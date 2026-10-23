@@ -63,6 +63,8 @@ void help() {
                  "  --lod-colours         Colour patches by selected LOD\n"
                  "  --vertex-normals      Compare legacy vertex-normal interpolation\n"
                  "  --base                Show uneroded terrain\n"
+                 "  --atmosphere MODE     off, analytic or physical (default physical)\n"
+                 "  --no-horizon          Disable extra coarse horizon coverage\n"
                  "  --lighting-demo       Enable generated lights and mesh fixtures\n"
                  "  --material-dir PATH   Override imported terrain palette directory\n"
                  "  --no-material-assets  Use the constant fallback without loading assets\n"
@@ -97,6 +99,8 @@ int main(int argc, char **argv) {
         options.lod.enabled = true;
         options.streaming.enabled = true;
         options.streaming.hierarchical = true;
+        options.streaming.horizonBytes = 64ull << 20;
+        scene.atmosphere.mode = ow::AtmosphereMode::Physical;
         bool explicitRadius = false;
         double terrainSize = 128;
         bool singleChunk = false;
@@ -121,6 +125,18 @@ int main(int argc, char **argv) {
             }
             if (arg == "--lighting-demo")
                 lightingDemoEnabled = true;
+            else if (arg == "--atmosphere") {
+                auto v = value();
+                if (v == "off")
+                    scene.atmosphere.mode = ow::AtmosphereMode::Off;
+                else if (v == "analytic")
+                    scene.atmosphere.mode = ow::AtmosphereMode::Analytic;
+                else if (v == "physical")
+                    scene.atmosphere.mode = ow::AtmosphereMode::Physical;
+                else
+                    throw std::invalid_argument("--atmosphere expects off, analytic or physical");
+            } else if (arg == "--no-horizon")
+                options.streaming.horizonBytes = 0;
             else if (arg == "--material-dir")
                 options.materialDirectory = value();
             else if (arg == "--no-material-assets")
@@ -718,6 +734,35 @@ int main(int argc, char **argv) {
                         if (ImGui::Combo("Tone mapper", &mapper, "ACES fitted\0AgX neutral\0"))
                             scene.output.toneMapper = ow::ToneMapper(mapper);
                     }
+                    if (ImGui::CollapsingHeader("Atmosphere", ImGuiTreeNodeFlags_DefaultOpen)) {
+                        int mode = int(scene.atmosphere.mode),
+                            quality = int(scene.atmosphere.quality);
+                        if (ImGui::Combo("Sky", &mode, "Off\0Analytic\0Physical\0"))
+                            scene.atmosphere.mode = ow::AtmosphereMode(mode);
+                        if (ImGui::Combo("Atmosphere quality", &quality, "Normal\0High\0"))
+                            scene.atmosphere.quality = ow::AtmosphereQuality(quality);
+                        ImGui::Checkbox("Aerial perspective", &scene.atmosphere.aerialPerspective);
+                        if (ImGui::Button("Clear air"))
+                            scene.atmosphere.aerosolDensity = 1;
+                        ImGui::SameLine();
+                        if (ImGui::Button("Hazy air"))
+                            scene.atmosphere.aerosolDensity = 4;
+                        ImGui::SliderFloat("Aerosol density", &scene.atmosphere.aerosolDensity, 0,
+                                           10);
+                        ImGui::SliderFloat("Boundary haze (artistic)",
+                                           &scene.atmosphere.boundaryHaze, 0, 3);
+                        const auto &a = renderer.atmosphereStats();
+                        ImGui::Text("Atmosphere %.2f MiB | %s", a.bytes / 1048576.,
+                                    ow::atmosphereFallbackName(a.fallback));
+                        if (a.timingsAvailable)
+                            ImGui::Text("LUT %.3f | IBL %.3f | transport %.3f ms",
+                                        a.lutMilliseconds, a.environmentMilliseconds,
+                                        a.compositeMilliseconds);
+                        const auto &t = renderer.terrainStreamingStats();
+                        ImGui::Text("Outer coverage %.1f km | horizon %u / %u",
+                                    t.outerEffectiveRadius * options.terrainGrid.extent() / 1000,
+                                    t.horizonReady, t.horizonRequested);
+                    }
                     if (ImGui::CollapsingHeader("Sun & environment", ImGuiTreeNodeFlags_DefaultOpen)) {
                         ImGui::Checkbox("Sun", &scene.lighting.sunEnabled);
                         ImGui::SliderFloat("Illuminance (lux)", &scene.lighting.sunLux, 0, 200000,
@@ -725,10 +770,15 @@ int main(int argc, char **argv) {
                         ImGui::ColorEdit3("Sun colour", &scene.lighting.sunColour.x);
                         ImGui::SliderFloat3("Direction to sun", &scene.lighting.sunDirection.x, -1, 1);
                         ImGui::Checkbox("Environment", &scene.lighting.environmentEnabled);
-                        ImGui::SliderFloat("Brightness (nits)", &scene.lighting.environmentNits, 0,
-                                           20000, "%.0f");
-                        ImGui::SliderAngle("Environment rotation", &scene.lighting.environmentRotation,
-                                           -180, 180);
+                        if (scene.atmosphere.mode == ow::AtmosphereMode::Physical)
+                            ImGui::SliderFloat("Sky lighting multiplier",
+                                               &scene.atmosphere.environmentMultiplier, 0, 3);
+                        else {
+                            ImGui::SliderFloat("Brightness (nits)", &scene.lighting.environmentNits,
+                                               0, 20000, "%.0f");
+                            ImGui::SliderAngle("Environment rotation",
+                                               &scene.lighting.environmentRotation, -180, 180);
+                        }
                     }
                     if (ImGui::CollapsingHeader("Material", ImGuiTreeNodeFlags_DefaultOpen)) {
                         auto &material = scene.material;

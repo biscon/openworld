@@ -143,16 +143,20 @@ int64_t distance(ChunkCoord a, ChunkCoord b) {
     return std::max(std::llabs(a.x - b.x), std::llabs(a.z - b.z));
 }
 } // namespace
-TerrainStreamer::TerrainStreamer(uint32_t capacity, int maximumRadius, TerrainGrid grid, bool hierarchical,
-                                 uint32_t shadowSlots)
-    : slots_(capacity), cameraCapacity_(capacity - shadowSlots), maximumRadius_(maximumRadius), grid_(grid),
-      hierarchical_(hierarchical) {
+TerrainStreamer::TerrainStreamer(uint32_t capacity, int maximumRadius, TerrainGrid grid,
+                                 bool hierarchical, uint32_t shadowSlots, uint32_t horizonSlots)
+    : slots_(capacity), cameraCapacity_(capacity - shadowSlots),
+      baseCapacity_(capacity - shadowSlots - horizonSlots), horizonSlots_(horizonSlots),
+      maximumRadius_(maximumRadius), grid_(grid), hierarchical_(hierarchical) {
+    if (horizonSlots > capacity || shadowSlots > capacity - horizonSlots ||
+        (horizonSlots && (!hierarchical || horizonSlots != 48)))
+        throw std::invalid_argument("Invalid horizon residency reservation");
     if (shadowSlots > capacity || shadowSlots > 64 || (!hierarchical && shadowSlots))
         throw std::invalid_argument("Invalid shadow residency reservation");
     spatial_.fill(-1);
     if (hierarchical_) {
         if (maximumRadius < 0 || maximumRadius > terrainMaximumRadius(grid) ||
-            cameraCapacity_ < terrainHierarchyCapacity(maximumRadius))
+            baseCapacity_ < terrainHierarchyCapacity(maximumRadius))
             throw std::invalid_argument("Invalid hierarchy capacity");
         topLevel_ = terrainHierarchyLevel(maximumRadius);
         wanted_.reserve(capacity);
@@ -199,6 +203,7 @@ void TerrainStreamer::demand(const Camera &camera, int radius, uint64_t complete
     }
     centre_ = camera.chunk;
     radius_ = std::clamp(radius, 0, maximumRadius_);
+    outerRadius_ = horizonSlots_ ? radius_ * 2 : radius_;
     for (auto &s : slots_) {
         if (s.state == State::Retiring && s.retireAfter <= completed) {
             const auto g = s.generation;
@@ -255,10 +260,13 @@ TerrainHandle TerrainStreamer::next(State state) const {
         if (slots_[i].state == state && slots_[i].wanted) {
             const auto &s = slots_[i];
             // Coarse ancestors first; within a level prefer nearby visible data.
-            const auto value =
-                hierarchical_ ? int64_t((s.shadowOnly ? 100000000 : 0) + (topLevel_ - s.level) * 1000000 +
-                                        (s.refine ? 0 : 500000) + tileDistance(s.tile()) * 100)
-                              : distance(s.chunk, centre_);
+            const auto value = hierarchical_
+                                   ? int64_t((s.shadowOnly    ? 100000000
+                                              : s.horizonOnly ? 50000000
+                                                              : 0) +
+                                             (topLevel_ - s.level) * 1000000 +
+                                             (s.refine ? 0 : 500000) + tileDistance(s.tile()) * 100)
+                                   : distance(s.chunk, centre_);
             if (value < d) {
                 d = value;
                 best = i;
@@ -376,7 +384,8 @@ void TerrainStreamer::requestTree(TerrainTileKey t) {
     const int64_t x = t.x * scale - centre_.x, z = t.z * scale - centre_.z;
     // Clip to the requested square plus one base chunk. Descendant rings are
     // bounded to six tiles per axis, independent of the number of base chunks.
-    if (x > radius_ + 1 || z > radius_ + 1 || x + scale < -radius_ || z + scale < -radius_)
+    const int clip = t.level == topLevel_ ? outerRadius_ : radius_;
+    if (x > clip + 1 || z > clip + 1 || x + scale < -clip || z + scale < -clip)
         return;
     const double d = tileDistance(t);
     if (t.level < topLevel_ && d > 2)
@@ -394,12 +403,13 @@ void TerrainStreamer::demandHierarchy(const Camera &camera, int radius, uint64_t
                                       uint64_t submitted, uint64_t epoch) {
     centre_ = camera.chunk;
     radius_ = std::clamp(radius, 0, maximumRadius_);
+    outerRadius_ = horizonSlots_ ? radius_ * 2 : radius_;
     wanted_.clear();
     const int64_t scale = int64_t(1) << topLevel_;
-    const auto loX = terrainFloorDivide(centre_.x - radius_ - 1, scale);
-    const auto hiX = terrainFloorDivide(centre_.x + radius_ + 1, scale);
-    const auto loZ = terrainFloorDivide(centre_.z - radius_ - 1, scale);
-    const auto hiZ = terrainFloorDivide(centre_.z + radius_ + 1, scale);
+    const auto loX = terrainFloorDivide(centre_.x - outerRadius_ - 1, scale);
+    const auto hiX = terrainFloorDivide(centre_.x + outerRadius_ + 1, scale);
+    const auto loZ = terrainFloorDivide(centre_.z - outerRadius_ - 1, scale);
+    const auto hiZ = terrainFloorDivide(centre_.z + outerRadius_ + 1, scale);
     for (auto z = loZ; z <= hiZ; ++z)
         for (auto x = loX; x <= hiX; ++x)
             requestTree({x, z, topLevel_});
@@ -448,9 +458,14 @@ void TerrainStreamer::demandHierarchy(const Camera &camera, int radius, uint64_t
         for (const auto &w : wanted_) {
             if (w.key.level != uint32_t(level))
                 continue;
+            const int64_t span = int64_t(1) << w.key.level;
+            const int64_t x = w.key.x * span - centre_.x, z = w.key.z * span - centre_.z;
+            const bool horizon = horizonSlots_ && (x > radius_ + 1 || z > radius_ + 1 ||
+                                                   x + span < -radius_ || z + span < -radius_);
             int at = findTile(w.key);
             if (at < 0) {
-                for (uint32_t i = 0; i < cameraCapacity_; ++i)
+                for (uint32_t i = horizon ? baseCapacity_ : 0;
+                     i < (horizon ? cameraCapacity_ : baseCapacity_); ++i)
                     if (slots_[i].state == State::Empty) {
                         auto &s = slots_[i];
                         s.chunk = {w.key.x, w.key.z};
@@ -469,6 +484,7 @@ void TerrainStreamer::demandHierarchy(const Camera &camera, int radius, uint64_t
             auto &s = slots_[at];
             s.wanted = true;
             s.shadowOnly = false;
+            s.horizonOnly = horizon;
             s.refine = w.refine;
             s.visible = w.refine;
         }

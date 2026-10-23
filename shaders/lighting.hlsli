@@ -1,5 +1,6 @@
 #ifndef OW_LIGHTING
 #define OW_LIGHTING
+#include "atmosphere_common.hlsli"
 struct LightingUniform {
     column_major float4x4 viewProjection;
     float4 camera, sunDirection, sunColour, environment;
@@ -69,7 +70,7 @@ float3 shadeSurface(SurfaceMaterial m,float3 relativePosition,float visibility) 
     if(sunShadow.sampling.w==1)return shadowVisibility.xxx;
     if(sunShadow.sampling.w==2)return float3(shadowVisibility,1-shadowVisibility,.5);
     if(sunShadow.sampling.w==3)return float3(1-shadowVisibility,shadowVisibility,0);
-    float3 colour=directSurface(m,n,v,lighting.sunDirection.xyz)*lighting.sunColour.rgb*shadowVisibility;
+    float3 colour=directSurface(m,n,v,lighting.sunDirection.xyz)*lighting.sunColour.rgb*atmSurfaceSun(relativePosition)*shadowVisibility;
     if(clusters.options.z!=0 && (clusters.options.x>0 || clusters.options.w!=0)) {
         bool valid;uint id=surfaceCluster(relativePosition,valid);
         uint count=clusters.options.x;
@@ -83,10 +84,12 @@ float3 shadeSurface(SurfaceMaterial m,float3 relativePosition,float visibility) 
         else {[loop]for(uint i=0;i<count;++i)colour+=localSurface(m,n,v,relativePosition,clusterIndices[id*clusters.options.y+i]);}
     }
     float2 brdf=brdfMap.SampleLevel(lightingSampler,float2(nv,r),0).rg;
-    float3 spec=environmentMap.SampleLevel(lightingSampler,environmentDirection(reflect(-v,n)),r*6).rgb;
+    float3 spec=atmosphere.options.x==2?
+        atmosphereEnvironment.SampleLevel(atmosphereSampler,reflect(-v,n),r*6).rgb*atmosphere.illumination.rgb*atmosphere.options.w:
+        environmentMap.SampleLevel(lightingSampler,environmentDirection(reflect(-v,n)),r*6).rgb;
     float3 f=f0+(max(1-r,f0)-f0)*pow(1-nv,5);
-    colour+=lighting.environment.x*((1-f)*(1-m.metallic)*m.baseColour/pi*min(m.ao,visibility)*
-        diffuseIrradiance(environmentDirection(n))+spec*(f0*brdf.x+brdf.y));
+    colour+=(atmosphere.options.x==2?1:lighting.environment.x)*((1-f)*(1-m.metallic)*m.baseColour/pi*min(m.ao,visibility)*
+        (atmosphere.options.x==2?atmDiffuse(n):diffuseIrradiance(environmentDirection(n)))+spec*(f0*brdf.x+brdf.y));
     return min(max((colour+m.emissive)*lighting.output.x,0),65504);
 }
 SurfaceMaterial terrainMaterial(float3 normal) {

@@ -2,7 +2,8 @@
 
 Status: implemented; verification results are recorded below. Target-GPU and live
 windowed acceptance remain separate gates. Auto-exposure, temporal upscaling,
-sharpening and sky/fog histories are deferred.
+sharpening and separate fog histories are deferred. [Slice 5H](rendering_atmosphere.md)
+adds sky reprojection to the existing TAA history.
 
 ## Colour, resolution and controls
 
@@ -24,8 +25,9 @@ Raw `readHdrSnapshot()` remains unchanged. `readPostSnapshot()` is a blocking
 observer, returning resolved colour, motion, reactivity, signed history depth,
 reconstructed bloom levels and dimensions. Negative history depth marks rejected
 history; magnitude is view-space metres. These buffers never feed CPU rendering
-choices. The current synthetic pre-exposed background is not physical sky:
-background without neighbouring geometry does not accumulate history.
+choices. Slice 5H writes rotation-only sky motion (W=2) and permits background-to-
+background history when depth remains zero. Geometry motion retains W=1 and depth
+validation. The synthetic clear colour with atmosphere Off does not accumulate history.
 
 ## Submitted-frame state and geometry
 

@@ -145,14 +145,22 @@ VulkanTerrainStream::VulkanTerrainStream(VulkanTerrain &g, TerrainStreamingConfi
                 break;
             extra = n;
         }
+    uint32_t horizon = 0;
+    if (config_.hierarchical && pools.coverage + extra + 48 <= slotLimit &&
+        coverageCost(pools.coverage + extra + 48) - coverageCost(pools.coverage + extra) <=
+            config_.horizonBytes)
+        horizon = 48;
+    stats_.horizonSlots = horizon;
+    stats_.horizonBytes =
+        coverageCost(pools.coverage + extra + horizon) - coverageCost(pools.coverage + extra);
     stats_.shadowSlots = extra;
     stats_.shadowBytes = coverageCost(pools.coverage + extra) - coverageCost(pools.coverage);
-    capacity_ = pools.coverage + extra;
+    capacity_ = pools.coverage + extra + horizon;
     detailCapacity_ = pools.detail;
     const int maxRadius = pools.maximumRadius;
     cache_ = std::make_unique<TerrainCache>(layout_, config_);
-    stream_ = std::make_unique<TerrainStreamer>(capacity_, maxRadius, layout_.grid, config_.hierarchical,
-                                                extra);
+    stream_ = std::make_unique<TerrainStreamer>(capacity_, maxRadius, layout_.grid,
+                                                config_.hierarchical, extra, horizon);
     lod_ = std::make_unique<TerrainLod>(g_.grid_, g_.capacity_,
                                         TerrainLodConfig{true, layout_.patchCells, 64}, capacity_);
     meta_.resize(capacity_);
@@ -205,7 +213,7 @@ VulkanTerrainStream::VulkanTerrainStream(VulkanTerrain &g, TerrainStreamingConfi
         stats_.hostBytes +=
             (4 * leaves - 1) / 3 *
             (32 + uint64_t(capacity_) * (2 * sizeof(glm::vec2) + sizeof(TerrainPatchDraw)));
-        if (stats_.gpuBytes > config_.gpuBytes + config_.shadowCasterBytes ||
+        if (stats_.gpuBytes > config_.gpuBytes + config_.shadowCasterBytes + config_.horizonBytes ||
             stats_.hostBytes > config_.hostBytes)
             throw std::runtime_error(
                 "Terrain resource budget exceeded: GPU " + std::to_string(stats_.gpuBytes) + " / " +
@@ -475,7 +483,7 @@ void VulkanTerrainStream::updateDetailDemand(const Camera &camera, const SceneSe
         m.rank = detailPolicy_.rank(s.tile(), layout_.grid.extent(), s.detail >= 0, maximum);
         // Prediction only uses already-resident prefetch. Fully covered parents
         // retain their dependency role without acquiring unnecessary normals.
-        if (!s.wanted ||
+        if (s.horizonOnly || !s.wanted ||
             (!s.visible &&
              !(config_.hierarchical && s.wanted && s.state == TerrainStreamer::State::Resident &&
                m.rank.distance < m.rank.current)) ||
@@ -698,6 +706,9 @@ void VulkanTerrainStream::beginFrame(uint32_t frame, const Camera &camera,
     stats_.requestedRadius =
         std::clamp(radius, 0, config_.hierarchical ? terrainMaximumRadius(layout_.grid) : 8);
     stats_.effectiveRadius = stream_->radius();
+    stats_.outerRequestedRadius =
+        config_.horizonBytes ? stats_.effectiveRadius * 2 : stats_.effectiveRadius;
+    stats_.outerEffectiveRadius = stream_->outerRadius();
     // Coverage is independent of detail revisions. Accept it after coverage
     // demand, then resolve parent activation before ranking normal requests.
     // Otherwise a just-published inactive child could start detail for one frame.
@@ -817,9 +828,15 @@ void VulkanTerrainStream::beginFrame(uint32_t frame, const Camera &camera,
     schedule();
     stats_.coverage = stats_.detail = stats_.pending = stats_.detailPending = stats_.detailReady = 0;
     stats_.residentLevels.fill(0);
+    stats_.horizonRequested = stats_.horizonReady = 0;
     stats_.pressureEvents = stream_->pressureEvents();
     stats_.ioJobs = cache_->pending();
     for (const auto &s : stream_->slots()) {
+        if (s.horizonOnly && s.wanted) {
+            ++stats_.horizonRequested;
+            if (s.state == TerrainStreamer::State::Resident)
+                ++stats_.horizonReady;
+        }
         if (s.state == TerrainStreamer::State::Resident) {
             ++stats_.coverage;
             ++stats_.residentLevels[s.level];
@@ -1460,19 +1477,20 @@ void VulkanTerrainStream::prepareDraw(uint32_t frame, const Camera &camera, cons
     };
     const View view{
         vp, glm::vec4(eye, 0),
-        glm::vec4(layout_.grid.cells, layout_.grid.spacing, layout_.subdivisions, layout_.patchCells),
+        glm::vec4(layout_.grid.cells, layout_.grid.spacing, layout_.subdivisions,
+                  layout_.patchCells),
         config_.hierarchical ? glm::vec4(glm::vec3(camera.local), 0) : glm::vec4(0),
-        glm::vec4(-stream_->radius() * layout_.grid.extent() - camera.local.x,
-                  -stream_->radius() * layout_.grid.extent() - camera.local.z,
-                  (stream_->radius() + 1) * layout_.grid.extent() - camera.local.x,
-                  (stream_->radius() + 1) * layout_.grid.extent() - camera.local.z)};
+        glm::vec4(-stream_->outerRadius() * layout_.grid.extent() - camera.local.x,
+                  -stream_->outerRadius() * layout_.grid.extent() - camera.local.z,
+                  (stream_->outerRadius() + 1) * layout_.grid.extent() - camera.local.x,
+                  (stream_->outerRadius() + 1) * layout_.grid.extent() - camera.local.z)};
     std::memcpy(views_[frame].mapped, &view, sizeof(view));
     lod_->collectCasters(settings.shadows.mode != ShadowMode::Off && settings.lighting.sunEnabled &&
                          !settings.wireframe);
     activeCoords_.clear();
     activeSlots_.clear();
     if (config_.hierarchical)
-        lod_->beginHierarchy(camera, observer, vp, stream_->radius());
+        lod_->beginHierarchy(camera, observer, vp, stream_->outerRadius());
     for (uint32_t i = 0; i < capacity_; ++i) {
         auto &s = stream_->slot(i);
         if (s.state != TerrainStreamer::State::Resident || !s.visible || meta_[i].range > range_)
@@ -1520,7 +1538,8 @@ void VulkanTerrainStream::prepareDraw(uint32_t frame, const Camera &camera, cons
                                         observer, qualityFocalPixels_, settings.eroded);
         };
         const auto select = [&](float scale) {
-            lod_->beginHierarchy(camera, observer, vp, stream_->radius(), terrainHierarchyRange(scale));
+            lod_->beginHierarchy(camera, observer, vp, stream_->outerRadius(),
+                                 terrainHierarchyRange(scale));
             for (uint32_t i = 0; i < capacity_; ++i) {
                 const auto &tile = stream_->slot(i);
                 if (tile.state != TerrainStreamer::State::Resident || !tile.visible)

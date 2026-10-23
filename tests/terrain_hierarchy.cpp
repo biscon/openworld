@@ -20,6 +20,57 @@ void publish(TerrainStreamer &s) {
         if (s.slot(i).state == TerrainStreamer::State::Requested)
             s.slot(i).state = TerrainStreamer::State::Resident;
 }
+void horizon() {
+    TerrainGrid grid{32, .5f};
+    const auto base = terrainHierarchyCapacity(8);
+    TerrainStreamer stream(base + 48 + 16, 8, grid, true, 16, 48);
+    Camera camera;
+    camera.chunk = {-1, 1000000};
+    camera.local = {8, 30, 8};
+    for (int step = 0; step < 30; ++step) {
+        stream.demand(camera, 8, step, step, 1);
+        publish(stream);
+        stream.advance(.25f);
+    }
+    require(stream.outerRadius() == 16 && stream.radius() == 8,
+            "Independent detailed and outer coverage");
+    require(stream.topLevel() == terrainHierarchyLevel(8), "Horizon preserves shadow caster level");
+    require(stream.pressureEvents() == 0, "Horizon fits reserved storage");
+    uint32_t outer = 0;
+    for (uint32_t i = 0; i < stream.capacity(); ++i) {
+        const auto &slot = stream.slot(i);
+        if (!slot.horizonOnly || !slot.wanted)
+            continue;
+        ++outer;
+        require(slot.level == stream.topLevel(), "Horizon requests only coarse tiles");
+        require(i >= base && i < base + 48, "Horizon does not displace near or shadow slots");
+        require(slot.active && slot.drawMask == 15,
+                "Resident horizon provides full coarse coverage");
+    }
+    require(outer > 0, "Horizon extends terrain");
+    const auto before = allocations.load();
+    for (int i = 0; i < 100; ++i) {
+        stream.demand(camera, 8, 30, 30, 1);
+        stream.advance(.016f);
+    }
+    require(allocations.load() == before, "Horizon demand allocates nothing");
+    for (int x : {-17, 0, 15, 32}) {
+        camera.chunk.x = x;
+        for (int i = 0; i < 40; ++i) {
+            stream.demand(camera, 8, 100, 100, 1);
+            publish(stream);
+            stream.advance(.25f);
+        }
+        const int centre = stream.find(camera.chunk);
+        require(centre >= 0 && stream.slot(centre).active, "Horizon flight retains near detail");
+    }
+    for (int i = 0; i < 40; ++i) {
+        stream.demand(camera, 1, 100, 100, 1);
+        publish(stream);
+        stream.advance(.25f);
+    }
+    require(stream.outerRadius() == 2, "Outer range follows detailed radius changes");
+}
 void hierarchy() {
     for (int64_t v = -100; v < 100; ++v) {
         const auto p = terrainParent({v, v, 0});
@@ -220,6 +271,7 @@ void depth() {
 } // namespace
 int main() {
     try {
+        horizon();
         hierarchy();
         selection();
         refinementFollowsCamera();

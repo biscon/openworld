@@ -1,5 +1,6 @@
 #pragma once
 
+#include "atmosphere.hpp"
 #include "gtao.hpp"
 #include "lighting.hpp"
 #include "material_assets.hpp"
@@ -30,6 +31,8 @@ struct RendererOptions {
     ShadowCapacity shadowCapacity;
     bool forceDirectShadows = false, forceManualShadowFiltering = false, forceNoShadowDepth = false;
     uint32_t visibilityCapacity = 65536;
+    uint64_t atmosphereBudgetBytes = 64ull << 20;
+    bool forceNoAtmosphere = false;
     uint64_t taaBudgetBytes = 512ull << 20, bloomBudgetBytes = 128ull << 20;
     bool forceNoTaa = false, forceNoBloom = false;
     uint64_t gtaoBudgetBytes = 512ull * 1024 * 1024;
@@ -49,6 +52,7 @@ struct RendererOptions {
 
 struct SceneSettings {
     ShadingMode shading = ShadingMode::Pbr;
+    AtmosphereSettings atmosphere;
     TaaSettings taa;
     BloomSettings bloom;
     GtaoSettings gtao;
@@ -108,6 +112,8 @@ class Renderer {
     void setRenderHeight(uint32_t height);
     void resetTemporalHistory();
     bool invalidateInstanceHistory(InstanceHandle);
+    const AtmosphereStats &atmosphereStats() const;
+    AtmosphereSnapshot readAtmosphereSnapshot();
     const PostStats &postStats() const;
     PostSnapshot readPostSnapshot();
     HdrSnapshot readHdrSnapshot(); // Blocking diagnostic, pre-exposed pixels.
