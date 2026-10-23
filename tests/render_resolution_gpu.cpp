@@ -191,6 +191,27 @@ int main() {
             }
         }
         renderer.removeLight(lightHandle);
+        // UI is neither jittered nor a bloom/history input, even at threshold zero.
+        swatches.clear();
+        scene.gtao = {};
+        scene.taa.enabled = true;
+        scene.bloom.intensity = 1;
+        scene.bloom.threshold = 0;
+        scene.background[0] = scene.background[1] = scene.background[2] = 0;
+        frame(renderer, camera, scene);
+        frame(renderer, camera, scene);
+        const auto post = renderer.readPostSnapshot();
+        for (auto pixel : post.resolved)
+            require(glm::vec3(pixel) == glm::vec3(0), "UI is absent from temporal HDR");
+        for (const auto &level : post.bloom)
+            for (auto pixel : level)
+                require(glm::vec3(pixel) == glm::vec3(0), "UI does not enter bloom extraction");
+        const auto postOutput = capture(renderer, fixture.path / "post-ui.ppm");
+        scene.taa.enabled = false;
+        scene.bloom.intensity = 0;
+        frame(renderer, camera, scene);
+        require(postOutput == capture(renderer, fixture.path / "plain-ui.ppm"),
+                "Native UI edges are unchanged by TAA and bloom");
         require(renderer.validationErrors() == 0, "Scaled rendering resource lifecycle validation clean");
         std::cout << "Scene resolution GPU contracts passed\n";
     } catch (const std::exception &e) {

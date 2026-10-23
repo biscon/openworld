@@ -157,6 +157,9 @@ motion quality and cost; that implementation and its dense fallback are removed.
 Shared rendered terrain surfaces replace the canonical receiver workaround.
 Debug/Release and software Vulkan checks pass; target-GPU quality and performance
 gates remain pending.
+[Slice 5G](rendering_temporal_post.md) adds native scene-resolution TAA, submitted-frame
+mesh/terrain motion, temporal GTAO sampling and bounded HDR bloom. The demo enables
+TAA and subtle bloom. Auto-exposure and target-GPU/live acceptance remain deferred.
 
 ### Scope
 

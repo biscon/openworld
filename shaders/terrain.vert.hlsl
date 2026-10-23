@@ -1,3 +1,4 @@
+#include "temporal_surface.hlsli"
 #include "terrain_common.hlsli"
 #include "terrain_surface.hlsli"
 [[vk::binding(2,0)]] StructuredBuffer<Sample> samples;
@@ -29,6 +30,16 @@ float4 interpolateSample(float2 p) {
     float2 f=p-float2(a);
     return lerp(lerp(heightSample(a),heightSample(a+uint2(1,0)),f.x),
                 lerp(heightSample(a+uint2(0,1)),heightSample(a+uint2(1,1)),f.x),f.y);
+}
+float3 previousSurface(uint vertex,float3 observer) {
+    uint width=(draw.patch.w!=0?draw.patch.w:params.dimensions.x)+1;
+    uint2 local=uint2(vertex%width,vertex/width);
+    float2 grid=float2(draw.patch.xy+local*draw.patch.z);
+    uint2 anchor=uint2(grid)-(local&1)*draw.patch.z;
+    float3 reference=float3(anchor.x*params.shape.x,heightSample(anchor).w,anchor.y*params.shape.x)+draw.offset.xyz;
+    float m=draw.morph.w!=0?saturate((distance(reference,observer)-draw.morph.x)/(draw.morph.y-draw.morph.x)):0;
+    grid-=float2(local&1)*float(draw.patch.z)*m;
+    return float3(grid.x*params.shape.x,interpolateSample(grid).w,grid.y*params.shape.x)+draw.offset.xyz;
 }
 #ifdef TERRAIN_SHADOW
 float4 main(uint id:SV_VertexID,uint instance:SV_InstanceID) : SV_Position {
@@ -69,6 +80,17 @@ TerrainSurface main(uint id:SV_VertexID,uint instance:SV_InstanceID) {
     // shading blend at their final shared position to avoid a lighting split.
     o.morph=draw.morph.w!=0?saturate((distance(position,view.observer.xyz)-draw.morph.x)/(draw.morph.y-draw.morph.x)):0;
     o.barycentric=float3(id%3==0?1:0,id%3==1?1:0,id%3==2?1:0);
+    o.previousClip=0;
+    if(temporal.state.x!=0 && instance<uint(temporal.state.w)) {
+        TemporalTerrainRecord old=temporalTerrain[instance];
+        if(old.valid.x>0) {
+            Draw current=draw;
+            draw.offset=asfloat(old.draw[0]);draw.options=old.draw[1];draw.patch=old.draw[2];
+            draw.morph=asfloat(old.draw[3]);draw.normals=old.draw[4];draw.indices=old.draw[5];
+            o.previousClip=mul(temporal.previous,float4(previousSurface(vertex,old.observer.xyz),1));
+            draw=current;
+        }
+    }
     return o;
 #endif
 }

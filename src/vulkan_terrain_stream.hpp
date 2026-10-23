@@ -2,6 +2,7 @@
 #include "terrain_cache.hpp"
 #include "terrain_detail_policy.hpp"
 #include "terrain_generation_budget.hpp"
+#include "vulkan_post.hpp"
 #include "vulkan_shadows.hpp"
 #include "vulkan_terrain.hpp"
 #include "vulkan_visibility.hpp"
@@ -10,7 +11,8 @@ namespace ow {
 struct SceneSettings;
 class VulkanTerrainStream {
   public:
-    VulkanTerrainStream(VulkanTerrain &, TerrainStreamingConfig, const std::filesystem::path &);
+    VulkanTerrainStream(VulkanTerrain &, TerrainStreamingConfig, const std::filesystem::path &,
+                        uint32_t temporalCapacity = 65536);
     ~VulkanTerrainStream();
     void settings(const TerrainSettings &);
     void beginFrame(uint32_t frame, const Camera &, const SceneSettings &);
@@ -18,9 +20,9 @@ class VulkanTerrainStream {
     void prepareDraw(uint32_t frame, const Camera &, const Camera &observer, const glm::mat4 &,
                      const SceneSettings &, uint32_t viewportHeight);
     void prepareVisibility(VulkanVisibility &, uint32_t frame, const Camera &, const Camera &,
-                           const SceneSettings &);
-    void draw(VkCommandBuffer, uint32_t frame, const Camera &, const Camera &observer, const SceneSettings &,
-              bool finalPass = true, VulkanVisibility *visibility = nullptr);
+                           const SceneSettings &, VulkanPost *post = nullptr);
+    void draw(VkCommandBuffer, uint32_t frame, const Camera &, const Camera &observer,
+              const SceneSettings &, bool finalPass = true, VulkanVisibility *visibility = nullptr);
     void prepareShadows(uint32_t frame, const Camera &, const SceneSettings &, VulkanShadows &);
     void drawShadows(VkCommandBuffer, VkPipelineLayout, VulkanShadows &);
     VkDescriptorSetLayout descriptorLayout() const { return descriptorLayout_; }
@@ -45,6 +47,7 @@ class VulkanTerrainStream {
         uint32_t width{}, layers{};
         uint64_t bytes{};
     };
+    TerrainHistory history_;
     VulkanTerrain &g_;
     TerrainPayloadLayout layout_;
     TerrainStreamingConfig config_;

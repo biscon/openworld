@@ -15,6 +15,8 @@ Milestone 4 adds [hierarchical terrain residency](terrain_hierarchy.md): coarse 
 
 ## System design index
 
+- [Temporal antialiasing and HDR bloom](rendering_temporal_post.md) — implemented slice 5G: submitted-frame geometry history, native scene-resolution TAA and bounded pre-exposed bloom. Verification is recorded in the design; target-GPU/live review remains pending. Auto-exposure is deferred.
+
 - [Local terrain asset builds](rendering_materials.md#local-asset-builds) — implemented: CMake imports tracked source artwork into each build tree; generated DDS files are removed from the source tree without rewriting history. Debug/Release, incremental-build fixtures and software Vulkan material checks pass.
 
 - [Scene resolution and presentation](rendering_resolution.md) — implemented: configurable scene height (demo default 1080) independent of native output resolution, native ImGui and F10 borderless fullscreen. Debug/Release and software Vulkan checks pass; live windowed and target-GPU verification remain pending.

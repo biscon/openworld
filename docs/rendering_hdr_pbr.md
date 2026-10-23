@@ -16,7 +16,7 @@ Rec.709/D65. Lighting calculations use FP32; the scene image stores radiance
 multiplied by `2^compensation / (1.2 * 2^EV100)`. Defaults are EV100 15 and
 compensation 0. The output pass does not apply exposure again. Pre-exposed values
 are limited to FP16's finite maximum, 65504, before storage; extreme exposure or
-emission can saturate this limit. There is no temporal history to rescale yet.
+emission can saturate this limit. [Slice 5G](rendering_temporal_post.md) now rescales linear HDR history by current/previous pre-exposure before resolve.
 
 `SurfaceMaterial` carries base colour, world-space shading normal, perceptual
 roughness, metallic, AO, emissive and opacity. Shared lighting implements GGX,

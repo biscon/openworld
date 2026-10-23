@@ -1,0 +1,5 @@
+mode,effective_taa,effective_bloom,cpu_median_ms,cpu_p95_ms,frame_gpu_median_ms,frame_gpu_p95_ms,taa_median_ms,taa_p95_ms,bloom_median_ms,bloom_p95_ms,taa_bytes,bloom_bytes,cpp_allocations,timestamps_available
+off,0,0,2.892119,3.206006,2.818572,3.013146,0,0,0,0,1216,0,0,1
+taa,1,0,3.99049,4.393804,3.819291,4.316469,0.502689,0.581686,0,0,2558784,0,0,1
+bloom,0,1,4.228124,4.888747,4.124982,4.580452,0,0,1.320956,1.429539,1216,638976,0,1
+combined,1,1,4.939803,5.431321,4.861937,5.354578,0.461922,0.591575,1.313522,1.400955,2558784,638976,0,1

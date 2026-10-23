@@ -16,8 +16,8 @@ struct TerrainDevice {
 class VulkanTerrain {
   public:
     VulkanTerrain(TerrainDevice device, TerrainGrid grid, uint32_t capacity, uint32_t normalSubdivisions,
-                  uint32_t chunkCapacity, const std::filesystem::path &shaders, TerrainLodConfig lod = {},
-                  VkDescriptorSetLayout lightingLayout = VK_NULL_HANDLE,
+                  uint32_t chunkCapacity, const std::filesystem::path &shaders,
+                  TerrainLodConfig lod = {}, VkDescriptorSetLayout lightingLayout = VK_NULL_HANDLE,
                   VkDescriptorSetLayout materialLayout = VK_NULL_HANDLE,
                   VkDescriptorSetLayout visibilityLayout = VK_NULL_HANDLE);
     ~VulkanTerrain();
@@ -36,6 +36,7 @@ class VulkanTerrain {
     uint32_t normalHalo(uint32_t level) const { return (1u << (normalLevels_ - 1 - level)) - 1; }
     uint32_t normalLevels() const { return normalLevels_; }
     TerrainIndexRange patchRange(uint32_t mask) const { return patchTopology_.ranges[mask]; }
+    uint64_t contentRevision(uint32_t slot) const { return slots_.at(slot).revision; }
     uint64_t generationCount() const { return updates_.count(); }
     uint64_t allocatedBytes() const { return allocatedBytes_; }
     uint32_t chunkCount() const { return updates_.requested().count; }
@@ -48,7 +49,8 @@ class VulkanTerrain {
     VkBuffer shadowIndices() const { return lod_ ? patchIndices_.handle : indices_.handle; }
     VkPipelineLayout graphicsLayout() const { return graphicsLayout_; }
     std::vector<uint32_t> readIndices();
-    std::vector<TerrainSample> readback(uint32_t slot = 0); // Blocking diagnostics, never the frame path.
+    std::vector<TerrainSample>
+    readback(uint32_t slot = 0); // Blocking diagnostics, never the frame path.
     std::vector<glm::vec4> readNormals(uint32_t slot,
                                        uint32_t level = 0); // base layer followed by eroded layer
     // Blocking diagnostics; reuses scratch and invalidates slot zero.
@@ -57,7 +59,8 @@ class VulkanTerrain {
                                                                bool canonical = true);
     std::vector<glm::vec2> sampleTerrainHeightLevel(TerrainGrid, const TerrainRequest &, uint32_t level,
                                                     bool ridgeFixture);
-    std::vector<TerrainSample> sampleTerrainNormalFixture(TerrainGrid, uint32_t level, uint32_t tileLevel);
+    std::vector<TerrainSample> sampleTerrainNormalFixture(TerrainGrid, uint32_t level,
+                                                          uint32_t tileLevel);
     std::vector<TerrainSample> normalsForFixture(const std::vector<glm::vec2> &heights);
 
   private:

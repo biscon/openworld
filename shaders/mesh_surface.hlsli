@@ -1,6 +1,6 @@
 #include "lighting.hlsli"
 #include "materials.hlsli"
-struct MeshSurface {float4 position:SV_Position;[[vk::location(0)]]float3 relative:TEXCOORD0;[[vk::location(1)]]float3 normal:NORMAL;[[vk::location(2)]]float4 tangent:TANGENT;[[vk::location(3)]]float2 uv:TEXCOORD1;[[vk::location(4)]]nointerpolation uint material:TEXCOORD2;};
+struct MeshSurface {[[vk::location(8)]]float4 previousClip:TEXCOORD7;float4 position:SV_Position;[[vk::location(0)]]float3 relative:TEXCOORD0;[[vk::location(1)]]float3 normal:NORMAL;[[vk::location(2)]]float4 tangent:TANGENT;[[vk::location(3)]]float2 uv:TEXCOORD1;[[vk::location(4)]]nointerpolation uint material:TEXCOORD2;};
 float4 meshTexture(uint index,float2 uv,float2 dx,float2 dy){
 #ifdef OW_BINDLESS
     return materialImages[NonUniformResourceIndex(index)].SampleGrad(materialSampler,uv,dx,dy);

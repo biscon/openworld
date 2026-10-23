@@ -17,8 +17,9 @@ struct Geometry {
 struct InstanceRecord {
     glm::mat4 transform{1}, normalTransform{1};
     glm::uvec4 options{0};
+    glm::mat4 previousTransform{1};
 };
-static_assert(sizeof(InstanceRecord) == 144);
+static_assert(sizeof(InstanceRecord) == 208);
 struct Draw {
     uint32_t record = 0, variant = 0;
     float depth = 0;
@@ -36,6 +37,7 @@ struct VulkanMeshes::Impl {
     ScenePool<std::shared_ptr<Geometry>, MeshHandle> meshes;
     std::vector<std::weak_ptr<Geometry>> allocations;
     struct Frame {
+        bool temporal = false;
         Buffer records;
         VkDescriptorSet set{};
         std::vector<Draw> opaque, blend;
@@ -44,10 +46,18 @@ struct VulkanMeshes::Impl {
     VkDescriptorSetLayout setLayout{};
     VkDescriptorPool pool{};
     VkPipelineLayout layout{};
-    std::array<VkPipeline, 20> pipelines{};
+    std::array<VkPipeline, 40> pipelines{};
     uint32_t skipped = 0;
+    bool temporalAttachments = true;
+    struct History {
+        MeshInstance instance;
+        uint32_t generation = 0;
+        bool valid = false;
+    };
+    std::vector<History> history, pending;
     Impl(VkPhysicalDevice p, VkDevice d, const SceneCapacity &c, VulkanMaterials &m)
-        : physical(p), device(d), capacity(c), materials(m), meshes(c.meshes), allocations(c.meshes) {}
+        : physical(p), device(d), capacity(c), materials(m), meshes(c.meshes), allocations(c.meshes),
+          history(c.instances), pending(c.instances) {}
     ~Impl() {
         for (auto p : pipelines)
             if (p)
@@ -66,7 +76,8 @@ struct VulkanMeshes::Impl {
                 n += p->data.bytes;
         return n;
     }
-    void pipeline(uint32_t pass, uint32_t variant, VkShaderModule vs, VkShaderModule fs) {
+    void pipeline(uint32_t pass, uint32_t variant, VkShaderModule vs, VkShaderModule fs,
+                  bool temporal = false) {
         VkPipelineShaderStageCreateInfo stages[2]{};
         for (auto &s : stages) {
             s.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -82,7 +93,8 @@ struct VulkanMeshes::Impl {
             {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(MeshVertex, normal)},
             {2, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(MeshVertex, tangent)},
             {3, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(MeshVertex, uv)}};
-        VkPipelineVertexInputStateCreateInfo input{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
+        VkPipelineVertexInputStateCreateInfo input{
+            VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
         input.vertexBindingDescriptionCount = 1;
         input.pVertexBindingDescriptions = &bind;
         input.vertexAttributeDescriptionCount = 4;
@@ -93,14 +105,16 @@ struct VulkanMeshes::Impl {
         VkPipelineInputAssemblyStateCreateInfo assembly{
             VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
         assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-        VkPipelineViewportStateCreateInfo viewport{VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
+        VkPipelineViewportStateCreateInfo viewport{
+            VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
         viewport.viewportCount = viewport.scissorCount = 1;
         VkPipelineRasterizationStateCreateInfo raster{
             VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
         raster.lineWidth = 1;
         raster.cullMode = variant & 1 ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT;
         raster.frontFace = variant & 2 ? VK_FRONT_FACE_CLOCKWISE : VK_FRONT_FACE_COUNTER_CLOCKWISE;
-        VkPipelineMultisampleStateCreateInfo ms{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
+        VkPipelineMultisampleStateCreateInfo ms{
+            VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
         ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
         VkPipelineDepthStencilStateCreateInfo depth{
             VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
@@ -111,18 +125,33 @@ struct VulkanMeshes::Impl {
         attachment.colorWriteMask = 15;
         attachment.blendEnable = pass == 3;
         attachment.srcColorBlendFactor = attachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-        attachment.dstColorBlendFactor = attachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-        VkPipelineColorBlendStateCreateInfo blend{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
-        blend.attachmentCount = (pass == 2 || pass == 4) ? 0 : 1;
-        blend.pAttachments = &attachment;
+        attachment.dstColorBlendFactor = attachment.dstAlphaBlendFactor =
+            VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        VkPipelineColorBlendStateCreateInfo blend{
+            VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
+        std::array<VkPipelineColorBlendAttachmentState, 3> attachments{attachment, attachment,
+                                                                       attachment};
+        if (temporal && pass == 3) {
+            attachments[1].blendEnable = false;
+            attachments[1].colorWriteMask = 0;
+            attachments[2].srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+            attachments[2].dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
+            attachments[2].colorBlendOp = VK_BLEND_OP_MAX;
+            attachments[2].srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+            attachments[2].dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+            attachments[2].alphaBlendOp = VK_BLEND_OP_MAX;
+        }
+        blend.attachmentCount = (pass == 2 || pass == 4) ? 0 : temporal ? 3 : 1;
+        blend.pAttachments = attachments.data();
         VkDynamicState dynamicStates[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
         VkPipelineDynamicStateCreateInfo dynamic{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
         dynamic.dynamicStateCount = 2;
         dynamic.pDynamicStates = dynamicStates;
-        VkFormat colour = VK_FORMAT_R16G16B16A16_SFLOAT;
+        VkFormat colours[] = {VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_R16G16B16A16_SFLOAT,
+                              temporalAttachments ? VK_FORMAT_R8_UNORM : VK_FORMAT_R16G16B16A16_SFLOAT};
         VkPipelineRenderingCreateInfo rendering{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
-        rendering.colorAttachmentCount = (pass == 2 || pass == 4) ? 0 : 1;
-        rendering.pColorAttachmentFormats = &colour;
+        rendering.colorAttachmentCount = blend.attachmentCount;
+        rendering.pColorAttachmentFormats = colours;
         rendering.depthAttachmentFormat = VK_FORMAT_D32_SFLOAT;
         VkGraphicsPipelineCreateInfo ci{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
         ci.pNext = &rendering;
@@ -137,19 +166,21 @@ struct VulkanMeshes::Impl {
         ci.pColorBlendState = &blend;
         ci.pDynamicState = &dynamic;
         ci.layout = layout;
-        check(vkCreateGraphicsPipelines(device, {}, 1, &ci, nullptr, &pipelines[pass * 4 + variant]));
+        check(vkCreateGraphicsPipelines(device, {}, 1, &ci, nullptr,
+                                        &pipelines[pass * 4 + variant + (temporal ? 20 : 0)]));
     }
 };
 VulkanMeshes::VulkanMeshes(VkPhysicalDevice p, VkDevice d, const SceneCapacity &c,
                            VkDescriptorSetLayout lighting, VulkanMaterials &m,
                            const std::filesystem::path &shaders, bool bindless,
-                           VkDescriptorSetLayout shadowLayout)
+                           VkDescriptorSetLayout shadowLayout, bool temporalAttachments)
     : instances(c.instances), impl_(std::make_unique<Impl>(p, d, c, m)) {
     if (!c.instances || c.instances > 65535 || !c.meshes || c.meshes > 4096)
         throw std::invalid_argument("Invalid mesh capacities");
     auto &s = *impl_;
-    VkDescriptorSetLayoutBinding binding{0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT,
-                                         nullptr};
+    s.temporalAttachments = temporalAttachments;
+    VkDescriptorSetLayoutBinding binding{0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
+                                         VK_SHADER_STAGE_VERTEX_BIT, nullptr};
     VkDescriptorSetLayoutCreateInfo li{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
     li.bindingCount = 1;
     li.pBindings = &binding;
@@ -185,6 +216,13 @@ VulkanMeshes::VulkanMeshes(VkPhysicalDevice p, VkDevice d, const SceneCapacity &
     ShaderModule depth(d, shaders / (bindless ? "mesh_depth_bindless.frag.spv" : "mesh_depth.frag.spv"));
     ShaderModule sv(d, shaders / "shadow_mesh.vert.spv");
     ShaderModule sf(d, shaders / (bindless ? "shadow_mesh_bindless.frag.spv" : "shadow_mesh.frag.spv"));
+    if (temporalAttachments) {
+        ShaderModule temporalFs(
+            d, shaders / (bindless ? "mesh_bindless_temporal.frag.spv" : "mesh_temporal.frag.spv"));
+        for (uint32_t pass : {0u, 1u, 3u})
+            for (uint32_t v = 0; v < 4; ++v)
+                s.pipeline(pass, v, vs.handle, temporalFs.handle, true);
+    }
     for (uint32_t v = 0; v < 4; ++v)
         s.pipeline(4, v, sv.handle, sf.handle);
     for (uint32_t pass = 0; pass < 4; ++pass)
@@ -208,8 +246,8 @@ MeshHandle VulkanMeshes::upload(const MeshData &data) {
             !std::isfinite(glm::dot(v.normal, v.normal)) || glm::dot(v.normal, v.normal) > 1e6f ||
             !std::isfinite(glm::dot(glm::vec3(v.tangent), glm::vec3(v.tangent))) ||
             glm::dot(glm::vec3(v.tangent), glm::vec3(v.tangent)) > 1e6f ||
-            glm::dot(glm::cross(v.normal, glm::vec3(v.tangent)), glm::cross(v.normal, glm::vec3(v.tangent))) <
-                1e-12f ||
+            glm::dot(glm::cross(v.normal, glm::vec3(v.tangent)),
+                     glm::cross(v.normal, glm::vec3(v.tangent))) < 1e-12f ||
             glm::dot(v.normal, v.normal) < 1e-12f ||
             glm::dot(glm::vec3(v.tangent), glm::vec3(v.tangent)) < 1e-12f || std::abs(v.tangent.w) != 1)
             throw std::invalid_argument("Invalid mesh normal/tangent");
@@ -219,8 +257,8 @@ MeshHandle VulkanMeshes::upload(const MeshData &data) {
     for (auto i : data.indices)
         if (i >= data.vertices.size())
             throw std::invalid_argument("Mesh index out of range");
-    auto free =
-        std::find_if(s.allocations.begin(), s.allocations.end(), [](const auto &p) { return p.expired(); });
+    auto free = std::find_if(s.allocations.begin(), s.allocations.end(),
+                             [](const auto &p) { return p.expired(); });
     if (free == s.allocations.end())
         return {};
     uint64_t vertexBytes = data.vertices.size() * sizeof(MeshVertex),
@@ -248,7 +286,8 @@ MeshHandle VulkanMeshes::upload(const MeshData &data) {
     return h;
 }
 bool VulkanMeshes::release(MeshHandle h) { return impl_->meshes.remove(h); }
-void VulkanMeshes::prepare(uint32_t frame, const Camera &camera, TerrainGrid terrain) {
+void VulkanMeshes::prepare(uint32_t frame, const Camera &camera, TerrainGrid terrain,
+                           const Camera &previous, bool historyValid, bool temporal) {
     auto &s = *impl_;
     auto &f = s.frames.at(frame);
     for (auto &d : f.opaque)
@@ -262,9 +301,14 @@ void VulkanMeshes::prepare(uint32_t frame, const Camera &camera, TerrainGrid ter
     s.skipped = 0;
     auto *out = static_cast<InstanceRecord *>(f.records.mapped);
     auto origin = worldPosition(camera, terrain);
+    f.temporal = temporal;
+    auto previousOrigin = worldPosition(previous, terrain);
+    for (auto &h : s.pending)
+        h.valid = false;
     uint32_t n = 0, dense = 0;
     for (const auto &i : instances.values()) {
-        auto identity = instances.handle(dense++).slot;
+        auto handle = instances.handle(dense++);
+        auto identity = handle.slot;
         auto *geometry = s.meshes.get(i.mesh);
         if (!geometry) {
             ++s.skipped;
@@ -275,9 +319,23 @@ void VulkanMeshes::prepare(uint32_t frame, const Camera &camera, TerrainGrid ter
                          rotation * glm::scale(glm::mat4(1), i.scale);
         bool mirror = i.scale.x * i.scale.y * i.scale.z < 0;
         auto &m = s.materials.meshMaterial(i.material);
+        const auto &old = s.history[identity];
+        bool valid = historyValid && old.valid && old.generation == handle.generation &&
+                     old.instance.mesh.slot == i.mesh.slot &&
+                     old.instance.mesh.generation == i.mesh.generation &&
+                     old.instance.material.slot == i.material.slot &&
+                     old.instance.material.generation == i.material.generation;
+        auto previousTransform =
+            valid ? glm::translate(glm::mat4(1),
+                                   glm::vec3(relativePosition(old.instance.position, previousOrigin))) *
+                        glm::mat4_cast(glm::normalize(old.instance.rotation)) *
+                        glm::scale(glm::mat4(1), old.instance.scale)
+                  : transform;
+        s.pending[identity] = {i, handle.generation, true};
         out[n] = {transform,
                   glm::transpose(glm::inverse(transform)),
-                  {s.materials.resolve(i.material), mirror ? 1u : 0u, 0, 0}};
+                  {s.materials.resolve(i.material), mirror ? 1u : 0u, valid ? 1u : 0u, 0},
+                  previousTransform};
         const auto centre = glm::vec3(transform * glm::vec4((*geometry)->centre, 1));
         Draw draw{n++, uint32_t(m.doubleSided) | (mirror ? 2u : 0u), glm::dot(centre, camera.forward()),
                   identity, *geometry};
@@ -339,10 +397,12 @@ void VulkanMeshes::draw(VkCommandBuffer cmd, uint32_t frame, VkDescriptorSet lig
         if (indirect && previous == d.batch)
             continue;
         previous = d.batch;
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, s.pipelines[pass * 4 + d.variant]);
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                          s.pipelines[pass * 4 + d.variant + (f.temporal && pass != 2 ? 20 : 0)]);
         VkDeviceSize offset = 0;
         vkCmdBindVertexBuffers(cmd, 0, 1, &d.geometry->data.buffer, &offset);
-        vkCmdBindIndexBuffer(cmd, d.geometry->data.buffer, d.geometry->indexOffset, VK_INDEX_TYPE_UINT32);
+        vkCmdBindIndexBuffer(cmd, d.geometry->data.buffer, d.geometry->indexOffset,
+                             VK_INDEX_TYPE_UINT32);
         const uint32_t record = indirect ? 0x80000000u : d.record;
         vkCmdPushConstants(cmd, s.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 4, &record);
         if (indirect)
@@ -375,11 +435,22 @@ void VulkanMeshes::drawShadows(VkCommandBuffer cmd, uint32_t frame, VkDescriptor
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, s.pipelines[16 + d.variant]);
         VkDeviceSize offset = 0;
         vkCmdBindVertexBuffers(cmd, 0, 1, &d.geometry->data.buffer, &offset);
-        vkCmdBindIndexBuffer(cmd, d.geometry->data.buffer, d.geometry->indexOffset, VK_INDEX_TYPE_UINT32);
+        vkCmdBindIndexBuffer(cmd, d.geometry->data.buffer, d.geometry->indexOffset,
+                             VK_INDEX_TYPE_UINT32);
         shadows.drawRange(cmd, d.shadow, uint32_t(end - i));
         i = end;
     }
 }
 uint64_t VulkanMeshes::bytes() const { return impl_->bytes(); }
 uint32_t VulkanMeshes::skipped() const { return impl_->skipped; }
+} // namespace ow
+
+namespace ow {
+void VulkanMeshes::submitted() { impl_->history.swap(impl_->pending); }
+bool VulkanMeshes::invalidateHistory(InstanceHandle h) {
+    if (!instances.valid(h))
+        return false;
+    impl_->history[h.slot].valid = false;
+    return true;
+}
 } // namespace ow

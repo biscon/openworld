@@ -5,6 +5,7 @@
 #include "material_assets.hpp"
 #include "scene.hpp"
 #include "shadows.hpp"
+#include "temporal.hpp"
 #include "terrain_lod.hpp"
 #include "terrain_stream.hpp"
 #include "visibility.hpp"
@@ -29,6 +30,8 @@ struct RendererOptions {
     ShadowCapacity shadowCapacity;
     bool forceDirectShadows = false, forceManualShadowFiltering = false, forceNoShadowDepth = false;
     uint32_t visibilityCapacity = 65536;
+    uint64_t taaBudgetBytes = 512ull << 20, bloomBudgetBytes = 128ull << 20;
+    bool forceNoTaa = false, forceNoBloom = false;
     uint64_t gtaoBudgetBytes = 512ull * 1024 * 1024;
     bool forceNoGtao = false, forceWideGtao = false;
     bool forceFixedIndirect = false, forceSingleIndirect = false, forceDirectVisibility = false,
@@ -46,6 +49,8 @@ struct RendererOptions {
 
 struct SceneSettings {
     ShadingMode shading = ShadingMode::Pbr;
+    TaaSettings taa;
+    BloomSettings bloom;
     GtaoSettings gtao;
     ShadowSettings shadows;
     bool terrainVisible = true;
@@ -95,12 +100,16 @@ class Renderer {
     bool releaseMaterial(MaterialHandle);
     const SceneStats &sceneStats() const;
     const MaterialStats &materialStats() const;
-    bool
-    reloadMaterials(const std::filesystem::path &); // Explicit asset load; published on subsequent frames.
+    bool reloadMaterials(
+        const std::filesystem::path &); // Explicit asset load; published on subsequent frames.
     void resize();
     void resizeOffscreen(uint32_t width, uint32_t height);
     // Queued for next frame; 0 selects native, otherwise 1..16384.
     void setRenderHeight(uint32_t height);
+    void resetTemporalHistory();
+    bool invalidateInstanceHistory(InstanceHandle);
+    const PostStats &postStats() const;
+    PostSnapshot readPostSnapshot();
     HdrSnapshot readHdrSnapshot(); // Blocking diagnostic, pre-exposed pixels.
     const RenderingStats &renderingStats() const;
     const VisibilityStats &visibilityStats() const;

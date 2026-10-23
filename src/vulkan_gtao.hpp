@@ -7,7 +7,8 @@ namespace ow {
 struct GtaoCapabilities {
     bool supported = false, compact = false;
 };
-GtaoCapabilities gtaoCapabilities(VkPhysicalDevice, bool forceUnavailable = false, bool forceWide = false);
+GtaoCapabilities gtaoCapabilities(VkPhysicalDevice, bool forceUnavailable = false,
+                                  bool forceWide = false);
 class VulkanGtao {
   public:
     VulkanGtao(VkPhysicalDevice, VkDevice, uint32_t queueFamily, GtaoCapabilities, uint64_t budget,
@@ -26,7 +27,8 @@ class VulkanGtao {
     void initialize(VkCommandBuffer);
     // Source depth must be in DEPTH_READ_ONLY_OPTIMAL; does not transition
     // caller-owned depth.
-    void record(VkCommandBuffer, VkImageView sourceDepth);
+    void record(VkCommandBuffer, VkImageView sourceDepth, glm::vec2 jitter = {},
+                uint32_t temporalPhase = 0);
     const GtaoStats &stats() const;
     VkDeviceSize snapshotBytes(uint32_t frame) const;
     void copySnapshot(VkCommandBuffer, uint32_t frame, VkBuffer) const;
