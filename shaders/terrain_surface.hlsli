@@ -2,6 +2,7 @@
 #define OW_TERRAIN_SURFACE
 struct TerrainSurface {
     float4 position : SV_Position;
+    [[vk::location(8)]] float4 previousClip : TEXCOORD7;
 #ifdef TERRAIN_RECORD_ID
     [[vk::location(7)]] nointerpolation uint recordID : TEXCOORD6;
 #endif

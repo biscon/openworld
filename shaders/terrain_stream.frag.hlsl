@@ -1,9 +1,10 @@
+#include "temporal_surface.hlsli"
 #include "lighting.hlsli"
 #include "materials.hlsli"
 #include "terrain_stream_common.hlsli"
 #include "terrain_surface.hlsli"
 #include "terrain_clip.hlsli"
-float4 main(TerrainSurface input) : SV_Target0 {
+float4 shadePixel(TerrainSurface input) : SV_Target0 {
     loadDraw(input.recordID);
     clipTerrainView(input);
     if(draw.tile.w>=0) return float4(lerp(float3(.05,.6,.1),float3(1,.05,.02),draw.tile.w),1);
@@ -28,3 +29,12 @@ float4 main(TerrainSurface input) : SV_Target0 {
     if(lighting.output.y==0) colour=shadeTerrain(normal,input.relativePosition,screenVisibility(input.position.xy));
     return float4(colour,1);
 }
+
+#ifdef OW_TEMPORAL_OUTPUT
+TemporalOutput main(TerrainSurface input) {
+    return temporalOutput(shadePixel(input),input.relativePosition,input.previousClip,float(input.previousClip.w>0),saturate(dot(lighting.emissive.rgb,float3(.2126,.7152,.0722))/10000));
+}
+
+#else
+float4 main(TerrainSurface input):SV_Target0 { return shadePixel(input); }
+#endif

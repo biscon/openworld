@@ -1,4 +1,5 @@
 #pragma once
+#include "temporal.hpp"
 #include "vulkan_materials.hpp"
 #include "vulkan_shadows.hpp"
 #include "vulkan_visibility.hpp"
@@ -8,12 +9,15 @@ class VulkanMeshes {
   public:
     VulkanMeshes(VkPhysicalDevice, VkDevice, const SceneCapacity &, VkDescriptorSetLayout lighting,
                  VulkanMaterials &, const std::filesystem::path &, bool bindless,
-                 VkDescriptorSetLayout shadowLayout);
+                 VkDescriptorSetLayout shadowLayout, bool temporalAttachments = true);
     ~VulkanMeshes();
     ScenePool<MeshInstance, InstanceHandle> instances;
     MeshHandle upload(const MeshData &);
     bool release(MeshHandle);
-    void prepare(uint32_t frame, const Camera &, TerrainGrid);
+    void prepare(uint32_t frame, const Camera &, TerrainGrid, const Camera &previous, bool historyValid,
+                 bool temporal);
+    void submitted();
+    bool invalidateHistory(InstanceHandle);
     void uploads(VkCommandBuffer, uint32_t frame);
     void prepareVisibility(uint32_t frame, VulkanVisibility &);
     // pass: 0 regular opaque, 1 equal opaque, 2 depth only, 3 transparent.

@@ -19,7 +19,7 @@ no upstream application/framework dependency. Full is the spatial reference. Bot
 modes use three slices, three samples per side, fixed spatial noise and a single 5x5
 edge-aware spatial filter. The retained reference heuristics use radius multiplier
 1.457, falloff range 0.615, sample distribution power 2, visibility power 2.2,
-and mip offset 3.3; thin-occluder compensation remains zero. No history, temporal rotation, micro-normal input, bent
+and mip offset 3.3; thin-occluder compensation remains zero. [Slice 5G](rendering_temporal_post.md) supplies projection jitter and temporal sample rotation only while effective TAA resolves the shaded result. TAA-off and diagnostic paths keep fixed samples. No independent AO history, micro-normal input, bent
 normals, specular occlusion or GI is introduced.
 
 Half uses ceil(native extent / 2), selecting the nearest valid depth in each 2x2
@@ -155,8 +155,7 @@ cost; timestamp availability is explicit. CPU measurements include frame-fence w
 ## Limitations and remaining gates
 
 GTAO sees only current depth: hidden/offscreen surfaces and transparent occluders are
-not recovered. Finite spatial sampling can shimmer in motion until 5G adds temporal
-sampling/resolve; fixed noise avoids independently animated noise here. Full and Half
+not recovered. Finite spatial sampling can shimmer with TAA off; slice 5G rotates samples and resolves shaded HDR when TAA is enabled. Full and Half
 can differ around narrow features and disocclusions. There is no GI handoff or distant
 occlusion beyond environment irradiance. Material AO scale separation remains a
 conservative minimum rule until assets carry scale information.

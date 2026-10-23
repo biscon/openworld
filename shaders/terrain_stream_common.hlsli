@@ -1,5 +1,8 @@
 #ifndef OW_STREAM_COMMON
 #define OW_STREAM_COMMON
+#include "temporal_surface.hlsli"
+static bool previousGeometryActive=false;
+static TemporalTerrainRecord previousGeometry;
 #define TERRAIN_RECORD_ID
 struct View { column_major float4x4 viewProjection; float4 observer; float4 grid; float4 camera; float4 clip; };
 [[vk::binding(0,0)]] ConstantBuffer<View> view;
@@ -38,7 +41,7 @@ void loadDraw(uint id) { draw=drawPush; if((drawPush.options.w&0x80000000u)!=0) 
 float3 renderPosition(float2 grid,float height) {
     precise float3 local=float3(grid.x*draw.tile.x,height,grid.y*draw.tile.x);
     precise float3 world=local+draw.offset.xyz;
-    precise float3 relative=world-view.camera.xyz;
+    precise float3 relative=world-(previousGeometryActive?previousGeometry.camera.xyz:view.camera.xyz);
     return relative;
 }
 float exactLerp(float a,float b,float f) {
@@ -101,8 +104,8 @@ float availability(float2 p) {
 
 float heightAvailability(float2 p) {
     float2 q=weightCoordinate(p); uint2 a=min(uint2(q),2); float2 f=q-float2(a);
-    return exactLerp(exactLerp(weights.heights[a.y][a.x],weights.heights[a.y][a.x+1],f.x),
-                exactLerp(weights.heights[a.y+1][a.x],weights.heights[a.y+1][a.x+1],f.x),f.y);
+    return exactLerp(exactLerp((previousGeometryActive?previousGeometry.weights[4+a.y][a.x]:weights.heights[a.y][a.x]),(previousGeometryActive?previousGeometry.weights[4+a.y][a.x+1]:weights.heights[a.y][a.x+1]),f.x),
+                exactLerp((previousGeometryActive?previousGeometry.weights[5+a.y][a.x]:weights.heights[a.y+1][a.x]),(previousGeometryActive?previousGeometry.weights[5+a.y][a.x+1]:weights.heights[a.y+1][a.x+1]),f.x),f.y);
 }
 float3 parentNormal(float2 grid,float morph) {
     uint width,height,layers; coarseNormals.GetDimensions(width,height,layers);

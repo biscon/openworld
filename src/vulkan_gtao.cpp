@@ -14,8 +14,8 @@ bool formatSupports(VkPhysicalDevice p, VkFormat f, VkFormatFeatureFlags flags) 
     return (props.optimalTilingFeatures & flags) == flags;
 }
 void transition(VkCommandBuffer cmd, VkImage image, VkImageLayout oldLayout, VkImageLayout newLayout,
-                VkPipelineStageFlags2 src, VkAccessFlags2 sa, VkPipelineStageFlags2 dst, VkAccessFlags2 da,
-                uint32_t levels = 1, uint32_t base = 0) {
+                VkPipelineStageFlags2 src, VkAccessFlags2 sa, VkPipelineStageFlags2 dst,
+                VkAccessFlags2 da, uint32_t levels = 1, uint32_t base = 0) {
     VkImageMemoryBarrier2 b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
     b.srcStageMask = src;
     b.srcAccessMask = sa;
@@ -143,7 +143,8 @@ GtaoCapabilities gtaoCapabilities(VkPhysicalDevice p, bool unavailable, bool wid
         formatSupports(p, VK_FORMAT_R32_SFLOAT, need) && formatSupports(p, VK_FORMAT_R32_UINT, need) &&
         formatSupports(p, VK_FORMAT_R8G8B8A8_UNORM, need);
     bool compact = !wide && features.shaderStorageImageExtendedFormats &&
-                   formatSupports(p, VK_FORMAT_R8_UNORM, need) && formatSupports(p, VK_FORMAT_R8_UINT, need);
+                   formatSupports(p, VK_FORMAT_R8_UNORM, need) &&
+                   formatSupports(p, VK_FORMAT_R8_UINT, need);
     return {supported, compact};
 }
 struct VulkanGtao::Impl {
@@ -211,7 +212,8 @@ struct VulkanGtao::Impl {
                                   VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT) ==
                 VK_SUCCESS &&
             t[1] && t[3] && t[5] && t[7]) {
-            const uint64_t mask = timestampBits == 64 ? ~uint64_t(0) : (uint64_t(1) << timestampBits) - 1;
+            const uint64_t mask =
+                timestampBits == 64 ? ~uint64_t(0) : (uint64_t(1) << timestampBits) - 1;
             stats.prepareMilliseconds = double((t[2] - t[0]) & mask) * period / 1e6;
             stats.evaluateMilliseconds = double((t[4] - t[2]) & mask) * period / 1e6;
             stats.filterMilliseconds = double((t[6] - t[4]) & mask) * period / 1e6;
@@ -250,8 +252,8 @@ VulkanGtao::VulkanGtao(VkPhysicalDevice p, VkDevice d, uint32_t family, GtaoCapa
     const char *names[] = {"prepare", "reduce", "evaluate", "denoise", "resolve"};
     const char *entries[] = {"prepare", "reduceDepth", "evaluate", "denoise", "resolve"};
     for (uint32_t i = 0; i < 5; ++i) {
-        ShaderModule module(
-            d, shaders / (std::string("gtao_") + names[i] + (caps.compact ? "" : "_wide") + ".comp.spv"));
+        ShaderModule module(d, shaders / (std::string("gtao_") + names[i] +
+                                          (caps.compact ? "" : "_wide") + ".comp.spv"));
         VkComputePipelineCreateInfo ci{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
         ci.layout = s.pipelineLayout;
         ci.stage = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO};
@@ -345,7 +347,8 @@ void VulkanGtao::resize(uint32_t w, uint32_t h, GtaoMode mode) {
                                    f.edges.view,    f.filtered.view, f.offsets.view, f.result.view};
             for (uint32_t b = 0; b < 12; ++b)
                 imageDescriptor(s.device, f.sets[l], b, views[b],
-                                b < 6 ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
+                                b < 6 ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE
+                                      : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
         }
 }
 VkImageView VulkanGtao::begin(uint32_t frame, const GtaoSettings &settings, bool wireframe) {
@@ -371,7 +374,8 @@ bool VulkanGtao::active() const { return impl_->stats.effective != GtaoMode::Off
 void VulkanGtao::initialize(VkCommandBuffer cmd) {
     auto &s = *impl_;
     transition(cmd, s.white.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-               VK_PIPELINE_STAGE_2_NONE, 0, VK_PIPELINE_STAGE_2_CLEAR_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
+               VK_PIPELINE_STAGE_2_NONE, 0, VK_PIPELINE_STAGE_2_CLEAR_BIT,
+               VK_ACCESS_2_TRANSFER_WRITE_BIT);
     VkClearColorValue colour{{1, 1, 1, 1}};
     VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
     vkCmdClearColorImage(cmd, s.white.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &colour, 1, &range);
@@ -379,7 +383,8 @@ void VulkanGtao::initialize(VkCommandBuffer cmd) {
                VK_PIPELINE_STAGE_2_CLEAR_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
                VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
 }
-void VulkanGtao::record(VkCommandBuffer cmd, VkImageView source) {
+void VulkanGtao::record(VkCommandBuffer cmd, VkImageView source, glm::vec2 jitter,
+                        uint32_t temporalPhase) {
     auto &s = *impl_;
     if (!active())
         return;
@@ -399,16 +404,17 @@ void VulkanGtao::record(VkCommandBuffer cmd, VkImageView source) {
               {ty * float(s.width) / s.height, ty,
                Camera::nearPlane * Camera::farPlane / (Camera::farPlane - Camera::nearPlane),
                Camera::nearPlane / (Camera::farPlane - Camera::nearPlane)},
-              {s.settings.radius, 0, 0, 0}};
+              {s.settings.radius, jitter.x, jitter.y, float(temporalPhase)}};
     auto stamp = [&](uint32_t index) {
         if (s.queries)
-            vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, s.queries, s.current * 4 + index);
+            vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, s.queries,
+                                 s.current * 4 + index);
     };
     auto dispatch = [&](uint32_t pipeline, uint32_t level, uint32_t w, uint32_t h) {
         push.pass.y = level;
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, s.pipelines[pipeline]);
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, s.pipelineLayout, 0, 1, &f.sets[level],
-                                0, nullptr);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, s.pipelineLayout, 0, 1,
+                                &f.sets[level], 0, nullptr);
         vkCmdPushConstants(cmd, s.pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
         vkCmdDispatch(cmd, (w + 7) / 8, (h + 7) / 8, 1);
     };
@@ -453,8 +459,8 @@ void VulkanGtao::copySnapshot(VkCommandBuffer cmd, uint32_t frame, VkBuffer dst)
     for (auto i : f.snapshotImages()) {
         transition(cmd, i->image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                    VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                   VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT, VK_PIPELINE_STAGE_2_COPY_BIT,
-                   VK_ACCESS_2_TRANSFER_READ_BIT);
+                   VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT,
+                   VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
         VkBufferImageCopy copy{};
         copy.bufferOffset = offset;
         copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
@@ -480,7 +486,8 @@ GtaoSnapshot VulkanGtao::decodeSnapshot(uint32_t frame, const void *data) const 
     const auto *bytes = static_cast<const uint8_t *>(data);
     out.pixels.resize(size_t(s.width) * s.height);
     for (size_t i = 0; i < out.pixels.size(); ++i)
-        out.pixels[i] = glm::vec4(bytes[4 * i], bytes[4 * i + 1], bytes[4 * i + 2], bytes[4 * i + 3]) / 255.f;
+        out.pixels[i] =
+            glm::vec4(bytes[4 * i], bytes[4 * i + 1], bytes[4 * i + 2], bytes[4 * i + 3]) / 255.f;
     bytes += align4(f.result.payload());
     std::vector<float> *arrays[] = {&out.depth, &out.raw, &out.filtered, &out.edges};
     const Image *images[] = {&f.depth, &f.raw, &f.filtered, &f.edges};

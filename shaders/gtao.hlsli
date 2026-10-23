@@ -32,7 +32,7 @@ float linearDepth(int2 p) {
     return d>0 ? ao.projection.z/(d+ao.projection.w) : 0;
 }
 float3 positionAt(float2 pixel,float z) {
-    float2 ndc=(pixel+.5)/float2(ao.dims.xy)*2-1;
+    float2 ndc=(pixel+.5-ao.effect.yz)/float2(ao.dims.xy)*2-1;
     return float3(ndc.x*ao.projection.x*z,-ndc.y*ao.projection.y*z,z);
 }
 float4 edgeWeights(float c,float l,float r,float t,float b) {
@@ -113,6 +113,7 @@ void evaluate(uint3 tid:SV_DispatchThreadID) {
     float search=min(128.,radius*ao.dims.y/(2*ao.projection.y*z));
     // Fixed interleaved gradient/R2-style spatial rotations: never vary with frame index.
     float noise=frac(52.9829189*frac(dot(float2(np),float2(.06711056,.00583715))));
+    noise=frac(noise+ao.effect.w*.618033989);
     float noiseStep=frac(noise+.754877666);
     float visibility=0,validSamples=0;
     [unroll]for(uint slice=0;slice<3;++slice) {

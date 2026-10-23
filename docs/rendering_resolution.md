@@ -30,7 +30,7 @@ Each of two in-flight frame slots owns HDR and depth images at scene resolution.
 Presentation targets own only output colour views/images and per-swapchain-image
 presentation semaphores. Scene resources include GTAO, Hi-Z and cluster storage;
 terrain pixel-error LOD uses scene height. Shadow-map resolutions are independent.
-No additional intermediate colour target or generic render graph is introduced.
+[Slice 5G](rendering_temporal_post.md) adds scene-sized temporal history/motion and bounded bloom resources. Output-only resizing preserves history when scene extent is unchanged; there is no generic render graph.
 
 The existing output pass samples pre-exposed HDR with a clamp-to-edge linear
 sampler at normalized output coordinates, then tone maps to the sRGB attachment.

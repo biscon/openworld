@@ -1,10 +1,11 @@
+#include "temporal_surface.hlsli"
 #include "lighting.hlsli"
 #include "materials.hlsli"
 #include "terrain_surface.hlsli"
 [[vk::binding(5, 0)]] Texture2DArray<float4> normalMap;
 [[vk::binding(7, 0)]] Texture2DArray<float4> nextNormals;
 [[vk::binding(6, 0)]] SamplerState normalSampler;
-float4 main(TerrainSurface input) : SV_Target0 {
+float4 shadePixel(TerrainSurface input) : SV_Target0 {
     float3 normal = input.normal;
     if (input.options.y != 0) {
         uint width, height, layers;
@@ -38,3 +39,12 @@ float4 main(TerrainSurface input) : SV_Target0 {
     if(lighting.output.y==0) colour=shadeTerrain(normal,input.relativePosition,screenVisibility(input.position.xy));
     return float4(colour,1);
 }
+
+#ifdef OW_TEMPORAL_OUTPUT
+TemporalOutput main(TerrainSurface input) {
+    return temporalOutput(shadePixel(input),input.relativePosition,input.previousClip,float(input.previousClip.w>0),saturate(dot(lighting.emissive.rgb,float3(.2126,.7152,.0722))/10000));
+}
+
+#else
+float4 main(TerrainSurface input):SV_Target0 { return shadePixel(input); }
+#endif

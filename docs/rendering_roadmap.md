@@ -1,6 +1,6 @@
 # Milestone 5 rendering roadmap
 
-Status: roadmap updated 2026-10-23. Slices 5A through 5F, including 5E.5, are implemented; subsequent slices remain proposed. Software verification does not replace pending target-GPU acceptance. See the implementation documents for verification and limitations. This expands [milestone 5](milestones.md#milestone-5-materials-and-the-broader-rendering-system); terrain geography remains a separate deferred milestone.
+Status: roadmap updated 2026-10-23. Slices 5A through 5G.2, including 5E.5, are implemented; optional 5G.3 is deferred and subsequent slices remain proposed. Software verification does not replace pending target-GPU acceptance. See the implementation documents for verification and limitations. This expands [milestone 5](milestones.md#milestone-5-materials-and-the-broader-rendering-system); terrain geography remains a separate deferred milestone.
 
 ## Direction and starting point
 
@@ -150,7 +150,7 @@ Status: **implemented**, with Off by default and Half/Full opt-in modes,
 spatial denoising, depth-aware reconstruction and indirect-diffuse-only integration.
 See [GTAO design and verification](rendering_gtao.md) for Debug/Release and software
 Vulkan evidence; target-GPU 1080p/native profiling and live motion review remain pending.
-The requirements below record the slice's intended contract; temporal integration remains 5G work.
+The requirements below record the slice's intended contract; temporal sample integration is implemented in 5G.
 
 Add GTAO after the current-frame depth foundation in 5E, before forward opaque lighting. It estimates horizon-based visibility from visible depth; it cannot recover hidden/offscreen geometry and is not actual ground truth for the full scene. Clustered forward can consume its AO texture without adopting a full deferred G-buffer. Use Intel's MIT-licensed XeGTAO as an implementation reference. It has **depth preparation, horizon evaluation and edge-aware denoising passes**, rather than one universally fast dispatch. Its spatial path works without TAA, with temporal sampling available when TAA is present. [XeGTAO implementation and limitations](https://github.com/GameTechDev/XeGTAO).
 
@@ -177,7 +177,9 @@ incremental 1080p target and native RTX 3060 motion review before acceptance.
 
 ### 5G — Temporal antialiasing and HDR post-processing
 
-**TAA is the chosen primary antialiasing method. Bloom is a planned feature with an off/intensity control**, rather than an unspecified optional extension. Keep these independently reviewable; neither replaces correct texture filtering or fixes incorrect visibility/shadow data. TAA can be brought forward after the depth/motion and material contracts are ready; it does not intrinsically require cascaded shadows, although 5F must later be validated with it enabled.
+Status: 5G.1–5G.2 implemented; [design, controls and verification](rendering_temporal_post.md). The demo enables TAA and subtle bloom at its configured scene resolution. Auto-exposure (5G.3) remains deferred; target-GPU/live motion acceptance remains pending.
+
+**TAA is the primary antialiasing method. Bloom has independent off/intensity controls.** Keep these independently reviewable; neither replaces correct texture filtering or fixes incorrect visibility/shadow data. TAA depends on the depth/motion and material contracts; its integration with cascaded shadows is covered by the combined fixtures.
 
 #### 5G.1 — Native-resolution TAA
 
