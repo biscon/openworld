@@ -39,7 +39,12 @@ unsupported devices produce an error rather than silently changing renderers.
 
 The offline `material_import` target uses system libpng, libsquish and nlohmann JSON,
 plus the small vendored BC7 encoder. Runtime loading needs none of these libraries.
-Production textures are already imported; see [asset provenance and reimport instructions](assets/terrain/README.md).
+Building `engine` also builds `terrain_assets`, importing the tracked source PNGs
+and palette recipe into `<build>/assets/terrain/runtime`. This happens on the first
+build and when inputs change or outputs are missing; unchanged builds reuse the
+textures. Generated DDS files are not versioned. To build only the palette, run
+`cmake --build cmake-build-release --target terrain_assets`. See
+[asset provenance and import instructions](assets/terrain/README.md).
 
 ## CLion
 

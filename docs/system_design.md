@@ -15,6 +15,8 @@ Milestone 4 adds [hierarchical terrain residency](terrain_hierarchy.md): coarse 
 
 ## System design index
 
+- [Local terrain asset builds](rendering_materials.md#local-asset-builds) — implemented: CMake imports tracked source artwork into each build tree; generated DDS files are removed from the source tree without rewriting history. Debug/Release, incremental-build fixtures and software Vulkan material checks pass.
+
 - [Scene resolution and presentation](rendering_resolution.md) — implemented: configurable scene height (demo default 1080) independent of native output resolution, native ImGui and F10 borderless fullscreen. Debug/Release and software Vulkan checks pass; live windowed and target-GPU verification remain pending.
 
 - [Cascaded sun shadows](rendering_shadows.md) — implemented slice 5F: four stable near cascades and one far mountain cascade, shared rendered terrain surfaces, bounded offscreen residency and ordinary depth rendering. The virtual implementation and dense clipmap fallback are removed. Debug/Release and software Vulkan checks pass; target-GPU acceptance remains required.

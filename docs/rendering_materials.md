@@ -4,7 +4,52 @@ Status: implemented; software Vulkan verification below. Target-GPU performance 
 
 The current renderer extends these 5B contracts with [slice 5C](rendering_terrain_blending.md): a fourth optional macro array, 3D projection coordinates, height-aware composition and spatial repetition control. The descriptions below record the 5B baseline; the 5C design records the current combined sampling costs and interfaces.
 
-## Responsibilities and contracts
+## Local asset builds
+
+Status: implemented; Debug/Release builds and focused verification pass.
+
+Source PNGs, authoring prompts, the palette recipe, and the C++ importer remain
+tracked. Runtime DDS files and the copied runtime manifest are generated products,
+owned by the build tree at `<build>/assets/terrain/runtime`. Existing source-tree
+runtime files are removed from the working tree and ignored for future imports;
+their initial Git history is retained.
+
+CMake's `terrain_assets` target runs `material_import` and is a dependency of the
+demo `engine` target. Engine startup defaults to that build's output directory;
+the `--material-dir` override remains available. Building libraries or individual
+test targets does not import production artwork. The target rebuilds when the
+recipe, any referenced PNG, or the importer changes, and regenerates missing
+outputs. CMake watches the recipe so changing its referenced filenames updates
+the dependency graph. All compressed and uncompressed fallback variants are
+generated, together with optional macro textures and a copied manifest. A success
+stamp is written last; failed imports leave the target dirty for retry and fail
+the engine build. Import runs offline during builds, never in a rendering frame,
+and does not invoke image generation or require external storage services.
+
+Use one output set per build tree (the existing separate Debug/Release presets).
+The first build pays the full import cost and disk footprint; unchanged builds
+do no asset work. Asset publication is build-time work: finish building before
+launching the corresponding engine, rather than rebuilding live assets in use.
+
+Verification uses tiny generated PNG/JSON fixtures in isolated temporary build
+trees to exercise CMake's clean build, no-op rebuild, source/recipe/importer
+dependency changes, missing outputs, and failure/retry behaviour. Existing
+importer CPU/GPU tests protect texture semantics. Separately build the production
+palette and demo and smoke-test loading with Vulkan validation when available.
+
+Verification (2026-10-23): both configurations build the production palette and
+engine successfully; unchanged follow-up builds report no work. All nine Release
+outputs are byte-identical to the former tracked versions. `material_cpu`,
+`material_import`, `terrain_asset_build`, and `material_gpu` pass in Debug and
+Release. The asset-build fixture exercises Ninja and Unix Makefiles, including
+paths containing spaces, dependency replacement, missing outputs, importer
+changes, failed-import recovery and removal of optional macros. The Release demo
+runs from its default build-directory palette with zero Vulkan validation errors.
+Production probes also load compressed/bindless and RGBA/fixed variants, including
+macro textures, at 160x90 under llvmpipe with zero validation errors. No runtime
+rendering algorithm or performance claim changes in this build-system revision.
+
+## Runtime material contracts
 
 An offline C++ importer reads PNG artwork and a JSON recipe, derives wrap-aware tangent normals from authored height in metres, builds linear-light colour mips and normal/roughness-aware mips, and writes bounded DDS DX10 2D-array palettes. Runtime reads DDS only; builds never generate artwork. Colour uses BC7 sRGB, normals BC5 UNORM (positive Z reconstructed), packed scalars BC7 UNORM: roughness/AO/height/one. RGBA8 alternatives have identical semantics. Four 2048-square layers represent grass, soil, rock and gravel, each repeating over 4 metres. Sources, built-in imagegen prompts and processing settings remain under assets/terrain. Scalar maps are authored estimates, not measured scans. Metallic is zero.
 
@@ -62,9 +107,8 @@ Reviewed [repeated tiles](images/materials/repeated_palette.png), [half-offset s
 ## Reproduction and performance
 
 ```sh
-cmake --build cmake-build-release --target material_import material_probe
-cmake-build-release/material_import assets/terrain/source/palette.json assets/terrain/runtime
-cmake-build-release/material_probe assets/terrain/runtime /tmp/material-review 1920 1080
+cmake --build cmake-build-release --target terrain_assets material_probe
+cmake-build-release/material_probe cmake-build-release/assets/terrain/runtime /tmp/material-review 1920 1080
 ```
 
 The probe captures flat/sloped surfaces, rotating light and terrain weights, then records median scene/output GPU timestamps for constant, trilinear, 8× and 16× modes. The first software Vulkan run at 1280×720 measured scene medians of 21.55 / 199.38 / 569.95 / 573.14 ms respectively. These are **llvmpipe software costs**, not RTX 3060 performance estimates. Production palette image allocation was 67,112,256 bytes including fallback. No hardware GPU/display is available here; 1080p/native RTX timings and motion/shimmer review remain unmeasured. Keep the constant/trilinear comparison switches when evaluating performance.

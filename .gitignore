@@ -12,6 +12,9 @@
 /.ninja_deps
 /.ninja_log
 
+# Generated terrain palettes (normal builds place these inside the build tree).
+/assets/terrain/runtime/
+
 # IDE state and per-machine configuration.
 /.idea/
 /.env

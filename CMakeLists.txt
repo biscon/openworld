@@ -145,10 +145,11 @@ target_link_libraries(engine_render PUBLIC terrain_core imgui)
 add_dependencies(engine_render shaders)
 add_executable(engine src/main.cpp)
 target_link_libraries(engine PRIVATE engine_render)
+set(MATERIAL_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/assets/terrain/runtime")
 target_compile_definitions(engine PRIVATE
     GLM_FORCE_RADIANS GLM_FORCE_DEPTH_ZERO_TO_ONE
     OPENWORLD_SHADER_DIR="${SHADER_OUTPUT_DIR}"
-    OPENWORLD_MATERIAL_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets/terrain/runtime"
+    OPENWORLD_MATERIAL_DIR="${MATERIAL_OUTPUT_DIR}"
     $<$<CONFIG:Debug>:OPENWORLD_DEBUG>)
 foreach(target terrain_core engine_render engine)
     if(MSVC)
@@ -259,12 +260,21 @@ find_library(SQUISH_LIBRARY squish REQUIRED)
 add_executable(material_import tools/material_import.cpp src/material_assets.cpp third_party/bc7enc/bc7enc.cpp)
 target_include_directories(material_import PRIVATE src third_party/bc7enc ${SQUISH_INCLUDE_DIR} ${NLOHMANN_JSON_INCLUDE_DIR})
 target_link_libraries(material_import PRIVATE PNG::PNG ${SQUISH_LIBRARY} glm::glm)
+include(cmake/TerrainAssets.cmake)
+openworld_add_terrain_assets(terrain_assets material_import
+    "${CMAKE_CURRENT_SOURCE_DIR}/assets/terrain/source/palette.json" "${MATERIAL_OUTPUT_DIR}")
+add_dependencies(engine terrain_assets)
 if(BUILD_TESTING)
     add_executable(material_cpu_tests tests/material_cpu.cpp)
     target_link_libraries(material_cpu_tests PRIVATE engine_render)
     add_test(NAME material_cpu COMMAND material_cpu_tests)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     add_test(NAME material_import COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/material_import.py $<TARGET_FILE:material_import>)
+    add_test(NAME terrain_asset_build COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/terrain_asset_build.py
+        "${CMAKE_COMMAND}" $<TARGET_FILE:material_import>
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/TerrainAssets.cmake")
+    set_tests_properties(terrain_asset_build PROPERTIES TIMEOUT 60)
     if(OPENWORLD_GPU_TESTS)
         add_executable(material_gpu_tests tests/material_gpu.cpp)
         target_link_libraries(material_gpu_tests PRIVATE engine_render)

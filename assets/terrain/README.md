@@ -12,15 +12,18 @@ Height is an artistic approximation; small relief amplitudes deliberately limit
 artifacts from imperfect registration. Roughness is a conservative constant per
 material, AO is one, metallic is zero. No albedo-to-height conversion is used.
 
-Reimport explicitly:
+Build the runtime palette explicitly (a normal `engine` build does this automatically):
 
 ```sh
-cmake --build cmake-build-release --target material_import
-cmake-build-release/material_import assets/terrain/source/palette.json assets/terrain/runtime
+cmake --build cmake-build-release --target terrain_assets
 ```
 
-Normal builds use the checked-in runtime DDS files without invoking imagegen or
-importing artwork. `*_rgba.dds` are the format fallback and comparison versions.
+Generated DDS files and the copied manifest live in
+`cmake-build-release/assets/terrain/runtime` (or the corresponding Debug build
+directory). Only source artwork, prompts, recipes and importer code are tracked;
+runtime palettes are build products. Source/recipe/importer edits or missing outputs
+trigger import; unchanged builds reuse the existing files. No build invokes imagegen
+or downloads artwork. `*_rgba.dds` are the format fallback and comparison versions.
 Colours are sRGB, normals linear XY with positive Z, scalars linear roughness/AO/
 height/one. All materials repeat over 4 metres at default settings. Changing
 repeat scale retains physical height through the normal-strength correction.
@@ -45,7 +48,7 @@ Both compressed and RGBA palettes contain four layers and complete mip chains.
 Rebuild only the macro array without touching approved micro assets:
 
 ```sh
-cmake-build-release/material_import assets/terrain/source/palette.json assets/terrain/runtime --macro-only
+cmake-build-release/material_import assets/terrain/source/palette.json cmake-build-release/assets/terrain/runtime --macro-only
 ```
 
 [Repeated/offset review](../../docs/images/materials/macro_review.png) shows the
