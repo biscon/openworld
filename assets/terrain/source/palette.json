@@ -1,0 +1,56 @@
+{
+  "version": 2,
+  "size": 2048,
+  "packing": "roughness,AO,height,1",
+  "normalConvention": "tangent +U/+V/+N, U +X, V +Z, positive Z reconstructed",
+  "resample": "wrap bilinear in linear light; source resolution retained separately",
+  "materials": [
+    {
+      "name": "grass",
+      "colour": "grass.png",
+      "height": "grass_height.png",
+      "repeatMetres": 4,
+      "heightMetres": 0.01,
+      "roughness": 0.9,
+      "macroColour": "grass_macro.png",
+      "macroRoughnessSeed": 182,
+      "macroRoughnessAmplitude": 0.35
+    },
+    {
+      "name": "soil",
+      "colour": "soil.png",
+      "height": "soil_height.png",
+      "repeatMetres": 4,
+      "heightMetres": 0.015,
+      "roughness": 0.9,
+      "macroColour": "soil_macro.png",
+      "macroRoughnessSeed": 279,
+      "macroRoughnessAmplitude": 0.35
+    },
+    {
+      "name": "rock",
+      "colour": "rock.png",
+      "height": "rock_height.png",
+      "repeatMetres": 4,
+      "heightMetres": 0.02,
+      "roughness": 0.82,
+      "macroColour": "rock_macro.png",
+      "macroRoughnessSeed": 376,
+      "macroRoughnessAmplitude": 0.35
+    },
+    {
+      "name": "gravel",
+      "colour": "gravel.png",
+      "height": "gravel_height.png",
+      "repeatMetres": 4,
+      "heightMetres": 0.035,
+      "roughness": 0.87,
+      "macroColour": "gravel_macro.png",
+      "macroRoughnessSeed": 473,
+      "macroRoughnessAmplitude": 0.35
+    }
+  ],
+  "macroSize": 512,
+  "macroRepeatMetres": 64,
+  "macroPacking": "sRGB RGB: linear 0.5 neutral colour modulation; linear alpha: 0.5 neutral roughness"
+}

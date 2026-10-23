@@ -1,0 +1,56 @@
+{
+  "tool": "built-in image_gen.imagegen",
+  "date": "2026-10-17",
+  "modelVersion": null,
+  "seed": null,
+  "entries": [
+    {
+      "output": "rock.png",
+      "returnedFile": "exec-b542e1b9-b03a-4bce-b67e-8858675036f0.png",
+      "prompt": "Use case: photorealistic-natural. Production game PBR base-colour texture, 2048x2048 square. Orthographic straight-down view of a 4 metre by 4 metre continuous weathered grey limestone bedrock surface from temperate European uplands, fine subtle fissures and small natural mineral variation, subdued neutral grey-beige colour. Seamlessly tileable horizontally and vertically, even distribution with no focal feature, no borders. This is unlit albedo: fully diffuse uniform ambient illumination, absolutely no directional shadows, no highlights, no ambient occlusion dark crevices, no perspective, no text, no objects or vegetation. Fine photorealistic detail at a natural 4m physical scale. Fill whole frame with surface, no grid or map montage.",
+      "reference": null
+    },
+    {
+      "output": "rock_height.png",
+      "returnedFile": "exec-c6a12075-4bba-425f-9cf1-76f9cd3166e4.png",
+      "prompt": "Edit this texture into its matching scalar HEIGHT MAP for PBR. Keep every crack, stone boundary and feature in EXACTLY the same pixel position and scale, no rotation, crop, rearrangement or new features. Output square 2048x2048 grayscale only. Interpret surface geometry, not albedo brightness: broad stone faces are similar mid/light grey shallow height, narrow fissures lower dark grey, mineral colour flecks must NOT become bumps. Smooth shallow relief, no directional lighting or shadows. Tile seamlessly on both axes. This corresponds to only 0.06 metre total physical relief over 4 metres of bedrock. No normal map, labels, borders or montage.",
+      "reference": "rock.png"
+    },
+    {
+      "output": "grass.png",
+      "returnedFile": "exec-661268f1-42d9-4641-90e7-b096cde9837f.png",
+      "prompt": "Use case: photorealistic-natural. Game terrain PBR BASE COLOUR texture, square 2048x2048, orthographic directly overhead, physical footprint 4 by 4 metres of dense temperate upland short green grass and fine low ground cover. Small natural blades, subdued olive and fresh green mixed evenly with tiny dry straw flecks, no flowers or conspicuous clumps. Uniform diffuse UNLIT albedo with no highlights, no directional shadows or ambient occlusion. Seamless horizontal and vertical repetition, matching opposite edges, no visible grid, no large landmarks, no vignette, no perspective, no text. The entire frame is one continuous surface.",
+      "reference": null
+    },
+    {
+      "output": "grass_height.png",
+      "returnedFile": "exec-d18eb6d3-292d-445f-a391-d86c9a6d3f8e.png",
+      "prompt": "Convert this exact grass ground texture to a spatially REGISTERED shallow HEIGHT MAP, square 2048x2048 grayscale. Preserve every blade/clump/location and scale without adding shapes, rotations or shifting. Grass upper fine blades light grey, low underlying soil darker grey, shallow low contrast microrelief only. Interpret geometry, ignore albedo colour variation and yellow flecks. Neutral unlit technical scalar map without lighting/shadows, seamless opposite edges, no labels. Total height range is only 1 centimetre over a 4 metre surface.",
+      "reference": "grass.png"
+    },
+    {
+      "output": "soil.png",
+      "returnedFile": "exec-735ad14c-4a90-49c5-9a3d-0e297424d4a1.png",
+      "prompt": "Use case: photorealistic-natural. Production PBR terrain BASE COLOUR texture, square 2048x2048. Orthographic straight-down 4 by 4 metre area of temperate upland brown soil, fine friable dry earth with very tiny granules and occasional minute stones, understated cool umber, even natural fine variation. No footprints, leaves, roots, grass, large cracks or focal objects. Seamlessly tileable in X and Y with matching opposite edges. Completely unlit neutral albedo, no directional shadows, highlights, dark ambient occlusion, vignette or perspective. One full-frame continuous texture, no text, panels or borders.",
+      "reference": null
+    },
+    {
+      "output": "soil_height.png",
+      "returnedFile": "exec-7b41dae1-12c3-4844-ab25-fde52b8f10f6.png",
+      "prompt": "Create the matching registered HEIGHT map of this exact soil texture, square 2048x2048 grayscale. Do not move, rescale or invent any pebble or grain. Preserve exact pixel positions and image extent. Geometry only: tiny grains slightly elevated mid/light grey, spaces modestly lower grey; broad soil is a mostly flat middle grey level. Ignore pigment brightness. Shallow fine relief corresponding to total 0.015 metre over 4 metres, no deep craters, no directional shading, no normal colours. Seamless repetition on X and Y, no borders or labels.",
+      "reference": "soil.png"
+    },
+    {
+      "output": "gravel.png",
+      "returnedFile": "exec-3f50d31a-aff7-4c4b-9548-0bc6c29cb1a5.png",
+      "prompt": "Use case: photorealistic-natural. Square 2048x2048 production PBR terrain BASE COLOUR texture. Straight-down orthographic view of a 4 metre by 4 metre temperate upland fine limestone gravel surface. Dense evenly distributed small angular grey-beige chips, most 1 to 3 centimetres, subtle grey brown mineral colours and fine grit, no boulders, distinct landmarks, grass or debris. Unlit albedo under completely uniform neutral diffuse light, no directional shadows, dark AO crevices, highlights, perspective or vignette. Seamlessly tileable with matching opposite edges in both axes. Entire frame is texture, no text, grid, labels or borders.",
+      "reference": null
+    },
+    {
+      "output": "gravel_height.png",
+      "returnedFile": "exec-775af787-a8c8-45a0-9281-8570a73b2c1e.png",
+      "prompt": "Convert this exact gravel base colour into its registered scalar HEIGHT MAP, square 2048x2048 grayscale. Preserve all pebble outlines, sizes, positions and the image extent EXACTLY. Do not rearrange stones. Stone upper faces mid/light grey regardless of pigment, small interstitial spaces darker grey, shallow relief, geometry rather than colour brightness. Neutral technical height without directional highlights or shadows. Total physical range 0.035 metre over a 4 metre square. Seamless opposite edges, no labels, no normal-map colours, no borders.",
+      "reference": "gravel.png"
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+extent=320x180
+frames=8
+streaming=0
+radius_m=1
+warmup=16
+build=Release
+device=llvmpipe (LLVM 23.1.3, 256 bits)
+validation=1
+device=llvmpipe (LLVM 23.1.3, 256 bits)
+validation=1

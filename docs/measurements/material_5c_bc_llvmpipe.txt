@@ -1,0 +1,6 @@
+device=llvmpipe (LLVM 23.1.1, 256 bits)
+resolution=320x180
+quick=1
+macro=1
+binding=bindless
+imageBytes=68511488

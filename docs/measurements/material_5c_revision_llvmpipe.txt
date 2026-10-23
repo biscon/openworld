@@ -1,0 +1,12 @@
+device=llvmpipe (LLVM 23.1.1, 256 bits)
+resolution=320x180
+quick=1
+macro=1
+binding=fixed
+imageBytes=274046976
+seed_1 chunk=31,15 centreHeight=773.477
+seed_2 chunk=50,85 centreHeight=280.283
+seed_3 chunk=78,39 centreHeight=623.266
+command=VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json cmake-build-release/material_probe assets/terrain/runtime /tmp/material-performance-final 320 180 --quick --fixed --rgba
+validation_errors=0
+notes=Software-only smoke: 4 warm-up and 8 measured frames; fixed dense 256x256-cell terrain patch, not the live hierarchical RTX 3060 scene. Preview has no depth prepass. No hardware performance inference.

@@ -1,0 +1,5 @@
+mode,scene,moving,low_sun,width,height,cpu_median_ms,cpu_p95_ms,request_p95_ms,allocation_p95_ms,raster_p95_ms,shadow_bytes,terrain_shadow_bytes,hits,updates,overflow,pairs,triangles,incomplete
+off,valley,0,1,320,180,2.1817,2.40408,0,0,0,50701728,0,0,0,0,0,0,0
+dense,valley,0,1,320,180,4.87397,5.02967,0.205463,0.27856,0.068438,50701728,0,0,0,0,0,0,1
+uncached,valley,0,1,320,180,13.0862,15.0758,2.74016,0.301222,7.62154,50701728,0,0,16,0,236,82540,1
+cached,valley,0,1,320,180,6.88255,7.44864,2.61421,0.274593,0.086321,50701728,0,16,0,0,0,0,1

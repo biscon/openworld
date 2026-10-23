@@ -1,0 +1,5 @@
+mode,scene,moving,low_sun,width,height,cpu_median_ms,cpu_p95_ms,request_p95_ms,allocation_p95_ms,raster_p95_ms,shadow_bytes,terrain_shadow_bytes,hits,updates,overflow,pairs,triangles,incomplete
+off,plain,1,0,320,180,2.21889,2.45981,0,0,0,50701728,0,0,0,0,0,0,0
+dense,plain,1,0,320,180,6.58984,7.31795,0.216925,0.265045,3.00318,50701728,0,0,0,0,0,32776,0
+uncached,plain,1,0,320,180,12.453,13.2403,1.86563,0.267008,7.12514,50701728,0,0,10,0,227,88348,0
+cached,plain,1,0,320,180,12.7773,14.2415,1.93474,0.286485,8.29687,50701728,0,0,10,0,227,88348,0

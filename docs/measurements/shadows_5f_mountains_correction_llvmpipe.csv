@@ -1,0 +1,5 @@
+mode,scene,moving,low_sun,width,height,cpu_median_ms,cpu_p95_ms,request_p95_ms,allocation_p95_ms,raster_p95_ms,shadow_bytes,terrain_shadow_bytes,hits,updates,overflow,pairs,triangles,incomplete,casters
+off,mountains,0,0,320,180,11.8789,12.9122,0,0,0,106636768,3120128,0,0,0,0,0,0,0
+dense,mountains,0,0,320,180,21.8211,23.1225,0.211986,0.331168,0.07485,106636768,3120128,0,0,0,0,0,0,3385
+uncached,mountains,0,0,320,180,133.212,135.6,5.27678,1.4335,96.3184,106636768,3120128,0,40,0,8574,1542912,0,27290
+cached,mountains,0,0,320,180,33.2841,34.5473,5.066,0.353029,0.263662,106636768,3120128,40,0,0,0,0,0,27290

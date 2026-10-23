@@ -1,0 +1,37 @@
+{
+  "size": 256,
+  "materials": [
+    {
+      "name": "grass",
+      "colour": "rock.png",
+      "height": "rock_height.png",
+      "repeatMetres": 4,
+      "heightMetres": 0.02,
+      "roughness": 0.85
+    },
+    {
+      "name": "soil",
+      "colour": "rock.png",
+      "height": "rock_height.png",
+      "repeatMetres": 4,
+      "heightMetres": 0.02,
+      "roughness": 0.85
+    },
+    {
+      "name": "rock",
+      "colour": "rock.png",
+      "height": "rock_height.png",
+      "repeatMetres": 4,
+      "heightMetres": 0.02,
+      "roughness": 0.85
+    },
+    {
+      "name": "gravel",
+      "colour": "rock.png",
+      "height": "rock_height.png",
+      "repeatMetres": 4,
+      "heightMetres": 0.02,
+      "roughness": 0.85
+    }
+  ]
+}

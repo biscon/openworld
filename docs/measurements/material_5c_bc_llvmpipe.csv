@@ -1,0 +1,12 @@
+workload,mode,scene_median_ms,scene_p95_ms,output_median_ms,output_p95_ms,max_logical_reads,effective_af,samples
+four_layer_cliff,constant,0.39861,0.450755,0.121948,0.146465,0,8,8
+four_layer_cliff,baseline,42.3146,43.3077,0.189489,0.224903,12,8,8
+four_layer_cliff,height,41.3603,44.9064,0.176905,0.194611,12,8,8
+four_layer_cliff,cliffs,61.4648,62.958,0.177155,0.200868,18,8,8
+four_layer_cliff,macro,51.313,54.1703,0.171811,0.183184,16,8,8
+four_layer_cliff,balanced_trilinear,37.3501,40.8996,0.149844,0.171023,24,1,8
+four_layer_cliff,balanced_8x,74.4702,75.2945,0.147671,0.196459,24,8,8
+four_layer_cliff,balanced_16x,74.2444,75.9602,0.167307,0.202343,24,16,8
+four_layer_cliff,pruned_8x,74.6393,77.0328,0.173488,0.228255,24,8,8
+four_layer_cliff,high,189.956,191.607,0.193266,0.246282,60,16,8
+four_layer_cliff,all_stochastic,256.189,260.887,0.198861,0.236581,78,16,8

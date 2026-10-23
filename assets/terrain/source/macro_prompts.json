@@ -1,0 +1,37 @@
+{
+  "tool": "built-in image_gen",
+  "date": "2026-10-17",
+  "model_version": null,
+  "seed": null,
+  "notes": "Model version and seed were not exposed. Original outputs retained without edits. Runtime macro colour is area-filtered to 32 square then wrap-reconstructed at 512 square; roughness is an independent periodic seeded field.",
+  "assets": [
+    {
+      "file": "grass_macro.png",
+      "prompt": "Generate one square seamless terrain macro albedo texture of temperate meadow GRASS seen in strict orthographic top-down view. This is a game-engine material texture covering 64 by 64 metres, intended as broad colour modulation over a separate detailed grass texture. Only broad soft irregular patches of muted olive, sage, dried straw green and earthy green, variations several metres across; fine blades must not be visible or enlarged. Natural irregular coherent meadow colour, subtle variations, no distinctive landmarks. Perfectly flat neutral diffuse base colour, no shadows, no highlights, no perspective, no horizon, no rocks, no objects, no text, no border. Tile seamlessly on both axes, edges consistent, uniform illumination. Full square image is the texture. Opaque background.",
+      "returnedFilename": "exec-171a5cba-921c-4859-83e4-cc00a82e3e0c.png",
+      "sourceWidth": 1254,
+      "sourceHeight": 1254
+    },
+    {
+      "file": "soil_macro.png",
+      "prompt": "One square seamless game terrain macro albedo texture of SOIL, strict orthographic top-down. Represents a 64 by 64 metre patch of bare natural temperate earth. Broad soft irregular patches of warm brown, muted ochre, cool dark loam, subtle mineral colour mottling several metres across. Intended for low-frequency colour modulation over a separate micro soil texture: no individual clods, cracks, pebbles or giant grain. Neutral diffuse colour only, no lighting gradients, shadows, highlights, perspective or horizon. Seamless on both axes. No objects, vegetation, text, border or distinct landmarks. Restrained realistic palette with gentle broad tonal variation. Entire square filled with the texture.",
+      "returnedFilename": "exec-77994368-ee14-42de-bf50-ca79f2d2503e.png",
+      "sourceWidth": 1254,
+      "sourceHeight": 1254
+    },
+    {
+      "file": "rock_macro.png",
+      "prompt": "One square seamless game terrain macro albedo texture of weathered ROCK, strict orthographic surface view. Represents 64 by 64 metres of broad neutral-grey rock colour, subtle warm grey and cool slate grey mineral clouds with restrained muted tan weathering. Irregular soft mineral colour regions several metres across. Used for low-frequency colour modulation over separate detailed rock normal/albedo maps: no large cracks, boulders, stones, perspective or apparent relief. Flat evenly illuminated diffuse base colour, no directional lighting, shadows or highlights. Seamless edges on both axes, no landmarks, no text, no borders. Entire square filled with restrained realistic broad rock colour variation.",
+      "returnedFilename": "exec-d812921f-806f-41bb-845d-bbb9bc36ef18.png",
+      "sourceWidth": 1254,
+      "sourceHeight": 1254
+    },
+    {
+      "file": "gravel_macro.png",
+      "prompt": "One square seamless game terrain macro albedo texture of GRAVEL terrain, strict orthographic top-down. A 64 by 64 metre footprint described only by broad soft irregular colour patches: muted beige-grey aggregate, warm dusty tan, cool grey fines, softly mottled several-metre mineral regions. Used as low-frequency modulation over a separate micro gravel texture. Individual pebbles must not be visible or enlarged. Restrained natural colour variation, no distinct features, no tracks or vegetation. Neutral flat diffuse base colour, no shadows, highlights, directional lighting, perspective, horizon or relief. Tile seamlessly on both axes. No text, no border, no objects. Fill the square entirely.",
+      "returnedFilename": "exec-4b70d9ea-8171-4b2a-b006-59acd421d71f.png",
+      "sourceWidth": 1254,
+      "sourceHeight": 1254
+    }
+  ]
+}

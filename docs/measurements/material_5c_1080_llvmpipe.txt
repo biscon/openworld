@@ -1,0 +1,6 @@
+device=llvmpipe (LLVM 23.1.1, 256 bits)
+resolution=1920x1080
+quick=1
+macro=1
+binding=fixed
+imageBytes=274046976

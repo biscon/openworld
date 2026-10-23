@@ -1,0 +1,13 @@
+Colour transform adaptations in shaders/tonemap.hlsli and src/lighting.cpp:
+
+ACES fitted by Stephen Hill, published in BakingLab by MJP and David Neubelt.
+https://github.com/TheRealMJP/BakingLab/blob/master/BakingLab/ACES.hlsl
+Distributed under the MIT licence. See LICENSE-MIT.
+
+AgX neutral adapted from Filament's ToneMapper.cpp.
+Copyright (C) 2021 The Android Open Source Project
+https://github.com/google/filament/blob/main/filament/src/ToneMapper.cpp
+Licensed under the Apache License, Version 2.0. See LICENSE-APACHE-2.0.
+Modifications: HLSL/GLM implementation; linear Rec.709 working colour space;
+neutral look only; bounded display output. Filament credits Blender/AgX and
+https://iolite-engine.com/blog_posts/minimal_agx_implementation for this work.
