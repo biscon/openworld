@@ -20,6 +20,7 @@ Build a fast, modular, reusable open-world engine. Runtime performance is a prim
 
 ## Modularity and implementation quality
 
+- Keep application entry points such as `main` focused on startup, shutdown, and orchestration. Put subsystem implementation in cohesive source/header files, and split growing files when distinct responsibilities make them difficult to navigate. Use practical judgment: related types and functions can share a file; avoid rigid one-class-per-file rules or fragmentation that makes the code harder to follow.
 - Never let OOP conventions, inheritance hierarchies, design patterns, or abstraction purity dictate a slower implementation. Use simple structs, functions, composition, or classes according to the problem. Introduce indirection or virtual dispatch only when it provides a concrete benefit at an acceptable cost.
 - Keep systems cohesive and interfaces small. Separate terrain generation, terrain data, rendering, and persistence responsibilities without building a general framework in advance.
 - Keep ownership and lifetimes explicit. Use RAII for resource management where appropriate; performance is not a reason to accept leaks, dangling references, races, or undefined behaviour.
