@@ -15,8 +15,10 @@ Milestone 4 adds [hierarchical terrain residency](terrain_hierarchy.md): coarse 
 
 ## System design index
 
+- [Vegetation asset and foliage foundation](rendering_vegetation_assets.md) — implemented 5J-V2; saved reusable assets, compact instancing, foliage lighting, submitted wind history and isolated review tools.
+
 - [Vegetation representation experiment](rendering_vegetation_experiment.md) — implemented 5J-V1 automated comparison with saved fixtures, compact indirect instancing, LOD, wind, CSM and temporal motion. Debug/Release, software Vulkan and native RTX 3060 synchronization validation pass; native performance results are recorded, final asset/scene acceptance remains open.
-- [Vegetation and ground clutter roadmap](rendering_vegetation.md) — agreed architecture; V1 experiment implemented, V2–V6 proposed: baked grass tufts and mixed mesh/card plants, bounded GPU population and instancing, independent LOD/density/shadow budgets, shared wind and temporary player bending. Slices 5J-V1–V6 start with a representation/performance experiment; trees remain a separate future design.
+- [Vegetation and ground clutter roadmap](rendering_vegetation.md) — agreed architecture; V1 experiment and V2 foliage foundation implemented, V3–V6 proposed: baked grass tufts and mixed mesh/card plants, bounded GPU population and instancing, independent LOD/density/shadow budgets, shared wind and temporary player bending. Slices 5J-V1–V6 start with a representation/performance experiment; trees remain a separate future design.
 
 - [Engine UI and layout persistence](engine_ui.md) — implemented: menu-driven settings and diagnostics, dedicated UI modules, and UI-only JSON state saved on clean exit. Debug/Release and software Vulkan checks pass; native desktop review is blocked by an X11 drawable error.
 

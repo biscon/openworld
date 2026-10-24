@@ -1,5 +1,6 @@
 #pragma once
 #include "scene.hpp"
+#include "vegetation_library.hpp"
 #include <array>
 #include <filesystem>
 #include <memory>
@@ -23,26 +24,33 @@ struct VegetationFixture {
     bool rolling = false;
 };
 struct VegetationOptions {
+    std::shared_ptr<const VegetationLibrary> library;
+    std::shared_ptr<const VegetationPopulation> population;
     std::shared_ptr<const VegetationFixture> fixture;
     uint64_t budgetBytes = 128ull << 20;
-    uint32_t listCapacity = 0; // zero = population; smaller values are overflow diagnostics
+    uint32_t listCapacity = 0; // zero = required part entries; smaller values are overflow diagnostics
 };
 struct VegetationSettings {
     bool enabled = true, coverage = false;
     uint32_t representation = 0; // blades, cards, hybrid
     float density = 1, cardWidth = 1, cardDensity = 1;
-    float time = 0, wind = 1, distance = 70, shadowDistance = 25;
+    float time = 0, wind = 1, distance = 70, shadowDistance = 0;
+    glm::vec2 windDirection{1, .45f};
+    bool transmission = true, depthPrepass = true;
+    int32_t isolateAsset = -1, forceLod = -1; // -2 selects the grass category
+    uint32_t inspectIdentity = ~0u;
 };
 struct VegetationStats {
     uint64_t frame = 0, allocatedBytes = 0, triangles = 0;
-    uint32_t visible = 0, casters = 0, overflow = 0;
+    uint32_t visible = 0, casters = 0, overflow = 0, casterCandidates = 0, selectionGroups = 0;
     double preparationMilliseconds = 0, selectionMilliseconds = 0, depthMilliseconds = 0,
            colourMilliseconds = 0, shadowMilliseconds = 0;
     bool completed = false, timingsAvailable = false, enabled = false;
 };
 struct VegetationSnapshot {
+    uint32_t binCount = vegetationBins;
     VegetationStats stats;
-    std::array<uint32_t, vegetationBins * vegetationViews> counts{};
+    std::array<uint32_t, vegetationBinLimit * vegetationViews> counts{};
     std::array<std::vector<uint32_t>, vegetationViews> identities;
 };
 VegetationAssets makeVegetationAssets();

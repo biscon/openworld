@@ -177,7 +177,10 @@ trees remain a separate future design. The [V1 experiment](rendering_vegetation_
 is implemented with Debug/Release, software Vulkan and native RTX 3060 validation.
 [Native measurements](measurements/vegetation_5j_v1/rtx3060/README.md) inform the
 receive-only grass policy; final assets and full-scene acceptance remain open.
-V2–V6 remain proposed.
+The [V2 asset/foliage foundation](rendering_vegetation_assets.md) is implemented with
+saved grass/fern/shrub assets, compact instancing, wind history, leaf transmission,
+and isolated interactive review. [V2 measurements and validation](measurements/vegetation_5j_v2/rtx3060/README.md)
+record the current budgets and remaining quality limits. V3–V6 remain proposed.
 
 ### Scope
 

@@ -5,17 +5,24 @@
 namespace ow {
 using namespace render_detail;
 namespace {
-constexpr uint32_t workWords = 97 * vegetationViews, queryCount = 16;
+constexpr uint32_t viewWords = vegetationBinLimit * 8 + 1, workWords = viewWords * vegetationViews,
+                   queryCount = 16;
 struct Uniform {
     std::array<glm::mat4, 6> views{};
     glm::vec4 cameraTime{}, previousCameraTime{}, settings{}, previousSettings{}, cards{}, previousCards{};
-    glm::uvec4 modes{}, limits{};
-    std::array<glm::uvec4, 12> geometry{};
+    glm::uvec4 modes{}, limits{}, profile{}, inspection{};
+    glm::vec4 wind{}, previousWind{};
+    std::array<glm::uvec4, 6> lists{};
+    std::array<glm::uvec4, 48> geometry{};
+    std::array<glm::vec4, 48> foliage{};
+    std::array<glm::vec4, 8> ranges{}, deformation{}, envelope{};
+    std::array<glm::uvec4, 24> lods{};
 };
-static_assert(sizeof(Uniform) == 704);
+static_assert(sizeof(Uniform) == 2976);
 struct Cell {
-    glm::vec4 lo{0}, hi{0};
+    glm::vec4 lo{}, hi{}, origin{}, previousOrigin{}, phase{}, casterLo{}, casterHi{};
 };
+static_assert(sizeof(Cell) == 112);
 } // namespace
 struct VulkanVegetation::Impl {
     VkPhysicalDevice physical;
@@ -28,14 +35,24 @@ struct VulkanVegetation::Impl {
     std::array<VkPipeline, 6> pipelines{};
     VkQueryPool queries{};
     bool temporalAttachments = false, uploaded = false, history = false;
-    Buffer instances, geometry, cells, staging, diagnostic;
+    Buffer instances, geometry, groups, casters, staging, diagnostic;
     uint64_t indexOffset = 0, bytes = 0, budget = 0, serial = 0;
     uint32_t count = 0, cellCount = 0, listCapacity = 0, frame = 0, lastFrame = 0, timestampBits = 0;
     double timestampPeriod = 0;
-    std::array<glm::uvec4, 12> geometryInfo{};
+    std::array<glm::uvec4, 48> geometryInfo{};
+    bool legacy = true;
+    uint32_t bins = 12, cameraGroups = 0, casterGroups = 0, casterCount = 0, listEntries = 0;
+    VegetationPopulation population;
+    WorldPosition previousCamera{};
+    WorldPosition currentCamera{};
+    std::vector<Cell> localCells;
+    std::vector<glm::vec4> casterLo, casterHi;
+    std::vector<float> casterRange;
+    std::vector<TextureHandle> textures;
+    std::vector<MaterialHandle> materialHandles;
     std::vector<Cell> cellBounds;
     struct Frame {
-        Buffer uniform, lists, work, readback;
+        Buffer uniform, lists, work, readback, cells;
         VkDescriptorSet set{};
         VegetationStats stats;
         uint32_t stamped = 0;
@@ -44,8 +61,7 @@ struct VulkanVegetation::Impl {
     std::array<Frame, 2> frames;
     Uniform current{}, previous{};
     VegetationStats last;
-    TextureHandle texture;
-    MaterialHandle bladeMaterial, cardMaterial;
+
     Impl(VkPhysicalDevice p, VkDevice d, VulkanMaterials &m) : physical(p), device(d), materials(m) {}
     ~Impl() {
         for (auto p : pipelines)
@@ -61,9 +77,10 @@ struct VulkanVegetation::Impl {
             vkDestroyDescriptorPool(device, pool, nullptr);
         if (setLayout)
             vkDestroyDescriptorSetLayout(device, setLayout, nullptr);
-        materials.releaseMaterial(bladeMaterial);
-        materials.releaseMaterial(cardMaterial);
-        materials.releaseTexture(texture);
+        for (auto h : materialHandles)
+            materials.releaseMaterial(h);
+        for (auto h : textures)
+            materials.releaseTexture(h);
     }
     void allocate(Buffer &b, uint64_t size, VkBufferUsageFlags usage, bool host = false) {
         // Query driver padding before committing each allocation.
@@ -95,9 +112,9 @@ struct VulkanVegetation::Impl {
             return result;
         auto *w = static_cast<const uint32_t *>(f.readback.mapped);
         for (uint32_t view = 0; view < 6; ++view) {
-            result.overflow += w[view * 97 + 96];
-            for (uint32_t b = 0; b < 12; ++b) {
-                auto n = w[view * 97 + b * 8 + 1];
+            result.overflow += w[view * viewWords + viewWords - 1];
+            for (uint32_t b = 0; b < bins; ++b) {
+                auto n = w[view * viewWords + b * 8 + 1];
                 if (view == 0) {
                     result.visible += n;
                     result.triangles += uint64_t(n) * geometryInfo[b].x / 3;
@@ -141,16 +158,17 @@ struct VulkanVegetation::Impl {
         stages[0].module = vs;
         stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
         stages[1].module = fs;
-        VkVertexInputBindingDescription bind{0, sizeof(MeshVertex), VK_VERTEX_INPUT_RATE_VERTEX};
+        VkVertexInputBindingDescription bind{0, sizeof(FoliageVertex), VK_VERTEX_INPUT_RATE_VERTEX};
         VkVertexInputAttributeDescription attrs[] = {
-            {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(MeshVertex, position)},
-            {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(MeshVertex, normal)},
-            {2, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(MeshVertex, tangent)},
-            {3, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(MeshVertex, uv)}};
+            {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(FoliageVertex, position)},
+            {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(FoliageVertex, normal)},
+            {2, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(FoliageVertex, tangent)},
+            {3, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(FoliageVertex, uv)},
+            {4, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(FoliageVertex, deformation)}};
         VkPipelineVertexInputStateCreateInfo input{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
         input.vertexBindingDescriptionCount = 1;
         input.pVertexBindingDescriptions = &bind;
-        input.vertexAttributeDescriptionCount = 4;
+        input.vertexAttributeDescriptionCount = 5;
         input.pVertexAttributeDescriptions = attrs;
         VkPipelineInputAssemblyStateCreateInfo assembly{
             VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
@@ -212,83 +230,212 @@ VulkanVegetation::VulkanVegetation(VkPhysicalDevice p, VkDevice d, uint32_t fami
                                    bool temporalAttachments, const VegetationOptions &options)
     : impl_(std::make_unique<Impl>(p, d, m)) {
     auto &s = *impl_;
-    const auto &fixture = *options.fixture;
-    if (fixture.instances.size() > vegetationMaximum || fixture.instances.size() % 128 ||
-        fixture.side > 256 || !fixture.side || fixture.side % 4)
-        throw std::invalid_argument("Invalid vegetation population");
-    s.budget = options.budgetBytes;
-    s.count = uint32_t(fixture.instances.size());
-    s.cellCount = (s.count + 127) / 128;
-    s.listCapacity = options.listCapacity ? options.listCapacity : std::max(1u, s.count);
-    if (s.listCapacity > vegetationMaximum)
-        throw std::invalid_argument("Invalid vegetation list capacity");
-    s.temporalAttachments = temporalAttachments;
-    std::vector<MeshVertex> vertices;
-    std::vector<uint32_t> indices;
-    for (uint32_t b = 0; b < 12; ++b) {
-        const auto &mesh = fixture.assets.meshes[b];
-        uint32_t base = uint32_t(vertices.size());
-        if (mesh.vertices.empty() || mesh.vertices.size() > 4096 || mesh.indices.empty() ||
-            mesh.indices.size() > 16384 || mesh.indices.size() % 3)
-            throw std::invalid_argument("Invalid vegetation geometry");
-        for (const auto &v : mesh.vertices) {
-            for (float x : {v.position.x, v.position.y, v.position.z, v.normal.x, v.normal.y, v.normal.z,
-                            v.tangent.x, v.tangent.y, v.tangent.z, v.tangent.w, v.uv.x, v.uv.y})
-                if (!std::isfinite(x))
-                    throw std::invalid_argument("Nonfinite vegetation vertex");
-            if (v.position.y < 0 || v.position.y > 1.001f ||
-                glm::length(glm::vec2(v.position.x, v.position.z)) > .401f)
-                throw std::invalid_argument("Vegetation mesh exceeds conservative envelope");
+    s.legacy = !options.library;
+    if (bool(options.library) != bool(options.population) || (options.library && options.fixture) ||
+        (!options.library && !options.fixture))
+        throw std::invalid_argument("Select one vegetation library/population or legacy fixture");
+    VegetationLibrary library;
+    if (s.legacy) {
+        const auto &fixture = *options.fixture;
+        if (fixture.instances.size() > vegetationMaximum || fixture.instances.size() % 128 ||
+            fixture.side > 256 || !fixture.side || fixture.side % 4)
+            throw std::invalid_argument("Invalid legacy vegetation population");
+        library.materials = {{{.105f, .23f, .035f, 1}, .85f}, {{1, 1, 1, 1}, .85f, .5f, 0, 0, -1, true}};
+        library.textures = {fixture.assets.cards};
+        for (uint32_t asset = 0; asset < 4; ++asset) {
+            FoliageAsset a;
+            a.minimum = {-.401f, 0, -.401f};
+            a.maximum = {.401f, 1.001f, .401f};
+            for (uint32_t lod = 0; lod < 3; ++lod) {
+                const auto &mesh = fixture.assets.meshes[asset * 3 + lod];
+                FoliagePart part;
+                part.material = asset % 2;
+                for (auto &v : mesh.vertices)
+                    part.vertices.push_back({v.position,
+                                             v.normal,
+                                             v.tangent,
+                                             v.uv,
+                                             {v.position.y, v.position.y * v.position.y, 0, 0}});
+                part.indices = mesh.indices;
+                a.lods[lod].push_back(std::move(part));
+            }
+            library.assets.push_back(std::move(a));
         }
-        s.geometryInfo[b] = {uint32_t(mesh.indices.size()), uint32_t(indices.size()), 0, 0};
-        vertices.insert(vertices.end(), mesh.vertices.begin(), mesh.vertices.end());
-        for (auto i : mesh.indices) {
-            if (i >= mesh.vertices.size())
-                throw std::invalid_argument("Vegetation index out of bounds");
-            indices.push_back(i + base);
+        for (uint32_t c = 0; c < fixture.instances.size() / 128; ++c) {
+            s.population.cells.push_back({{}, c * 128, 128});
+            for (uint32_t i = c * 128; i < (c + 1) * 128; ++i) {
+                const auto &v = fixture.instances[i];
+                if (v.cell != c || v.identity != i || !std::isfinite(v.yaw) || !std::isfinite(v.variation) ||
+                    v.rootScale.w < .3f || v.rootScale.w > .6f)
+                    throw std::invalid_argument("Invalid legacy instance");
+                for (int k = 0; k < 4; ++k)
+                    if (!std::isfinite(v.rootScale[k]))
+                        throw std::invalid_argument("Nonfinite legacy instance");
+                s.population.instances.push_back(
+                    {v.rootScale, v.yaw, v.variation, v.identity, c * 8 + (v.identity % 2) * 2});
+            }
+        }
+        validate(library);
+    } else {
+        validate(*options.library);
+        validate(*options.population, *options.library);
+        library = *options.library;
+        s.population = *options.population;
+    }
+    s.budget = options.budgetBytes;
+    s.count = uint32_t(s.population.instances.size());
+    s.cellCount = uint32_t(s.population.cells.size());
+    s.temporalAttachments = temporalAttachments;
+    s.textures.reserve(library.textures.size());
+    s.materialHandles.reserve(library.materials.size());
+    for (const auto &texture : library.textures) {
+        auto required = m.textureAllocationRequirements(texture);
+        if (required > s.budget - s.bytes)
+            throw std::runtime_error("Vegetation texture budget exhausted");
+        auto h = m.uploadTexture(texture);
+        if (h.slot == ~0u)
+            throw std::runtime_error("Vegetation texture slots exhausted");
+        s.textures.push_back(h);
+        s.bytes += required;
+    }
+    for (const auto &source : library.materials) {
+        MeshMaterial material;
+        material.doubleSided = true;
+        material.baseColour = source.colour;
+        material.roughness = source.roughness;
+        material.cutoff = source.cutoff;
+        material.alpha = source.masked ? AlphaMode::Mask : AlphaMode::Opaque;
+        if (source.colourTexture >= 0)
+            material.colourTexture = s.textures.at(source.colourTexture);
+        if (source.normalTexture >= 0)
+            material.normalTexture = s.textures.at(source.normalTexture);
+        auto h = m.createMaterial(material);
+        if (h.slot == ~0u)
+            throw std::runtime_error("Vegetation material slots exhausted");
+        s.materialHandles.push_back(h);
+    }
+    std::vector<FoliageVertex> vertices;
+    std::vector<uint32_t> indices;
+    s.bins = 0;
+    for (uint32_t asset = 0; asset < library.assets.size(); ++asset) {
+        const auto &a = library.assets[asset];
+        s.current.ranges[asset] = a.ranges;
+        s.current.deformation[asset] = {a.stiffness, a.displacement, float(a.category), 0};
+        auto horizontalExtent = glm::max(glm::abs(glm::vec2(a.minimum.x, a.minimum.z)),
+                                         glm::abs(glm::vec2(a.maximum.x, a.maximum.z)));
+        float radius = glm::length(horizontalExtent) + a.displacement;
+        s.current.envelope[asset] = {radius, a.minimum.y, a.maximum.y, 0};
+        for (uint32_t lod = 0; lod < 3; ++lod) {
+            s.current.lods[asset * 3 + lod] = {s.bins, uint32_t(a.lods[lod].size()), 0, 0};
+            for (const auto &part : a.lods[lod]) {
+                uint32_t base = uint32_t(vertices.size()), bin = s.bins++;
+                s.geometryInfo[bin] = {uint32_t(part.indices.size()), uint32_t(indices.size()),
+                                       m.resolve(s.materialHandles[part.material]), asset};
+                s.current.foliage[bin] = {1, 1, 1, library.materials[part.material].transmission};
+                vertices.insert(vertices.end(), part.vertices.begin(), part.vertices.end());
+                for (auto i : part.indices)
+                    indices.push_back(base + i);
+            }
         }
     }
-    s.indexOffset = vertices.size() * sizeof(MeshVertex);
-    auto geometryBytes = s.indexOffset + indices.size() * 4,
-         instanceBytes = fixture.instances.size() * sizeof(VegetationInstance);
+    s.indexOffset = vertices.size() * sizeof(FoliageVertex);
+    const uint64_t geometryBytes = s.indexOffset + indices.size() * 4,
+                   instanceBytes = s.count * sizeof(FoliageInstance);
+    std::vector<glm::uvec4> workGroups, casterWork;
+    std::vector<uint32_t> casterIndices;
+    s.localCells.resize(s.cellCount);
     s.cellBounds.resize(s.cellCount);
+    s.casterRange.resize(s.cellCount, 0);
+    s.casterLo.resize(s.cellCount, glm::vec4(INFINITY));
+    s.casterHi.resize(s.cellCount, glm::vec4(-INFINITY));
+    uint32_t cameraEntries = 0, casterEntries = 0;
     for (uint32_t c = 0; c < s.cellCount; ++c) {
-        auto &cell = s.cellBounds[c];
+        const auto &source = s.population.cells[c];
+        auto &cell = s.localCells[c];
         cell.lo = glm::vec4(INFINITY);
         cell.hi = glm::vec4(-INFINITY);
-        for (uint32_t i = c * 128; i < (c + 1) * 128; ++i) {
-            auto &plant = fixture.instances[i];
-            if (plant.identity != i || plant.cell != c || !std::isfinite(plant.rootScale.x) ||
-                !std::isfinite(plant.rootScale.y) || !std::isfinite(plant.rootScale.z) ||
-                plant.rootScale.w < .3f || plant.rootScale.w > .6f || !std::isfinite(plant.rootScale.w) ||
-                !std::isfinite(plant.yaw) || !std::isfinite(plant.variation))
-                throw std::invalid_argument("Invalid vegetation instance");
-            cell.lo = glm::min(cell.lo, glm::vec4(glm::vec3(plant.rootScale) - glm::vec3(.9, .05, .9), 0));
-            cell.hi = glm::max(cell.hi, glm::vec4(glm::vec3(plant.rootScale) + glm::vec3(.9, .65, .9), 0));
+        auto phase = materialPhase(source.origin.x, source.origin.z, 1024,
+                                   glm::dvec2(source.origin.local.x, source.origin.local.z), 256);
+        cell.phase = {phase * 256.f, 0, 0};
+        for (uint32_t i = source.first; i < source.first + source.count; ++i) {
+            const auto &v = s.population.instances[i];
+            auto asset = v.assetCell & 7;
+            const auto &a = library.assets[asset];
+            uint32_t parts = 0;
+            for (auto &lod : a.lods)
+                parts = std::max(parts, uint32_t(lod.size()));
+            cameraEntries += parts;
+            auto envelope = s.current.envelope[asset];
+            glm::vec3 lo =
+                glm::vec3(v.rootScale) + glm::vec3(-envelope.x, envelope.y, -envelope.x) * v.rootScale.w;
+            glm::vec3 hi =
+                glm::vec3(v.rootScale) + glm::vec3(envelope.x, envelope.z, envelope.x) * v.rootScale.w;
+            if (s.legacy) {
+                lo = glm::vec3(v.rootScale) - glm::vec3(.9, .05, .9);
+                hi = glm::vec3(v.rootScale) + glm::vec3(.9, .65, .9);
+            }
+            cell.lo = glm::min(cell.lo, glm::vec4(lo, 0));
+            cell.hi = glm::max(cell.hi, glm::vec4(hi, 0));
+            if (s.legacy || a.ranges.w > 0) {
+                s.casterRange[c] = std::max(s.casterRange[c], a.ranges.w);
+                casterIndices.push_back(i);
+                casterEntries += parts;
+                s.casterLo[c] = glm::min(s.casterLo[c], glm::vec4(lo, 0));
+                s.casterHi[c] = glm::max(s.casterHi[c], glm::vec4(hi, 0));
+            }
         }
+        if (!source.count)
+            cell.lo = cell.hi = glm::vec4(0);
+        for (uint32_t first = source.first; first < source.first + source.count; first += 128)
+            workGroups.push_back({first, std::min(128u, source.first + source.count - first), c, 0});
     }
-    auto cellBytes = s.cellBounds.size() * sizeof(Cell);
+    // Sparse plant/shrub casters share groups across cells instead of leaving
+    // almost all lanes idle in each grass-dominated cell.
+    for (uint32_t first = 0; first < casterIndices.size(); first += 128)
+        casterWork.push_back({first, std::min(128u, uint32_t(casterIndices.size()) - first), 0, 1});
+    s.cameraGroups = uint32_t(workGroups.size());
+    s.casterGroups = uint32_t(casterWork.size());
+    s.casterCount = uint32_t(casterIndices.size());
+    workGroups.insert(workGroups.end(), casterWork.begin(), casterWork.end());
+    if (options.listCapacity > vegetationMaximum * 2)
+        throw std::invalid_argument("Invalid vegetation list capacity");
+    s.listCapacity = options.listCapacity ? options.listCapacity : std::max(1u, cameraEntries);
+    uint32_t offset = 0;
+    for (uint32_t view = 0; view < 6; ++view) {
+        uint32_t capacity =
+            view ? (options.listCapacity ? std::min(options.listCapacity, casterEntries) : casterEntries)
+                 : s.listCapacity;
+        s.current.lists[view] = {offset, capacity, view ? s.cameraGroups : 0,
+                                 view ? s.casterGroups : s.cameraGroups};
+        offset += capacity;
+    }
+    s.listEntries = offset;
     s.allocate(s.instances, instanceBytes,
                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
     s.allocate(s.geometry, geometryBytes,
                VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
                    VK_BUFFER_USAGE_TRANSFER_DST_BIT);
-    s.allocate(s.cells, cellBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
-    s.allocate(s.staging, geometryBytes + instanceBytes + cellBytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true);
+    s.allocate(s.groups, workGroups.size() * 16, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
+    s.allocate(s.casters, casterIndices.size() * 4, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
+    if (!workGroups.empty())
+        std::memcpy(s.groups.mapped, workGroups.data(), workGroups.size() * 16);
+    if (!casterIndices.empty())
+        std::memcpy(s.casters.mapped, casterIndices.data(), casterIndices.size() * 4);
+    s.allocate(s.staging, geometryBytes + instanceBytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true);
     auto *data = static_cast<char *>(s.staging.mapped);
     std::memcpy(data, vertices.data(), s.indexOffset);
     std::memcpy(data + s.indexOffset, indices.data(), indices.size() * 4);
-    std::memcpy(data + geometryBytes, fixture.instances.data(), instanceBytes);
-    std::memcpy(data + geometryBytes + instanceBytes, s.cellBounds.data(), cellBytes);
-    VkDescriptorSetLayoutBinding bindings[5]{};
-    for (uint32_t i = 0; i < 5; ++i)
+    if (instanceBytes)
+        std::memcpy(data + geometryBytes, s.population.instances.data(), instanceBytes);
+    VkDescriptorSetLayoutBinding bindings[7]{};
+    for (uint32_t i = 0; i < 7; ++i)
         bindings[i] = {i, i == 1 ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
                        VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT, nullptr};
     VkDescriptorSetLayoutCreateInfo li{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-    li.bindingCount = 5;
+    li.bindingCount = 7;
     li.pBindings = bindings;
     check(vkCreateDescriptorSetLayout(d, &li, nullptr, &s.setLayout));
-    VkDescriptorPoolSize sizes[] = {{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 8},
+    VkDescriptorPoolSize sizes[] = {{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 12},
                                     {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2}};
     VkDescriptorPoolCreateInfo pi{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
     pi.maxSets = 2;
@@ -297,13 +444,12 @@ VulkanVegetation::VulkanVegetation(VkPhysicalDevice p, VkDevice d, uint32_t fami
     check(vkCreateDescriptorPool(d, &pi, nullptr, &s.pool));
     for (auto &f : s.frames) {
         s.allocate(f.uniform, sizeof(Uniform), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true);
-        s.allocate(f.lists, uint64_t(s.listCapacity) * 6 * 4,
+        s.allocate(f.cells, s.cellCount * sizeof(Cell), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
+        s.allocate(f.lists, uint64_t(s.listEntries) * 4,
                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
         s.allocate(f.work, workWords * 4,
                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
                        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
-        // Full lists are copied only for explicit snapshots, never during timed
-        // rendering.
         s.allocate(f.readback, workWords * 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT, true);
         VkDescriptorSetAllocateInfo ai{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
         ai.descriptorPool = s.pool;
@@ -314,29 +460,11 @@ VulkanVegetation::VulkanVegetation(VkPhysicalDevice p, VkDevice d, uint32_t fami
         descriptor(d, f.set, 1, f.uniform, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
         descriptor(d, f.set, 2, f.lists);
         descriptor(d, f.set, 3, f.work);
-        descriptor(d, f.set, 4, s.cells);
+        descriptor(d, f.set, 4, f.cells);
+        descriptor(d, f.set, 5, s.groups);
+        descriptor(d, f.set, 6, s.casters);
     }
-    s.allocate(s.diagnostic, uint64_t(s.listCapacity) * 6 * 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT, true);
-    auto required = m.textureAllocationRequirements(fixture.assets.cards);
-    if (required > s.budget - s.bytes)
-        throw std::runtime_error("Vegetation texture exceeds budget");
-    s.texture = m.uploadTexture(fixture.assets.cards);
-    if (s.texture.slot == ~0u)
-        throw std::runtime_error("Vegetation texture capacity exhausted");
-    s.bytes += required;
-    MeshMaterial material;
-    material.doubleSided = true;
-    material.baseColour = {.105, .23, .035, 1};
-    material.roughness = .85f;
-    s.bladeMaterial = m.createMaterial(material);
-    material.baseColour = {1, 1, 1, 1};
-    material.colourTexture = s.texture;
-    material.alpha = AlphaMode::Mask;
-    s.cardMaterial = m.createMaterial(material);
-    if (s.bladeMaterial.slot == ~0u || s.cardMaterial.slot == ~0u)
-        throw std::runtime_error("Vegetation material capacity exhausted");
-    for (uint32_t b = 0; b < 12; ++b)
-        s.geometryInfo[b].z = m.resolve(b % 6 >= 3 ? s.cardMaterial : s.bladeMaterial);
+    s.allocate(s.diagnostic, uint64_t(s.listEntries) * 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT, true);
     VkDescriptorSetLayout layouts[] = {s.setLayout, lighting, m.layout()};
     VkPushConstantRange push{VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT, 0, 16};
     VkPipelineLayoutCreateInfo pl{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
@@ -381,7 +509,8 @@ VulkanVegetation::VulkanVegetation(VkPhysicalDevice p, VkDevice d, uint32_t fami
         qi.queryCount = queryCount * 2;
         check(vkCreateQueryPool(d, &qi, nullptr, &s.queries));
     }
-    s.current.limits = {s.listCapacity, 1, fixture.side, 0};
+    s.current.limits = {s.listCapacity, 1, s.bins, 0};
+    s.current.profile = {s.legacy ? 1u : 0u, ~0u, ~0u, 1};
     s.last.allocatedBytes = s.bytes;
 }
 VulkanVegetation::~VulkanVegetation() = default;
@@ -405,8 +534,29 @@ void VulkanVegetation::prepare(uint32_t frame, const Camera &camera, TerrainGrid
     s.current.cameraTime = {glm::vec3(position), settings.time};
     s.current.settings = {settings.density, settings.wind, settings.distance, settings.shadowDistance};
     s.current.cards = {settings.cardWidth, settings.cardDensity, settings.coverage ? 1 : 0, 0};
+    s.current.wind = {glm::normalize(settings.windDirection), 0, 0};
+    s.current.profile = {s.legacy ? 1u : 0u, uint32_t(settings.isolateAsset), uint32_t(settings.forceLod),
+                         settings.transmission ? 1u : 0u};
+    s.current.inspection = {settings.inspectIdentity, 0, 0, 0};
+    s.current.previousWind = s.previous.wind;
+    s.currentCamera = worldPosition(camera, grid);
+    auto *cellData = static_cast<Cell *>(f.cells.mapped);
+    for (uint32_t c = 0; c < s.cellCount; ++c) {
+        Cell cell = s.localCells[c];
+        cell.origin = {glm::vec3(relativePosition(s.population.cells[c].origin, s.currentCamera)), 0};
+        cell.previousOrigin = {glm::vec3(relativePosition(s.population.cells[c].origin, s.previousCamera)),
+                               0};
+        cell.casterLo = s.casterLo[c];
+        cell.casterHi = s.casterHi[c];
+        cellData[c] = cell;
+        s.cellBounds[c] = cell;
+    }
+    f.stats.casterCandidates = s.casterCount;
     bool valid = s.history && temporal.state.y != 0 && s.previous.limits.w != 0 &&
-                 s.previous.modes.x == settings.representation && s.previous.cards.x == settings.cardWidth;
+                 s.previous.modes.x == settings.representation && s.previous.cards.x == settings.cardWidth &&
+                 s.previous.profile.y == s.current.profile.y && s.previous.profile.z == s.current.profile.z &&
+                 s.previous.inspection.x == s.current.inspection.x &&
+                 settings.time >= s.previous.cameraTime.w && settings.time - s.previous.cameraTime.w <= .25f;
     s.current.previousCameraTime = s.previous.cameraTime;
     s.current.previousSettings = s.previous.settings;
     s.current.previousCards = s.previous.cards;
@@ -420,13 +570,17 @@ void VulkanVegetation::prepare(uint32_t frame, const Camera &camera, TerrainGrid
 void VulkanVegetation::bounds(VulkanShadows &shadows) {
     auto start = std::chrono::steady_clock::now();
     auto &s = *impl_;
-    if (!s.current.limits.w)
+    if (!s.current.limits.w || !s.casterCount)
         return;
-    for (const auto &c : s.cellBounds) {
-        glm::vec3 lo = glm::vec3(c.lo) - glm::vec3(s.current.cameraTime),
-                  hi = glm::vec3(c.hi) - glm::vec3(s.current.cameraTime);
+    if (s.legacy && s.current.settings.w <= 0)
+        return;
+    for (uint32_t i = 0; i < s.cellCount; ++i) {
+        if (!std::isfinite(s.casterLo[i].x))
+            continue;
+        const auto &c = s.cellBounds[i];
+        glm::vec3 lo = glm::vec3(s.casterLo[i] + c.origin), hi = glm::vec3(s.casterHi[i] + c.origin);
         auto nearest = glm::max(glm::max(lo, -hi), glm::vec3(0));
-        if (glm::length(nearest) > s.current.settings.w)
+        if (glm::length(nearest) > (s.legacy ? s.current.settings.w : s.casterRange[i]))
             continue;
         shadows.includeCasterBounds({lo, hi, true});
     }
@@ -439,7 +593,7 @@ void VulkanVegetation::select(VkCommandBuffer cmd, const ShadowUniform &shadows,
     auto &f = s.frames[s.frame];
     if (!f.stats.enabled)
         return;
-    s.current.limits.y = cascades + 1;
+    s.current.limits.y = (s.casterCount && (!s.legacy || s.current.settings.w > 0)) ? cascades + 1 : 1;
     for (uint32_t i = 0; i < cascades; ++i)
         s.current.views[i + 1] = shadows.matrices[i];
     std::memcpy(f.uniform.mapped, &s.current, sizeof(Uniform));
@@ -453,10 +607,6 @@ void VulkanVegetation::select(VkCommandBuffer cmd, const ShadowUniform &shadows,
         if (instanceBytes) {
             copy = {geometryBytes, 0, instanceBytes};
             vkCmdCopyBuffer(cmd, s.staging.buffer, s.instances.buffer, 1, &copy);
-        }
-        if (s.cellCount) {
-            copy = {geometryBytes + instanceBytes, 0, uint64_t(s.cellCount) * sizeof(Cell)};
-            vkCmdCopyBuffer(cmd, s.staging.buffer, s.cells.buffer, 1, &copy);
         }
         s.uploaded = true;
     }
@@ -473,7 +623,10 @@ void VulkanVegetation::select(VkCommandBuffer cmd, const ShadowUniform &shadows,
             uint32_t push[] = {view, 0, phase, 0};
             vkCmdPushConstants(cmd, s.layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT, 0, 16,
                                push);
-            vkCmdDispatch(cmd, phase == 1 ? 1 : s.cellCount, 1, 1);
+            uint32_t groups = phase == 1 ? 1 : s.current.lists[view].w;
+            if (groups)
+                vkCmdDispatch(cmd, groups, 1, 1);
+            f.stats.selectionGroups += groups;
         }
         barrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
                 VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
@@ -490,7 +643,7 @@ void VulkanVegetation::draw(VkCommandBuffer cmd, VkDescriptorSet lighting, uint3
     auto start = std::chrono::steady_clock::now();
     auto &s = *impl_;
     auto &f = s.frames[s.frame];
-    if (!f.stats.enabled)
+    if (!f.stats.enabled || view >= s.current.limits.y)
         return;
     uint32_t query = pass == 4 ? 6 + 2 * (view - 1) : pass == 2 ? 2 : 4;
     s.stamp(cmd, query);
@@ -501,11 +654,13 @@ void VulkanVegetation::draw(VkCommandBuffer cmd, VkDescriptorSet lighting, uint3
     VkDeviceSize offset = 0;
     vkCmdBindVertexBuffers(cmd, 0, 1, &s.geometry.buffer, &offset);
     vkCmdBindIndexBuffer(cmd, s.geometry.buffer, s.indexOffset, VK_INDEX_TYPE_UINT32);
-    for (uint32_t bin = 0; bin < 12; ++bin) {
+    for (uint32_t bin = 0; bin < s.bins; ++bin) {
+        if (view && !s.legacy && s.current.ranges[s.geometryInfo[bin].w].w <= 0)
+            continue;
         uint32_t push[] = {view, bin, 0, 0};
         vkCmdPushConstants(cmd, s.layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT, 0, 16,
                            push);
-        vkCmdDrawIndexedIndirect(cmd, f.work.buffer, uint64_t(view * 97 + bin * 8) * 4, 1, 32);
+        vkCmdDrawIndexedIndirect(cmd, f.work.buffer, uint64_t(view * viewWords + bin * 8) * 4, 1, 32);
     }
     s.stamp(cmd, query + 1);
     f.stats.preparationMilliseconds +=
@@ -526,19 +681,22 @@ void VulkanVegetation::finish(VkCommandBuffer cmd) {
 void VulkanVegetation::submitted() {
     auto &s = *impl_;
     s.previous = s.current;
+    s.previousCamera = s.currentCamera;
     s.history = true;
     s.frames[s.frame].submitted = true;
     s.lastFrame = s.frame;
     ++s.serial;
 }
-const VegetationStats &VulkanVegetation::stats() const { return impl_->last; }
+const VegetationStats &VulkanVegetation::stats() const {
+    return impl_->last;
+}
 void VulkanVegetation::copySnapshot(VkCommandBuffer cmd) {
     auto &s = *impl_;
     if (!s.frames[s.lastFrame].stats.enabled)
         return;
     barrier(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
             VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
-    VkBufferCopy copy{0, 0, uint64_t(s.listCapacity) * 6 * 4};
+    VkBufferCopy copy{0, 0, uint64_t(s.listEntries) * 4};
     vkCmdCopyBuffer(cmd, s.frames[s.lastFrame].lists.buffer, s.diagnostic.buffer, 1, &copy);
     barrier(cmd, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_HOST_BIT,
             VK_ACCESS_2_HOST_READ_BIT);
@@ -547,14 +705,16 @@ VegetationSnapshot VulkanVegetation::snapshot() const {
     auto &s = *impl_;
     VegetationSnapshot out;
     out.stats = s.decode(s.lastFrame);
+    out.binCount = s.bins;
     if (out.stats.enabled) {
         auto *w = static_cast<const uint32_t *>(s.frames[s.lastFrame].readback.mapped);
         for (uint32_t v = 0; v < 6; ++v)
-            for (uint32_t b = 0; b < 12; ++b) {
-                out.counts[v * 12 + b] = w[v * 97 + b * 8 + 1];
-                auto *ids = static_cast<const uint32_t *>(s.diagnostic.mapped) + v * s.listCapacity +
-                            w[v * 97 + b * 8 + 7];
-                out.identities[v].insert(out.identities[v].end(), ids, ids + out.counts[v * 12 + b]);
+            for (uint32_t b = 0; b < s.bins; ++b) {
+                out.counts[v * s.bins + b] = w[v * viewWords + b * 8 + 1];
+                auto *ids = static_cast<const uint32_t *>(s.diagnostic.mapped) + s.current.lists[v].x +
+                            w[v * viewWords + b * 8 + 7];
+                for (uint32_t j = 0; j < out.counts[v * s.bins + b]; ++j)
+                    out.identities[v].push_back(s.population.instances.at(ids[j]).identity);
             }
     }
     return out;

@@ -11,7 +11,9 @@ uint32_t hash(uint32_t x) {
     x *= 0x846ca68bu;
     return x ^ (x >> 16);
 }
-float random(uint32_t x) { return (hash(x) >> 8) * (1.f / 16777216); }
+float random(uint32_t x) {
+    return (hash(x) >> 8) * (1.f / 16777216);
+}
 float field(float x, float z, bool rolling) {
     return rolling ? 1.8f * std::sin(x * .05f) * std::cos(z * .04f) : 0;
 }
@@ -238,9 +240,13 @@ void validate(const VegetationSettings &s) {
     for (float v : {s.density, s.cardWidth, s.cardDensity, s.time, s.wind, s.distance, s.shadowDistance})
         if (!std::isfinite(v))
             throw std::invalid_argument("Nonfinite vegetation setting");
+    if (!std::isfinite(s.windDirection.x) || !std::isfinite(s.windDirection.y) ||
+        (!std::isfinite(glm::length(s.windDirection)) || glm::length(s.windDirection) < .001f) ||
+        s.isolateAsset < -2 || s.isolateAsset >= 8 || s.forceLod < -1 || s.forceLod > 2)
+        throw std::invalid_argument("Invalid vegetation wind/inspection settings");
     if (s.representation > 2 || s.density < 0 || s.density > 1 || s.cardDensity < 0 || s.cardDensity > 1 ||
-        s.cardWidth < .5f || s.cardWidth > 2 || s.wind < 0 || s.wind > 2 || s.distance < 1 ||
-        s.distance > 100 || s.shadowDistance < 0 || s.shadowDistance > 50)
+        s.time < 0 || s.time > 1000000 || s.cardWidth < .5f || s.cardWidth > 2 || s.wind < 0 || s.wind > 2 ||
+        s.distance < 1 || s.distance > 100 || s.shadowDistance < 0 || s.shadowDistance > 50)
         throw std::invalid_argument("Invalid vegetation setting");
 }
 } // namespace ow

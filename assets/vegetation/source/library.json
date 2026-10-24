@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "size": 1024,
+  "grass": {
+    "blades": 24,
+    "width": 0.010,
+    "spread": 0.23,
+    "height": 0.65
+  },
+  "leaves": [
+    {
+      "colour": "fern.png",
+      "normalDome": 0.12
+    },
+    {
+      "colour": "shrub.png",
+      "normalDome": 0.16
+    }
+  ],
+  "ground": "../../terrain/source/grass.png"
+}

@@ -1,0 +1,20 @@
+Test project /home/bison/Projects/openworld/cmake-build-release
+    Start 44: vegetation_cpu
+1/6 Test #44: vegetation_cpu ...................   Passed    0.03 sec
+    Start 45: vegetation_gpu
+2/6 Test #45: vegetation_gpu ...................   Passed    1.80 sec
+    Start 46: vegetation_library
+3/6 Test #46: vegetation_library ...............   Passed    0.00 sec
+    Start 47: foliage_gpu
+4/6 Test #47: foliage_gpu ......................   Passed    1.84 sec
+    Start 48: vegetation_asset_build
+5/6 Test #48: vegetation_asset_build ...........   Passed    3.30 sec
+    Start 49: foliage_import_gpu
+6/6 Test #49: foliage_import_gpu ...............   Passed    9.32 sec
+
+100% tests passed out of 6
+
+Label Time Summary:
+gpu    =  12.95 sec*proc (3 tests)
+
+Total Test time (real) =  16.28 sec

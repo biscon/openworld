@@ -28,20 +28,21 @@ float3 diffuseIrradiance(float3 n) {
     return max(result,0);
 }
 #include "clusters.hlsli"
-float3 directSurface(SurfaceMaterial m,float3 n,float3 v,float3 l) {
+float3 directSurface(SurfaceMaterial m,float3 n,float3 v,float3 l,float transmission = 0) {
     const float pi=3.14159265359;
     float nv=max(dot(n,v),1e-5),nl=saturate(dot(n,l));
     float r=clamp(m.roughness,.045,1),a=r*r,a2=a*a;
     float3 f0=lerp(.04.xxx,m.baseColour,m.metallic);
-    if(nl<=0 || dot(v+l,v+l)<=1e-10)return 0;
+    float3 transmitted=m.baseColour*(transmission/3.14159265359)*saturate(dot(-n,l));
+    if(nl<=0 || dot(v+l,v+l)<=1e-10)return transmitted;
     float3 h=normalize(v+l);float nh=saturate(dot(n,h)),vh=saturate(dot(v,h));
     float denom=nh*nh*(a2-1)+1;
     float d=a2/(pi*denom*denom);
     float vis=.5/max(nl*sqrt(nv*nv*(1-a2)+a2)+nv*sqrt(nl*nl*(1-a2)+a2),1e-7);
     float3 f=f0+(1-f0)*pow(1-vh,5);
-    return ((1-f)*(1-m.metallic)*m.baseColour/pi+d*vis*f)*nl;
+    return ((1-f)*(1-m.metallic)*m.baseColour/pi+d*vis*f)*nl+transmitted;
 }
-float3 localSurface(SurfaceMaterial m,float3 n,float3 v,float3 position,uint index) {
+float3 localSurface(SurfaceMaterial m,float3 n,float3 v,float3 position,uint index,float transmission = 0) {
     LocalLightRecord light=localLights[index];float3 delta=light.positionRange.xyz-position;
     float d2=dot(delta,delta),range2=light.positionRange.w*light.positionRange.w;
     if(d2>=range2)return 0;
@@ -49,7 +50,7 @@ float3 localSurface(SurfaceMaterial m,float3 n,float3 v,float3 position,uint ind
     float cone=1;
     if(light.parameters.z!=0 && d2>1e-12)cone=saturate((dot(-l,light.directionOuter.xyz)-light.directionOuter.w)/(light.parameters.y-light.directionOuter.w));
     float attenuation=a*a*cone*cone/max(d2,light.parameters.x*light.parameters.x);
-    return directSurface(m,n,v,l)*light.colourIntensity.rgb*(light.colourIntensity.w*attenuation);
+    return directSurface(m,n,v,l,transmission)*light.colourIntensity.rgb*(light.colourIntensity.w*attenuation);
 }
 uint surfaceCluster(float3 position,out bool valid) {
     float3 view=mul(clusters.view,float4(position,1)).xyz;
@@ -61,7 +62,7 @@ uint surfaceCluster(float3 position,out bool valid) {
     return (sliceForDepth(view.z)*clusters.grid.y+xy.y)*clusters.grid.x+xy.x;
 }
 #include "shadow_sampling.hlsli"
-float3 shadeSurface(SurfaceMaterial m,float3 relativePosition,float visibility,float3 renderedPosition) {
+float3 shadeSurface(SurfaceMaterial m,float3 relativePosition,float visibility,float3 renderedPosition,float transmission = 0) {
     const float pi=3.14159265359;
     m.normal=curveNormal(relativePosition,m.normal,temporal.curvature);
     relativePosition=renderedPosition;
@@ -72,7 +73,7 @@ float3 shadeSurface(SurfaceMaterial m,float3 relativePosition,float visibility,f
     if(sunShadow.sampling.w==1)return shadowVisibility.xxx;
     if(sunShadow.sampling.w==2)return float3(shadowVisibility,1-shadowVisibility,.5);
     if(sunShadow.sampling.w==3)return float3(1-shadowVisibility,shadowVisibility,0);
-    float3 colour=directSurface(m,n,v,lighting.sunDirection.xyz)*lighting.sunColour.rgb*atmSurfaceSun(relativePosition)*shadowVisibility;
+    float3 colour=directSurface(m,n,v,lighting.sunDirection.xyz,transmission)*lighting.sunColour.rgb*atmSurfaceSun(relativePosition)*shadowVisibility;
     if(clusters.options.z!=0 && mul(clusters.view,float4(relativePosition,1)).z<=clusters.depth.y && (clusters.options.x>0 || clusters.options.w!=0)) {
         bool valid;uint id=surfaceCluster(relativePosition,valid);
         uint count=clusters.options.x;
@@ -82,8 +83,8 @@ float3 shadeSurface(SurfaceMaterial m,float3 relativePosition,float visibility,f
             if(clusters.options.w==2)return count>clusters.options.y?float3(1,0,1):0;
             float t=saturate(float(count)/clusters.options.y);return float3(t,t*t,1-t);
         }
-        if(brute){[loop]for(uint i=0;i<clusters.options.x;++i)colour+=localSurface(m,n,v,relativePosition,i);}
-        else {[loop]for(uint i=0;i<count;++i)colour+=localSurface(m,n,v,relativePosition,clusterIndices[id*clusters.options.y+i]);}
+        if(brute){[loop]for(uint i=0;i<clusters.options.x;++i)colour+=localSurface(m,n,v,relativePosition,i,transmission);}
+        else {[loop]for(uint i=0;i<count;++i)colour+=localSurface(m,n,v,relativePosition,clusterIndices[id*clusters.options.y+i],transmission);}
     }
     float2 brdf=brdfMap.SampleLevel(lightingSampler,float2(nv,r),0).rg;
     float3 spec=atmosphere.options.x==2?
@@ -92,6 +93,7 @@ float3 shadeSurface(SurfaceMaterial m,float3 relativePosition,float visibility,f
     float3 f=f0+(max(1-r,f0)-f0)*pow(1-nv,5);
     colour+=(atmosphere.options.x==2?1:lighting.environment.x)*((1-f)*(1-m.metallic)*m.baseColour/pi*min(m.ao,visibility)*
         (atmosphere.options.x==2?atmDiffuse(n):diffuseIrradiance(environmentDirection(n)))+spec*(f0*brdf.x+brdf.y));
+    if(transmission>0)colour+=m.baseColour*(transmission/pi)*min(m.ao,visibility)*(atmosphere.options.x==2?atmDiffuse(-n):lighting.environment.x*diffuseIrradiance(environmentDirection(-n)));
     return min(max((colour+m.emissive)*lighting.output.x,0),65504);
 }
 float3 shadeSurface(SurfaceMaterial m,float3 position,float visibility) {

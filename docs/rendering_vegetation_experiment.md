@@ -70,7 +70,15 @@ Target gates remain approximately 1.5 ms incremental GPU, 0.25 ms CPU preparatio
 128 MiB, with later streaming/interaction costs explicitly excluded from this slice.
 Findings must distinguish implementation, observed correctness and unverified budgets.
 
-## Implemented ABI and experiment controls
+## Historical V1 ABI and experiment controls
+
+The layout below describes the measured V1 implementation. V2 adapts these same
+fixtures into its [shared foliage backend](rendering_vegetation_assets.md): 64-byte
+vertices, 2976-byte uniforms and 385-word per-view work regions, with twelve active
+legacy bins. V1 geometry, blade/card policies and probe defaults remain available;
+current runs are compatibility checks, not the original measured binary.
+The general settings default now disables grass casting; the V1 probe explicitly
+requests its historical 25 m casting comparison.
 
 The startup boundary is `RendererOptions::vegetation`; `SceneSettings::vegetation`
 selects blades (0), cards (1), or hybrid (2), density, card calibration, time and wind.

@@ -2,7 +2,7 @@
 
 Status: architecture agreed on 2026-10-24. V1 experiment implemented with software
 Vulkan verification and native RTX 3060 measurements. Final density/appearance
-acceptance remains open; V2–V6 remain proposed. This expands
+acceptance remains open. The V2 asset/foliage foundation is implemented; V3–V6 remain proposed. This expands
 the vegetation part of [rendering roadmap slice 5J](rendering_roadmap.md#5j--representative-scene-content-and-reflections).
 It records the direction, implementation sequence, and acceptance gates. Each slice
 needs its own focused implementation plan before coding; exact layouts, capacities,
@@ -267,6 +267,9 @@ Detailed design and findings: [representation experiment](rendering_vegetation_e
 
 ### Handoff after V1 (2026-10-24)
 
+This is the historical V1 handoff. The agreed V2 plan has since been implemented;
+see the V2 section below for its current design, verification and measurements.
+
 Read the [native hardware report](measurements/vegetation_5j_v1/rtx3060/README.md)
 and [experiment design](rendering_vegetation_experiment.md) before planning V2.
 The hardware experiment has been run; there is no outstanding request for the user
@@ -308,6 +311,15 @@ probe still default to the historical 25 m casting comparison. V2 must implement
 the settled production policy explicitly rather than inherit that experiment default.
 
 ### 5J-V2 — Asset and foliage rendering foundation
+
+Status: foundation implemented; mixed/GTAO GPU budget and final visual acceptance remain open. Detailed design: [asset and foliage foundation](rendering_vegetation_assets.md).
+Native costs, captures and remaining acceptance limits: [V2 report](measurements/vegetation_5j_v2/rtx3060/README.md).
+
+Saved grass/fern/shrub assets, compact instancing, leaf transmission, submitted wind
+history and the isolated viewer/probe share one rendering backend. Production grass
+casting defaults to zero and does not enter caster work. The V1 probe retains its
+historical 25 m comparison. Streaming, terrain attachment updates, interactions
+and full-scene integration remain V3–V6 work.
 
 - Build the saved asset/LOD pipeline and a small representative asset set, including
   masked plants; add opacity-aware texture import and deformation metadata.

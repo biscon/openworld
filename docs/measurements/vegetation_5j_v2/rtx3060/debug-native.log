@@ -1,0 +1,47 @@
+Test project /home/bison/Projects/openworld/cmake-build-debug
+      Start 17: temporal_gpu
+ 1/15 Test #17: temporal_gpu .....................   Passed   13.03 sec
+      Start 19: lighting_gpu
+ 2/15 Test #19: lighting_gpu .....................   Passed    5.80 sec
+      Start 30: material_cpu
+ 3/15 Test #30: material_cpu .....................   Passed    0.00 sec
+      Start 31: material_import
+ 4/15 Test #31: material_import ..................   Passed    0.08 sec
+      Start 33: material_gpu
+ 5/15 Test #33: material_gpu .....................   Passed   14.65 sec
+      Start 36: scene_gpu
+ 6/15 Test #36: scene_gpu ........................   Passed   10.26 sec
+      Start 38: visibility_gpu
+ 7/15 Test #38: visibility_gpu ...................   Passed   48.69 sec
+      Start 40: gtao_gpu
+ 8/15 Test #40: gtao_gpu .........................***Failed    5.30 sec
+Vulkan device: NVIDIA GeForce RTX 3060
+Validation: enabled
+Ray AO MAE=0.0365156 Half/Full MAE=0.00804424 samples=39
+Tiled filter preserves edge-aware 5x5 visibility: 0.976471 != 0.978487
+
+      Start 41: shadows_gpu
+ 9/15 Test #41: shadows_gpu ......................   Passed   78.61 sec
+      Start 44: vegetation_cpu
+10/15 Test #44: vegetation_cpu ...................   Passed    0.16 sec
+      Start 45: vegetation_gpu
+11/15 Test #45: vegetation_gpu ...................   Passed   24.54 sec
+      Start 46: vegetation_library
+12/15 Test #46: vegetation_library ...............   Passed    0.02 sec
+      Start 47: foliage_gpu
+13/15 Test #47: foliage_gpu ......................   Passed   24.91 sec
+      Start 48: vegetation_asset_build
+14/15 Test #48: vegetation_asset_build ...........   Passed    3.37 sec
+      Start 49: foliage_import_gpu
+15/15 Test #49: foliage_import_gpu ...............   Passed   18.45 sec
+
+93% tests passed, 1 tests failed out of 15
+
+Label Time Summary:
+gpu    = 244.24 sec*proc (10 tests)
+
+Total Test time (real) = 247.90 sec
+
+The following tests FAILED:
+	 40 - gtao_gpu (Failed)                                 gpu
+Errors while running CTest

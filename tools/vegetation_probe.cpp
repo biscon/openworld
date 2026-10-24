@@ -20,11 +20,21 @@ void *operator new(std::size_t n) {
         return p;
     throw std::bad_alloc();
 }
-void *operator new[](std::size_t n) { return ::operator new(n); }
-void operator delete(void *p) noexcept { std::free(p); }
-void operator delete[](void *p) noexcept { std::free(p); }
-void operator delete(void *p, std::size_t) noexcept { std::free(p); }
-void operator delete[](void *p, std::size_t) noexcept { std::free(p); }
+void *operator new[](std::size_t n) {
+    return ::operator new(n);
+}
+void operator delete(void *p) noexcept {
+    std::free(p);
+}
+void operator delete[](void *p) noexcept {
+    std::free(p);
+}
+void operator delete(void *p, std::size_t) noexcept {
+    std::free(p);
+}
+void operator delete[](void *p, std::size_t) noexcept {
+    std::free(p);
+}
 void *operator new(std::size_t n, std::align_val_t a) {
     allocationCalls.fetch_add(1, std::memory_order_relaxed);
     void *p = nullptr;
@@ -32,20 +42,32 @@ void *operator new(std::size_t n, std::align_val_t a) {
         return p;
     throw std::bad_alloc();
 }
-void *operator new[](std::size_t n, std::align_val_t a) { return ::operator new(n, a); }
-void operator delete(void *p, std::align_val_t) noexcept { std::free(p); }
-void operator delete[](void *p, std::align_val_t) noexcept { std::free(p); }
-void operator delete(void *p, std::size_t, std::align_val_t) noexcept { std::free(p); }
-void operator delete[](void *p, std::size_t, std::align_val_t) noexcept { std::free(p); }
+void *operator new[](std::size_t n, std::align_val_t a) {
+    return ::operator new(n, a);
+}
+void operator delete(void *p, std::align_val_t) noexcept {
+    std::free(p);
+}
+void operator delete[](void *p, std::align_val_t) noexcept {
+    std::free(p);
+}
+void operator delete(void *p, std::size_t, std::align_val_t) noexcept {
+    std::free(p);
+}
+void operator delete[](void *p, std::size_t, std::align_val_t) noexcept {
+    std::free(p);
+}
 using namespace ow;
 namespace {
 using Clock = std::chrono::steady_clock;
 struct Options {
     std::filesystem::path output;
     uint32_t width = 1920, height = 1080, frames = 600, warmup = 120, repeats = 3, side = 256;
-    std::string sequence = "all", representation = "all";
+    std::string sequence = "all", representation = "all", profile = "v1";
+    bool mixed = false, rgba = false, prepass = true;
     bool quick = false, validation = false, fixed = false, variants = false, captures = true, canopy = false;
-    float density = 1, grassShadowDistance = 25;
+    float density = 1, grassShadowDistance = 25, exposure = 15;
+    int asset = -1;
     GtaoMode gtao = GtaoMode::Off;
 };
 double percentile(std::vector<double> values, double p) {
@@ -88,6 +110,10 @@ Camera cameraAt(const std::string &sequence, float t, uint32_t side, bool rollin
     c.renderFar = 300;
     c.local = {0, 1.7, side * .15};
     c.pitch = -.10f;
+    if (sequence == "asset") {
+        c.local = {0, .65, 1.8};
+        c.pitch = -.1f;
+    }
     if (sequence == "grazing") {
         c.local.y = .35;
         c.pitch = .025f;
@@ -220,12 +246,14 @@ void motionCapture(Renderer &r, SceneSettings settings, const std::string &seque
 int main(int argc, char **argv) {
     try {
         if (argc < 2)
-            throw std::invalid_argument("Usage: vegetation_probe OUTPUT_DIR [--quick] [--width N --height N "
-                                        "--frames N --warmup N --repeats N --side N] [--sequence "
-                                        "all|close|grazing|moving|aerial|rolling] [--representation "
-                                        "all|blades|cards|hybrid] [--density 4|8] [--variants] [--fixed] "
-                                        "[--require-validation] [--no-captures] [--grass-shadow-distance N] "
-                                        "[--gtao off|half|full] [--canopy-fixture]");
+            throw std::invalid_argument(
+                "Usage: vegetation_probe OUTPUT_DIR [--quick] [--width N --height N "
+                "--frames N --warmup N --repeats N --side N] [--sequence "
+                "all|close|grazing|moving|aerial|rolling] [--representation "
+                "all|blades|cards|hybrid] [--density 4|8] [--variants] [--fixed] "
+                "[--require-validation] [--no-captures] [--grass-shadow-distance N] "
+                "[--gtao off|half|full] [--canopy-fixture] [--profile v1|v2] "
+                "[--mixed] [--rgba] [--no-prepass] [--asset grass|fern|shrub] [--exposure EV]");
         Options o;
         o.output = argv[1];
         for (int i = 2; i < argc; ++i) {
@@ -238,7 +266,26 @@ int main(int argc, char **argv) {
                 o.warmup = 4;
                 o.repeats = 1;
                 o.side = 16;
-            } else if (arg == "--require-validation")
+            } else if (arg == "--asset" && i + 1 < argc) {
+                std::string name = argv[++i];
+                o.asset = name == "grass" ? 0 : name == "fern" ? 2 : name == "shrub" ? 3 : -1;
+                if (o.asset < 0)
+                    throw std::invalid_argument("Asset must be grass, fern or shrub");
+                o.profile = "v2";
+                o.sequence = "asset";
+            } else if (arg == "--exposure" && i + 1 < argc) {
+                o.exposure = std::stof(argv[++i]);
+                if (!std::isfinite(o.exposure) || o.exposure < 0 || o.exposure > 24)
+                    throw std::invalid_argument("Invalid exposure");
+            } else if (arg == "--profile" && i + 1 < argc)
+                o.profile = argv[++i];
+            else if (arg == "--no-prepass")
+                o.prepass = false;
+            else if (arg == "--mixed")
+                o.mixed = true;
+            else if (arg == "--rgba")
+                o.rgba = true;
+            else if (arg == "--require-validation")
                 o.validation = true;
             else if (arg == "--fixed")
                 o.fixed = true;
@@ -291,7 +338,15 @@ int main(int argc, char **argv) {
             } else
                 throw std::invalid_argument("Unknown or incomplete probe argument: " + arg);
         }
+        if (o.profile != "v1" && o.profile != "v2")
+            throw std::invalid_argument("Profile must be v1 or v2");
+        if (o.profile == "v2") {
+            o.representation = "blades";
+            o.grassShadowDistance = 0;
+        }
         std::vector<std::string> sequences = {"close", "grazing", "moving", "aerial", "rolling"};
+        if (o.sequence == "asset")
+            sequences = {"asset"};
         if (o.sequence != "all") {
             if (std::find(sequences.begin(), sequences.end(), o.sequence) == sequences.end())
                 throw std::invalid_argument("Unknown sequence");
@@ -303,9 +358,17 @@ int main(int argc, char **argv) {
             throw std::invalid_argument("Unknown representation");
         std::filesystem::create_directories(o.output);
         auto buildStart = Clock::now();
-        auto assets = readVegetationAssets(OPENWORLD_VEGETATION_DIR);
+        auto assets = o.profile == "v1" ? readVegetationAssets(OPENWORLD_VEGETATION_DIR) : VegetationAssets{};
+        std::shared_ptr<VegetationLibrary> library;
+        if (o.profile == "v2")
+            library = std::make_shared<VegetationLibrary>(
+                readVegetationLibrary(OPENWORLD_VEGETATION_LIBRARY_DIR, o.rgba));
         double assetMs = std::chrono::duration<double, std::milli>(Clock::now() - buildStart).count();
         std::ofstream meta(o.output / "metadata.txt");
+        meta << "profile=" << o.profile << "\nmixed=" << o.mixed << "\nrgba=" << o.rgba
+             << "\nexposure_ev100=" << o.exposure << "\nasset=" << o.asset
+             << "\nvegetation_prepass=" << o.prepass
+             << "\nasset_revision=" << (library ? library->revision : 1) << "\n";
         meta << "extent=" << o.width << 'x' << o.height << "\nnative_output=true\nframes=" << o.frames
              << "\nwarmup=" << o.warmup << "\nrepeats=" << o.repeats << "\nside=" << o.side
              << "\ndensity=" << o.density * 8
@@ -323,7 +386,8 @@ int main(int argc, char **argv) {
         meta << "build=Debug\n";
 #endif
         std::ofstream pairs(o.output / "paired.csv");
-        pairs << "sequence,representation,comparison,variant,repeat,cpu_delta_median_ms,gpu_delta_median_ms,"
+        pairs << "sequence,representation,comparison,variant,repeat,cpu_delta_"
+                 "median_ms,gpu_delta_median_ms,"
                  "gpu_delta_p95_ms,timestamps\n";
         std::ofstream raw(o.output / "frames.csv"), summary(o.output / "timings.csv"),
             coverageCsv(o.output / "coverage.csv"), report(o.output / "findings.md");
@@ -332,28 +396,37 @@ int main(int argc, char **argv) {
         raw << "sequence,representation,comparison,variant,repeat,enabled,"
                "completed_frame,cpu_ms,gpu_ms,prepare_ms,select_ms,depth_ms,colour_"
                "ms,shadows_ms,visible,triangles,casters,overflow,bytes,allocations,"
-               "timestamps\n";
+               "timestamps,caster_candidates,selection_groups\n";
         summary << "sequence,representation,comparison,variant,repeat,enabled,cpu_"
                    "median_ms,cpu_p95_ms,gpu_median_ms,gpu_p95_ms,prepare_median_"
                    "ms,prepare_p95_ms,vegetation_gpu_median_ms,vegetation_gpu_p95_"
                    "ms,allocations,bytes\n";
-        coverageCsv << "landscape,sequence,representation,width,density,fraction,tile_error\n";
-        report << "# Vegetation experiment results\n\nBlade tufts remain the "
-                  "provisional default. This automated report is evidence for "
-                  "review, not visual or target-GPU acceptance.\n\n"
-               << "Compare `paired.csv` deltas and `timings.csv` off/on rows and `coverage.csv` "
-                  "before accepting a distant card stage. Full settings are in "
-                  "`metadata.txt`; per-frame data are in `frames.csv`.\n\n";
-        meta << "scene=terrain off; owned ground mesh; atmosphere off; volumetrics off; bloom off; HiZ off\n"
+        coverageCsv << "landscape,sequence,representation,width,density,fraction,"
+                       "tile_error\n";
+        if (library)
+            report << "# V2 foliage foundation results\n\nSaved reusable blade, fern and shrub assets. No "
+                      "grass casting. "
+                      "The configured depth prepass and GTAO are retained in both off/on frames. "
+                      "Review paired.csv, timings.csv, coverage.csv and metadata.txt; timings alone do not "
+                      "establish appearance acceptance.\n\n";
+        else
+            report << "# V1 vegetation comparison\n\nLegacy blade/card/hybrid comparison. "
+                      "Review paired.csv and coverage.csv before drawing representation conclusions.\n\n";
+        meta << "scene=terrain off; owned ground mesh; atmosphere off; volumetrics "
+                "off; bloom off; HiZ off\n"
              << "canopy_fixture=" << o.canopy << "\n"
              << "requested_gtao=" << uint32_t(o.gtao) << "\ngrass_shadow_distance=" << o.grassShadowDistance
              << "\n"
-             << "lighting=sun lux 100000; direction -0.6,0.8,0.35; environment 3000 nits; exposure EV100 15; "
+             << "lighting=sun lux 100000; direction -0.6,0.8,0.35; environment "
+                "3000 nits; exposure recorded above; "
                 "ACES fitted\n"
-             << "CSM=near 1000m; far 8192m; bias 0.75 texels; normal bias 0.25 texels; TAA history 0.9\n"
-             << "variants=default TAA+CSM; shadows_off; taa_off; strong_wind 2; low_sun -0.8,0.15,0.4; "
-                "prepass; half GTAO\n"
-             << "allocation_bytes=peak committed Vulkan buffer/image requirements including texture upload "
+             << "CSM=near 1000m; far 8192m; bias 0.75 texels; normal bias 0.25 "
+                "texels; TAA history 0.9\n"
+             << "variants=default TAA+CSM; shadows_off; taa_off; strong_wind 2; "
+                "low_sun -0.8,0.15,0.4; "
+             << (library ? "no_prepass" : "prepass") << "; half GTAO\n"
+             << "allocation_bytes=peak committed Vulkan buffer/image requirements "
+                "including texture upload "
                 "peak; no shared target duplication\n";
         bool target = false;
         for (bool rolling : {false, true}) {
@@ -373,7 +446,18 @@ int main(int argc, char **argv) {
             options.forceFixedMaterials = o.fixed;
             options.terrainGrid = {8, .5f};
             options.terrainCapacity = 8;
-            options.vegetation.fixture = fixture;
+            if (library) {
+                options.vegetation.library = library;
+                options.vegetation.population = std::make_shared<VegetationPopulation>(
+                    makeVegetationPopulation(o.side, o.mixed, rolling));
+                if (o.asset >= 0) {
+                    auto specimen = std::make_shared<VegetationPopulation>();
+                    specimen->cells.push_back({{}, 0, 1});
+                    specimen->instances.push_back({{0, 0, 0, 1}, 0, .5f, 173, uint32_t(o.asset)});
+                    options.vegetation.population = specimen;
+                }
+            } else
+                options.vegetation.fixture = fixture;
             if (o.quick)
                 options.shadowCapacity.resolution = 128;
             Renderer r(options);
@@ -384,11 +468,20 @@ int main(int argc, char **argv) {
                  << "\nshadow_resolution=" << options.shadowCapacity.resolution << "\n";
             MeshMaterial ground;
             ground.baseColour = {.10, .17, .035, 1};
+            if (library) {
+                ground.baseColour = {1, 1, 1, 1};
+                ground.colourTexture =
+                    r.uploadTexture(readTexture(std::filesystem::path(OPENWORLD_VEGETATION_LIBRARY_DIR) /
+                                                (o.rgba ? "ground_rgba.dds" : "ground.dds")));
+                for (auto &v : fixture->ground.vertices)
+                    v.uv *= .25f;
+            }
             ground.doubleSided = true;
             auto groundMaterial = r.createMaterial(ground);
             MeshMaterial black = ground;
             black.baseColour = {0, 0, 0, 1};
             black.unlit = true;
+            black.colourTexture = {};
             auto blackMaterial = r.createMaterial(black);
             MeshInstance groundInstance;
             groundInstance.mesh = r.uploadMesh(fixture->ground);
@@ -405,6 +498,8 @@ int main(int argc, char **argv) {
             }
             SceneSettings scene;
             scene.terrainVisible = false;
+            scene.output.ev100 = o.exposure;
+            scene.vegetation.depthPrepass = o.prepass;
             scene.visibility = VisibilityMode::Indirect;
             scene.vegetation.density = o.density;
             scene.vegetation.shadowDistance = o.grassShadowDistance;
@@ -429,38 +524,42 @@ int main(int argc, char **argv) {
             }
             float bestWidth = 1, bestDensity = 1;
             double bestError = 1e9;
-            for (float width : {.75f, 1.f, 1.25f, 1.5f})
-                for (float density : {.5f, .75f, 1.f}) {
-                    auto calibrated = scene;
-                    calibrated.vegetation.representation = 1;
-                    calibrated.vegetation.cardWidth = width;
-                    calibrated.vegetation.cardDensity = density;
-                    double error = 0;
-                    for (uint32_t v = 0; v < 3; ++v) {
-                        auto c = coverage(r, cameraAt(views[v], 0, o.side, rolling), calibrated);
-                        double e = 0;
-                        for (uint32_t tile = 0; tile < 16; ++tile)
-                            e += std::abs(c.tiles[tile] - reference[v].tiles[tile]) / 16;
-                        error += e;
-                        coverageCsv << (rolling ? "rolling," : "flat,") << views[v] << ",cards," << width
-                                    << ',' << density << ',' << c.fraction << ',' << e << '\n';
+            if (!library)
+                for (float width : {.75f, 1.f, 1.25f, 1.5f})
+                    for (float density : {.5f, .75f, 1.f}) {
+                        auto calibrated = scene;
+                        calibrated.vegetation.representation = 1;
+                        calibrated.vegetation.cardWidth = width;
+                        calibrated.vegetation.cardDensity = density;
+                        double error = 0;
+                        for (uint32_t v = 0; v < 3; ++v) {
+                            auto c = coverage(r, cameraAt(views[v], 0, o.side, rolling), calibrated);
+                            double e = 0;
+                            for (uint32_t tile = 0; tile < 16; ++tile)
+                                e += std::abs(c.tiles[tile] - reference[v].tiles[tile]) / 16;
+                            error += e;
+                            coverageCsv << (rolling ? "rolling," : "flat,") << views[v] << ",cards," << width
+                                        << ',' << density << ',' << c.fraction << ',' << e << '\n';
+                        }
+                        if (error < bestError) {
+                            bestError = error;
+                            bestWidth = width;
+                            bestDensity = density;
+                        }
                     }
-                    if (error < bestError) {
-                        bestError = error;
-                        bestWidth = width;
-                        bestDensity = density;
-                    }
-                }
+            if (library)
+                bestError = 0;
             meta << "calibrated_card_width=" << bestWidth << "\ncalibrated_card_density=" << bestDensity
                  << "\nmean_coverage_tile_error=" << bestError / 3 << '\n';
-            report << "- " << (rolling ? "Rolling" : "Flat") << " fixture: card width " << bestWidth
-                   << ", density multiplier " << bestDensity << ", mean absolute tile coverage error "
-                   << bestError / 3 << ". "
-                   << (bestError / 3 > .05 ? "Coverage match failed the 5 percentage-point gate; "
-                                             "inspect captures before comparing quality."
-                                           : "Coverage is within the 5 percentage-point aggregate "
-                                             "gate; silhouettes still require review.")
-                   << "\n";
+            if (!library)
+                report << "- " << (rolling ? "Rolling" : "Flat") << " fixture: card width " << bestWidth
+                       << ", density multiplier " << bestDensity << ", mean absolute tile coverage error "
+                       << bestError / 3 << ". "
+                       << (bestError / 3 > .05 ? "Coverage match failed the 5 percentage-point gate; "
+                                                 "inspect captures before comparing quality."
+                                               : "Coverage is within the 5 percentage-point aggregate "
+                                                 "gate; silhouettes still require review.")
+                       << "\n";
             groundInstance.material = groundMaterial;
             r.updateInstance(groundHandle, groundInstance);
             meta << "calibration_effective_taa=" << r.postStats().taa
@@ -485,6 +584,8 @@ int main(int argc, char **argv) {
                             auto settings = base;
                             const char *names[] = {"default", "shadows_off", "taa_off", "strong_wind",
                                                    "low_sun", "prepass",     "gtao"};
+                            if (o.profile == "v2")
+                                names[5] = "no_prepass";
                             if (variant == 1)
                                 settings.shadows.mode = ShadowMode::Off;
                             if (variant == 2)
@@ -493,8 +594,10 @@ int main(int argc, char **argv) {
                                 settings.vegetation.wind = 2;
                             if (variant == 4)
                                 settings.lighting.sunDirection = {-.8f, .15f, .4f};
-                            if (variant == 5)
-                                settings.opaqueDepthPrepass = true;
+                            if (variant == 5) {
+                                settings.opaqueDepthPrepass = o.profile != "v2";
+                                settings.vegetation.depthPrepass = false;
+                            }
                             if (variant == 6)
                                 settings.gtao.mode = GtaoMode::Half;
                             for (uint32_t repeat = 0; repeat < o.repeats; ++repeat) {
@@ -537,7 +640,8 @@ int main(int argc, char **argv) {
                                             << ',' << v.shadowMilliseconds << ',' << v.visible << ','
                                             << v.triangles << ',' << v.casters << ',' << v.overflow << ','
                                             << v.allocatedBytes << ',' << sample.allocations << ','
-                                            << available << '\n';
+                                            << available << ',' << v.casterCandidates << ','
+                                            << v.selectionGroups << '\n';
                                     }
                                     summary
                                         << key.str() << ',' << percentile(cpu, .5) << ','
@@ -587,8 +691,8 @@ int main(int argc, char **argv) {
                             "measurements before acceptance."
                           : "unavailable: RTX 3060 performance acceptance remains "
                             "pending.")
-               << "\n\nStreaming, production terrain attachment, foliage transmission "
-                  "and interaction costs are not measured by V1. Cards are not "
+               << "\n\nStreaming, production terrain attachment "
+                  "and interaction costs remain outside this fixed-fixture probe. Cards are not "
                   "adopted automatically from coverage or timing alone.\n";
         return 0;
     } catch (const std::exception &e) {

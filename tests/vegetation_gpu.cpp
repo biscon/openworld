@@ -34,6 +34,7 @@ int main() {
             o.forceFixedMaterials = fixed;
             Renderer r(o);
             SceneSettings s;
+            s.vegetation.shadowDistance = 25;
             s.terrainVisible = false;
             s.shadows.mode = ShadowMode::Off;
             Camera c;
@@ -92,7 +93,8 @@ int main() {
                 for (auto v : post.motion)
                     require(v.w == 0, "reset invalidates plant history");
             }
-            // Distances exercise actual middle/far bins, including the hybrid card stage.
+            // Distances exercise actual middle/far bins, including the hybrid card
+            // stage.
             s.shadows.mode = ShadowMode::Off;
             s.taa.enabled = false;
             s.vegetation.representation = 0;
@@ -133,6 +135,7 @@ int main() {
             auto o = options(exact);
             Renderer r(o);
             SceneSettings s;
+            s.vegetation.shadowDistance = 25;
             s.terrainVisible = false;
             s.shadows.mode = ShadowMode::Off;
             Camera c;
@@ -142,12 +145,14 @@ int main() {
             require(snap.stats.visible == 128 && !snap.stats.overflow, "exact-capacity compact list");
             require(ids(snap).size() == 128, "all exact-capacity identities retained");
         }
-        // Deliberate undersizing must clamp indirect counts and never overwrite storage.
+        // Deliberate undersizing must clamp indirect counts and never overwrite
+        // storage.
         {
             auto o = options(fixture);
             o.vegetation.listCapacity = 7;
             Renderer r(o);
             SceneSettings s;
+            s.vegetation.shadowDistance = 25;
             s.terrainVisible = false;
             s.shadows.mode = ShadowMode::Off;
             Camera c;
@@ -166,6 +171,7 @@ int main() {
             auto o = options(empty);
             Renderer r(o);
             SceneSettings s;
+            s.vegetation.shadowDistance = 25;
             s.terrainVisible = false;
             Camera c;
             r.render(c, s);

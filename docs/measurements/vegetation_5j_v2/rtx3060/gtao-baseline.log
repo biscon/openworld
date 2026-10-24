@@ -1,0 +1,19 @@
+Test project /tmp/openworld-v2-baseline/build
+    Start 40: gtao_gpu
+1/1 Test #40: gtao_gpu .........................***Failed    8.27 sec
+Vulkan device: NVIDIA GeForce RTX 3060
+Validation: enabled
+Ray AO MAE=0.0365156 Half/Full MAE=0.00804424 samples=39
+Tiled filter preserves edge-aware 5x5 visibility: 0.976471 != 0.978487
+
+
+0% tests passed, 1 tests failed out of 1
+
+Label Time Summary:
+gpu    =   8.27 sec*proc (1 test)
+
+Total Test time (real) =   8.27 sec
+
+The following tests FAILED:
+	 40 - gtao_gpu (Failed)                                 gpu
+Errors while running CTest

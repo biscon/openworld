@@ -276,7 +276,7 @@ struct Renderer::Impl {
         }
         shadows =
             std::make_unique<VulkanShadows>(physical, device, queueFamily, shadowCaps, options.shadowCapacity,
-                                            options.vegetation.fixture ? 4096 : 0);
+                                            (options.vegetation.fixture || options.vegetation.library) ? 4096 : 0);
         {
             auto cmd = beginImmediate();
             shadows->initialize(cmd);
@@ -285,7 +285,9 @@ struct Renderer::Impl {
         meshes = std::make_unique<VulkanMeshes>(physical, device, options.sceneCapacity, lightingSetLayout,
                                                 *materials, options.shaderDirectory, materialCaps.bindless,
                                                 shadows->layout(), postCaps.taa);
-        if (options.vegetation.fixture)
+        if (options.vegetation.population && !options.vegetation.library)
+            throw std::invalid_argument("Vegetation population requires a library");
+        if (options.vegetation.fixture || options.vegetation.library)
             vegetation = std::make_unique<VulkanVegetation>(
                 physical, device, queueFamily, lightingSetLayout, *materials, options.shaderDirectory,
                 materialCaps.bindless, postCaps.taa, options.vegetation);
@@ -1893,7 +1895,9 @@ struct Renderer::Impl {
         volumetrics->record(cmd);
         visibility->beginGpu(cmd);
         visibility->cull(cmd, false);
-        const bool depthPrepass = settings.opaqueDepthPrepass || visibility->hiZ() || gtao->active();
+        const bool depthPrepass = settings.opaqueDepthPrepass ||
+                                  (options.vegetation.library && settings.vegetation.depthPrepass) ||
+                                  visibility->hiZ() || gtao->active();
         VkRenderingAttachmentInfo depth{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
         depth.imageView = frame.depthView;
         depth.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
