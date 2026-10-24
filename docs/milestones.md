@@ -173,7 +173,11 @@ The agreed [vegetation and ground clutter roadmap](rendering_vegetation.md) expa
 the vegetation part of 5J into slices 5J-V1–V6. It prioritizes dense ground-level
 grass/plants/shrubs with GPU instancing, bounded streaming, LOD, wind and temporary
 player bending. Implementation starts with a representation/performance experiment;
-trees remain a separate future design. These slices are not yet implemented.
+trees remain a separate future design. The [V1 experiment](rendering_vegetation_experiment.md)
+is implemented with Debug/Release, software Vulkan and native RTX 3060 validation.
+[Native measurements](measurements/vegetation_5j_v1/rtx3060/README.md) inform the
+receive-only grass policy; final assets and full-scene acceptance remain open.
+V2–V6 remain proposed.
 
 ### Scope
 

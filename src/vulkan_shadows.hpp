@@ -10,7 +10,8 @@ struct ShadowCapabilities {
 ShadowCapabilities shadowCapabilities(VkPhysicalDevice);
 class VulkanShadows {
   public:
-    VulkanShadows(VkPhysicalDevice, VkDevice, uint32_t queueFamily, ShadowCapabilities, ShadowCapacity);
+    VulkanShadows(VkPhysicalDevice, VkDevice, uint32_t queueFamily, ShadowCapabilities, ShadowCapacity,
+                  uint32_t externalCasterCapacity = 0);
     ~VulkanShadows();
     VkDescriptorSetLayout layout() const;
     void initialize(VkCommandBuffer);
@@ -18,6 +19,8 @@ class VulkanShadows {
                const ShadowSettings &, bool disabled, float farDistance);
     uint32_t append(VisibilityBounds, uint32_t count, uint32_t first, uint32_t source,
                     const void *record = nullptr, uint32_t bytes = 0);
+    void includeCasterBounds(VisibilityBounds); // bounds-only GPU-instanced casters, max 4096
+    const ShadowUniform &uniform() const;       // finalized by prepare()
     void missing(VisibilityBounds);
     void prepare(double collectionMilliseconds = 0);
     bool active() const;

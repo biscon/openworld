@@ -1,0 +1,3 @@
+sequence,representation,comparison,variant,repeat,enabled,cpu_median_ms,cpu_p95_ms,gpu_median_ms,gpu_p95_ms,prepare_median_ms,prepare_p95_ms,vegetation_gpu_median_ms,vegetation_gpu_p95_ms,allocations,bytes
+close,blades,count,default,0,0,58.5999,62.8926,58.4299,62.5642,0.000601,0.000982,0,0,0,72332180
+close,blades,count,default,0,1,421.429,421.709,421.53,425.907,0.028112,0.031079,247.415,249.211,0,72332180

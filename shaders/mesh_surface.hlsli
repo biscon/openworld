@@ -1,6 +1,10 @@
 #include "lighting.hlsli"
 #include "materials.hlsli"
-struct MeshSurface {[[vk::location(9)]]float3 renderedPosition:TEXCOORD8;[[vk::location(8)]]float4 previousClip:TEXCOORD7;float4 position:SV_Position;[[vk::location(0)]]float3 relative:TEXCOORD0;[[vk::location(1)]]float3 normal:NORMAL;[[vk::location(2)]]float4 tangent:TANGENT;[[vk::location(3)]]float2 uv:TEXCOORD1;[[vk::location(4)]]nointerpolation uint material:TEXCOORD2;};
+struct MeshSurface {
+#ifdef OW_VEGETATION
+[[vk::location(10)]]nointerpolation float4 plant:TEXCOORD9;
+#endif
+[[vk::location(9)]]float3 renderedPosition:TEXCOORD8;[[vk::location(8)]]float4 previousClip:TEXCOORD7;float4 position:SV_Position;[[vk::location(0)]]float3 relative:TEXCOORD0;[[vk::location(1)]]float3 normal:NORMAL;[[vk::location(2)]]float4 tangent:TANGENT;[[vk::location(3)]]float2 uv:TEXCOORD1;[[vk::location(4)]]nointerpolation uint material:TEXCOORD2;};
 float4 meshTexture(uint index,float2 uv,float2 dx,float2 dy){
 #ifdef OW_BINDLESS
     return materialImages[NonUniformResourceIndex(index)].SampleGrad(materialSampler,uv,dx,dy);
@@ -33,3 +37,12 @@ SurfaceMaterial meshSurface(MeshSurface i,MaterialRecord r,float4 base,float2 dx
     m.ao=orm.r*r.factors.z;m.roughness=orm.g*r.factors.x;m.metallic=orm.b*r.factors.y;
     m.emissive=r.emission.rgb*meshTexture(r.meshMaps.w,i.uv,dx,dy).rgb;return m;
 }
+
+#ifdef OW_VEGETATION
+void vegetationMask(MeshSurface i) {
+    // Stable plant-local coverage noise shared by camera/depth/shadow evaluation.
+    uint2 q=uint2(saturate(i.uv)*128);
+    uint h=q.x*1973+q.y*9277+uint(i.plant.w)*26699;h^=h>>16;h*=0x7feb352d;h^=h>>15;
+    if(float(h>>8)*(1.0/16777216.0)>=i.plant.x)discard;
+}
+#endif

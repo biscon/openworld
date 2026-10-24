@@ -139,6 +139,7 @@ struct VulkanShadows::Impl {
         uint32_t count, first;
     };
     std::vector<Caster> casters;
+    std::vector<VisibilityBounds> externalBounds;
     std::vector<uint32_t> offsets;
     std::array<ShadowCascade, shadowCascades> cascades;
     std::array<uint32_t, coverageCells> coverage{};
@@ -147,9 +148,10 @@ struct VulkanShadows::Impl {
     uint32_t frame = 0, raster = 0, invalidMask = 0;
     VkPipelineLayout boundLayout{};
     std::chrono::steady_clock::time_point started;
-    Impl(VkPhysicalDevice p, VkDevice d, ShadowCapabilities c, ShadowCapacity cap)
+    Impl(VkPhysicalDevice p, VkDevice d, ShadowCapabilities c, ShadowCapacity cap, uint32_t externalCapacity)
         : physical(p), device(d), caps(c), capacity(cap) {
         casters.reserve(cap.casters);
+        externalBounds.reserve(externalCapacity);
         offsets.resize(size_t(cap.casters + 1) * shadowCascades);
     }
     ~Impl() {
@@ -164,10 +166,10 @@ struct VulkanShadows::Impl {
     }
 };
 VulkanShadows::VulkanShadows(VkPhysicalDevice p, VkDevice d, uint32_t family, ShadowCapabilities caps,
-                             ShadowCapacity cap) {
+                             ShadowCapacity cap, uint32_t externalCasterCapacity) {
     if (!cap.casters || cap.casters > 65536 || cap.resolution < 16 || cap.resolution > caps.maxResolution)
         throw std::invalid_argument("Invalid CSM capacity");
-    impl_ = std::make_unique<Impl>(p, d, caps, cap);
+    impl_ = std::make_unique<Impl>(p, d, caps, cap, externalCasterCapacity);
     auto &s = *impl_;
     // Query exact allocation requirements before allocating memory.
     const uint32_t storageResolution = caps.depth ? cap.resolution : 16;
@@ -324,6 +326,7 @@ void VulkanShadows::begin(uint32_t frame, const Camera &camera, TerrainGrid grid
         s.current.fallback = ShadowFallback::Wireframe;
     }
     s.casters.clear();
+    s.externalBounds.clear();
     s.coverage.fill(1);
     s.invalidMask = 0;
     s.uniform = {};
@@ -373,6 +376,15 @@ uint32_t VulkanShadows::append(VisibilityBounds bounds, uint32_t count, uint32_t
     static_cast<uint32_t *>(s.frames[s.frame].sources.mapped)[id] = source;
     return id;
 }
+void VulkanShadows::includeCasterBounds(VisibilityBounds bounds) {
+    auto &s = *impl_;
+    if (!active() || !bounds.valid)
+        return;
+    if (s.externalBounds.size() == s.externalBounds.capacity())
+        throw std::runtime_error("External shadow bounds capacity exceeded");
+    s.externalBounds.push_back(shadowLightBounds(bounds, s.cascades[0].basis));
+}
+const ShadowUniform &VulkanShadows::uniform() const { return impl_->uniform; }
 void VulkanShadows::missing(VisibilityBounds bounds) {
     auto &s = *impl_;
     if (!active())
@@ -408,6 +420,9 @@ void VulkanShadows::prepare(double collectionMilliseconds) {
         const double centreZ = (c.basis * (forward * double((c.nearDistance + c.farDistance) * .5f))).z;
         double z0 = centreZ - c.radius - 16, z1 = centreZ + c.radius + 16;
         const double maximum = z1 + 8192;
+        for (const auto &b : s.externalBounds)
+            if (intersects(b, c) && b.hi.z >= z0 && b.lo.z <= maximum)
+                z1 = std::max(z1, std::min(maximum, double(b.hi.z) + 16));
         for (uint32_t n = 0; n < s.casters.size(); ++n) {
             s.offsets[size_t(i) * (s.capacity.casters + 1) + n] = cursor;
             const auto &caster = s.casters[n];

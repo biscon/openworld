@@ -1,6 +1,8 @@
 # Vegetation and ground clutter roadmap
 
-Status: architecture agreed on 2026-10-24; implementation not started. This expands
+Status: architecture agreed on 2026-10-24. V1 experiment implemented with software
+Vulkan verification and native RTX 3060 measurements. Final density/appearance
+acceptance remains open; V2–V6 remain proposed. This expands
 the vegetation part of [rendering roadmap slice 5J](rendering_roadmap.md#5j--representative-scene-content-and-reflections).
 It records the direction, implementation sequence, and acceptance gates. Each slice
 needs its own focused implementation plan before coding; exact layouts, capacities,
@@ -191,16 +193,23 @@ Motion vectors include previous submitted-frame wind and interaction, not only
 instance transforms. New population, changed attachments, and incompatible LODs
 reject temporal correspondence locally where it cannot be reconstructed safely.
 
-Shadow work has its own distance and population budget. Start by testing grass
-casting within roughly 15–25 m and shrubs farther out; grass need not cast through
-all terrain cascades to receive sun shadows. Offscreen nearby plants can still cast
-onto visible receivers. Within the casting range, deformation must match visible
-geometry; stopping only shadow animation is not an acceptable optimization.
+Shadow work has its own distance and population budget. The agreed production
+policy disables individual grass-blade casting by default while retaining reception
+of terrain, tree and other object shadows. Grass participates in the existing GTAO
+depth/lighting path when AO is enabled. GTAO supplies local ambient occlusion, not
+directional sun shadows or guaranteed per-blade contact detail. Shrubs, larger
+plants and rocks retain shadow casting with category-specific distance/LOD budgets.
+Offscreen nearby casters can still affect visible receivers. Within the casting
+range, deformation must match visible geometry. The V1 probe retains its historical
+25 m grass-casting default for reproducibility; `--grass-shadow-distance 0` selects
+the agreed policy. Production defaults belong to the subsequent implementation.
 
 ## Performance and validation gates
 
 Retain the engine objective of RTX 3060, 1080p, 120 FPS / 8.33 ms, with native-output
-measurements as well. Existing full-scene performance work remains unresolved; this
+measurements as well. The user accepts an eventual 60 FPS / 16.67 ms full-feature
+scene on this card, but the development target and tight feature budgets remain
+unchanged. Existing full-scene performance work remains unresolved; this
 roadmap does not assume that the following time is already available. Trees, water,
 terrain generation, and other effects need explicit remaining headroom.
 
@@ -242,6 +251,12 @@ V6 is the final integration gate, not the first opportunity to find regressions.
 
 ### 5J-V1 — Representation and budget experiment
 
+Status: experiment implemented; Debug/Release, software Vulkan and native RTX 3060
+synchronization validation pass. Native representation and shadow-policy measurements
+are recorded in the [hardware report](measurements/vegetation_5j_v1/rtx3060/README.md).
+Final asset coverage, foliage shading and integrated scene acceptance remain open.
+Detailed design and findings: [representation experiment](rendering_vegetation_experiment.md).
+
 - Build an owned meadow fixture comparing blade tufts with trimmed grass cards,
   using bounded indirect instancing and representative LOD, wind, and shadow work.
 - Include close, grazing, moving, and low aerial views with existing lighting/TAA.
@@ -249,6 +264,48 @@ V6 is the final integration gate, not the first opportunity to find regressions.
 - Deliver captures and paired CPU/GPU/memory measurements. Confirm the default
   representation and whether a distant card stage earns its complexity. Record
   target-GPU availability and any unresolved performance gate explicitly.
+
+### Handoff after V1 (2026-10-24)
+
+Read the [native hardware report](measurements/vegetation_5j_v1/rtx3060/README.md)
+and [experiment design](rendering_vegetation_experiment.md) before planning V2.
+The hardware experiment has been run; there is no outstanding request for the user
+to run it again. GPU access requires execution outside the sandbox, not a driver fix.
+Native synchronization validation passed, including the receive-only/GTAO captures.
+
+- **Settled direction:** blade tufts first; no grass shadow casting. Retain scene
+  shadow reception and GTAO compatibility. Shrubs, bigger plants and rocks cast
+  with their own limits. Trees remain a separate project. The original casting
+  path stays in the experiment solely for reproducible comparisons.
+- **Measured cost:** original moving blades with casting 2.749 ms; receiving-only
+  1.248 ms, or 1.388 ms with half GTAO (three-repeat range 1.196–1.555 ms). These
+  are incremental vegetation costs; GTAO is also enabled in the no-vegetation
+  baseline for the latter pair. Do not advertise 1.388 ms as the combined cost of
+  the whole GTAO system and grass. Budget remains approximately 1.5 ms.
+- **Representation:** tested cards/hybrid have no median win across the five views.
+  Keep the comparison harness, but do not add distant cards to production without
+  new evidence. This conclusion does not reject cards for broad-leaf plants.
+- **Next work:** plan **5J-V2**, then implement only after that plan is agreed. Focus
+  on saved reusable assets, representative coverage, foliage shading and animation
+  contracts. The plain-ground fixture is dark/sparse and lacks leaf transmission;
+  its appearance is not accepted as the reference target. Re-measure after assets
+  and coverage improve. Full-scene FPS and production streaming remain unproven.
+- **Concrete efficiency opportunity:** receive-only selection still dispatches all
+  cascade views (~0.50 ms). Production should exclude grass caster bounds/lists
+  and skip their selection work, preserving scene shadow reception. Treat this as
+  measured waste to address, not an already measured optimization.
+- **Budgets:** keep 128 MiB vegetation GPU storage and ~0.25 ms CPU preparation.
+  V1 measured ~69 MiB, ~0.035–0.040 ms preparation and zero C++ allocation calls
+  inside validation-disabled steady-state render intervals. Reserve headroom for
+  trees/water; eventual 60 FPS full-feature RTX 3060 is acceptable without relaxing
+  the tighter development target or these feature budgets.
+
+Implementation entry points: `src/vegetation.*` (fixtures/data),
+`src/vulkan_vegetation.*` (bounded GPU experiment), `shaders/vegetation*`,
+`tools/vegetation_probe.cpp`, and `tests/vegetation_cpu.cpp` / `vegetation_gpu.cpp`.
+The experiment remains disabled in the ordinary application; its API settings and
+probe still default to the historical 25 m casting comparison. V2 must implement
+the settled production policy explicitly rather than inherit that experiment default.
 
 ### 5J-V2 — Asset and foliage rendering foundation
 

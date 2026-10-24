@@ -1,0 +1,41 @@
+extent=1920x1080
+native_output=true
+frames=600
+warmup=120
+repeats=3
+side=256
+density=8
+seed=173
+simulation_step=1/120
+asset_load_ms=0.51993
+validation=0
+quick=0
+LOD=20,45,70m; fade=55..70m; grass_shadow_fade=0..0m
+allocation_counter=C++ new/new[] inside render; includes other renderer modules, excludes driver malloc
+memory=driver allocation requirements, includes retained upload staging and diagnostic buffer; shared render targets excluded
+build=Release
+scene=terrain off; owned ground mesh; atmosphere off; volumetrics off; bloom off; HiZ off
+canopy_fixture=0
+requested_gtao=0
+grass_shadow_distance=0
+lighting=sun lux 100000; direction -0.6,0.8,0.35; environment 3000 nits; exposure EV100 15; ACES fitted
+CSM=near 1000m; far 8192m; bias 0.75 texels; normal bias 0.25 texels; TAA history 0.9
+variants=default TAA+CSM; shadows_off; taa_off; strong_wind 2; low_sun -0.8,0.15,0.4; prepass; half GTAO
+allocation_bytes=peak committed Vulkan buffer/image requirements including texture upload peak; no shared target duplication
+device=NVIDIA GeForce RTX 3060
+bindless=1
+rolling=0
+fixture_renderer_load_ms=4412.92
+shadow_resolution=2048
+initial_upload_and_three_frames_ms=74.9311
+calibrated_card_width=1
+calibrated_card_density=1
+mean_coverage_tile_error=0.0202164
+calibration_effective_taa=0
+effective_material_filtering=8
+effective_run=moving,blades,count,default,0,0; taa=1; shadows=1; gtao=0
+effective_run=moving,blades,count,default,0,1; taa=1; shadows=1; gtao=0
+effective_run=moving,blades,count,default,1,1; taa=1; shadows=1; gtao=0
+effective_run=moving,blades,count,default,1,0; taa=1; shadows=1; gtao=0
+effective_run=moving,blades,count,default,2,0; taa=1; shadows=1; gtao=0
+effective_run=moving,blades,count,default,2,1; taa=1; shadows=1; gtao=0

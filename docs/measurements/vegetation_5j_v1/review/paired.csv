@@ -1,0 +1,6 @@
+sequence,representation,comparison,variant,repeat,cpu_delta_median_ms,gpu_delta_median_ms,gpu_delta_p95_ms,timestamps
+close,blades,count,default,0,489.964,493.992,504.369,1
+close,cards,count,default,0,183.308,183.274,190.199,1
+close,cards,coverage,default,0,187.232,187.203,187.468,1
+close,hybrid,count,default,0,501.336,498.431,501.081,1
+close,hybrid,coverage,default,0,487.592,493.126,499.092,1

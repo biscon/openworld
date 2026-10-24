@@ -10,6 +10,7 @@
 #include "vulkan_shadows.hpp"
 #include "vulkan_terrain.hpp"
 #include "vulkan_terrain_stream.hpp"
+#include "vulkan_vegetation.hpp"
 #include "vulkan_visibility.hpp"
 #include "vulkan_volumetrics.hpp"
 
@@ -167,6 +168,7 @@ struct Renderer::Impl {
     VkPipeline outputPipeline{};
     std::unique_ptr<VulkanClusters> clusters;
     std::unique_ptr<VulkanMeshes> meshes;
+    std::unique_ptr<VulkanVegetation> vegetation;
     std::unique_ptr<VulkanVisibility> visibility;
     VisibilityCapabilities visibilityCaps;
     std::unique_ptr<VulkanPost> post;
@@ -272,8 +274,9 @@ struct Renderer::Impl {
             gtao->initialize(cmd);
             endImmediate(cmd);
         }
-        shadows = std::make_unique<VulkanShadows>(physical, device, queueFamily, shadowCaps,
-                                                  options.shadowCapacity);
+        shadows =
+            std::make_unique<VulkanShadows>(physical, device, queueFamily, shadowCaps, options.shadowCapacity,
+                                            options.vegetation.fixture ? 4096 : 0);
         {
             auto cmd = beginImmediate();
             shadows->initialize(cmd);
@@ -282,6 +285,10 @@ struct Renderer::Impl {
         meshes = std::make_unique<VulkanMeshes>(physical, device, options.sceneCapacity, lightingSetLayout,
                                                 *materials, options.shaderDirectory, materialCaps.bindless,
                                                 shadows->layout(), postCaps.taa);
+        if (options.vegetation.fixture)
+            vegetation = std::make_unique<VulkanVegetation>(
+                physical, device, queueFamily, lightingSetLayout, *materials, options.shaderDirectory,
+                materialCaps.bindless, postCaps.taa, options.vegetation);
         terrain = std::make_unique<VulkanTerrain>(
             TerrainDevice{physical, device, queue, commandPool}, options.terrainGrid, options.terrainCapacity,
             options.normalSubdivisions, options.streaming.enabled ? 1 : options.terrainChunkCapacity,
@@ -1671,6 +1678,8 @@ struct Renderer::Impl {
                           settings.clusterDiagnostic);
         meshes->prepare(frameIndex, camera, options.terrainGrid, post->previousCamera(),
                         post->stats().historyValid, post->stats().taa);
+        if (vegetation)
+            vegetation->prepare(frameIndex, camera, options.terrainGrid, post->view(), settings.vegetation);
         uint32_t imageIndex = frameIndex;
         if (surface) {
             const auto acquired = vkAcquireNextImageKHR(device, swapchain, forever, frame.acquired,
@@ -1838,6 +1847,8 @@ struct Renderer::Impl {
         const auto shadowCollectionStart = std::chrono::steady_clock::now();
         prepareTerrainShadows(camera, settings);
         meshes->prepareShadows(frameIndex, *shadows);
+        if (vegetation)
+            vegetation->bounds(*shadows);
         shadows->prepare(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -
                                                                    shadowCollectionStart)
                              .count());
@@ -1845,6 +1856,8 @@ struct Renderer::Impl {
         // Finalize all borrowed terrain descriptors before any command binds
         // this lighting set, including clustered-light compute.
         clusters->record(cmd, frameIndex, frame.lightingSet);
+        if (vegetation)
+            vegetation->select(cmd, shadows->uniform(), shadows->active() ? shadows->cascadeCount() : 0);
         clusters->timestamp(cmd, frameIndex, 2);
         if (shadows->active()) {
             for (uint32_t cascade = 0; cascade < shadows->cascadeCount(); ++cascade) {
@@ -1870,6 +1883,8 @@ struct Renderer::Impl {
                     }
                 }
                 meshes->drawShadows(cmd, frameIndex, frame.lightingSet, *shadows);
+                if (vegetation)
+                    vegetation->draw(cmd, frame.lightingSet, 4, cascade + 1);
                 shadows->endRaster(cmd);
             }
             shadows->finish(cmd);
@@ -1946,6 +1961,8 @@ struct Renderer::Impl {
         if (depthPrepass) {
             drawTerrain(false);
             meshes->draw(cmd, frameIndex, frame.lightingSet, 2, visibility.get());
+            if (vegetation)
+                vegetation->draw(cmd, frame.lightingSet, 2);
             vkCmdEndRendering(cmd);
             visibility->stamp(cmd, 3);
             if (visibility->hiZ() || gtao->active()) {
@@ -1994,6 +2011,8 @@ struct Renderer::Impl {
         }
         drawTerrain(true);
         meshes->draw(cmd, frameIndex, frame.lightingSet, depthPrepass ? 1 : 0, visibility.get());
+        if (vegetation)
+            vegetation->draw(cmd, frame.lightingSet, depthPrepass ? 1 : 0);
         visibility->stamp(cmd, 9);
         clusters->timestamp(cmd, frameIndex, 3);
         if (atmosphere->active() || volumetrics->active()) {
@@ -2111,6 +2130,8 @@ struct Renderer::Impl {
         if (imguiReady)
             ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
         vkCmdEndRendering(cmd);
+        if (vegetation)
+            vegetation->finish(cmd);
         if (renderQueries) {
             vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, renderQueries,
                                  frameIndex * 4 + 3);
@@ -2148,6 +2169,8 @@ struct Renderer::Impl {
         volumetrics->submitted();
         post->submitted();
         meshes->submitted();
+        if (vegetation)
+            vegetation->submitted();
         terrainHistory->submitted();
         renderingStats.terrainFinalizeMilliseconds = 0;
         if (streaming) {
@@ -2258,6 +2281,7 @@ struct Renderer::Impl {
             destroySceneTargets();
             streaming.reset();
             terrain.reset();
+            vegetation.reset();
             meshes.reset();
             visibility.reset();
             volumetrics.reset();
@@ -2308,6 +2332,19 @@ bool Renderer::updateLight(LightHandle h, const LocalLight &l) {
     return impl_->clusters->lights.update(h, l);
 }
 bool Renderer::removeLight(LightHandle h) { return impl_->clusters->lights.remove(h); }
+const VegetationStats &Renderer::vegetationStats() const {
+    static const VegetationStats empty;
+    return impl_->vegetation ? impl_->vegetation->stats() : empty;
+}
+VegetationSnapshot Renderer::readVegetationSnapshot() {
+    if (!impl_->vegetation)
+        return {};
+    waitIdle();
+    auto cmd = impl_->beginImmediate();
+    impl_->vegetation->copySnapshot(cmd);
+    impl_->endImmediate(cmd);
+    return impl_->vegetation->snapshot();
+}
 MeshHandle Renderer::uploadMesh(const MeshData &m) { return impl_->meshes->upload(m); }
 bool Renderer::releaseMesh(MeshHandle h) { return impl_->meshes->release(h); }
 InstanceHandle Renderer::createInstance(const MeshInstance &i) {

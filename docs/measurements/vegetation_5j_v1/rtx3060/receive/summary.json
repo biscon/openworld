@@ -1,0 +1,31 @@
+{
+  "cases": [
+    {
+      "sequence": "moving",
+      "representation": "blades",
+      "comparison": "count",
+      "variant": "default",
+      "repeats": 3,
+      "delta_ms": 1.24797,
+      "delta_min": 0.978336,
+      "delta_max": 1.27501,
+      "gpu_median_ms": 2.60346,
+      "gpu_p95_ms": 3.94189,
+      "prepare_median_ms": 0.039133,
+      "prepare_p95_ms": 0.044242,
+      "vegetation_gpu_median_ms": 1.47888,
+      "select_ms": 0.5,
+      "depth_ms": 0.0,
+      "colour_ms": 0.977408,
+      "shadows_ms": 0.0,
+      "visible": 18203.0,
+      "triangles": 651534.0,
+      "casters": 0.0
+    }
+  ],
+  "frames": 3600,
+  "pairs": 3,
+  "bytes": 72332992,
+  "allocations": 0,
+  "overflow": 0
+}

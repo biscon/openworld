@@ -1,0 +1,9 @@
+sequence,representation,comparison,variant,repeat,enabled,completed_frame,cpu_ms,gpu_ms,prepare_ms,select_ms,depth_ms,colour_ms,shadows_ms,visible,triangles,casters,overflow,bytes,allocations,timestamps
+close,blades,count,default,0,0,59,4.66636,1.22342,0.0002,0,0,0,0,0,0,0,0,72332992,665,1
+close,blades,count,default,0,0,60,4.67658,1.224,0.0002,0,0,0,0,0,0,0,0,72332992,665,1
+close,blades,count,default,0,0,61,4.63787,1.19235,0.0002,0,0,0,0,0,0,0,0,72332992,665,1
+close,blades,count,default,0,0,62,4.68798,1.19104,0.00021,0,0,0,0,0,0,0,0,72332992,665,1
+close,blades,count,default,0,1,81,5.17599,2.72547,0.287838,0.505248,0,1.02502,0,18141,645840,0,0,72332992,2280,1
+close,blades,count,default,0,1,82,5.17434,2.73395,0.263352,0.506304,0,1.03219,0,18141,645840,0,0,72332992,2280,1
+close,blades,count,default,0,1,83,5.34785,2.74387,0.255577,0.509408,0,1.03834,0,18141,645840,0,0,72332992,2280,1
+close,blades,count,default,0,1,84,5.11389,2.73616,0.248553,0.506208,0,1.03834,0,18141,645840,0,0,72332992,2280,1

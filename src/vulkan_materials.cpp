@@ -608,6 +608,34 @@ void VulkanMaterials::recordUploads(VkCommandBuffer cmd) {
         if (im.image && im.live)
             upload(im.image.get());
 }
+uint64_t VulkanMaterials::textureAllocationRequirements(const TextureData &t) const {
+    auto &s = *impl_;
+    if (!t.width || !t.height || !t.levels || t.layers != 1 || t.bytes.size() != textureBytes(t))
+        throw std::invalid_argument("Invalid texture requirements");
+    VkImageCreateInfo ci{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    ci.imageType = VK_IMAGE_TYPE_2D;
+    ci.format = format(t.format);
+    ci.extent = {t.width, t.height, 1};
+    ci.mipLevels = t.levels;
+    ci.arrayLayers = 1;
+    ci.samples = VK_SAMPLE_COUNT_1_BIT;
+    ci.tiling = VK_IMAGE_TILING_OPTIMAL;
+    ci.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    VkImage image{};
+    check(vkCreateImage(s.device, &ci, nullptr, &image));
+    VkMemoryRequirements req{};
+    vkGetImageMemoryRequirements(s.device, image, &req);
+    vkDestroyImage(s.device, image, nullptr);
+    auto bytes = req.size;
+    VkBufferCreateInfo bi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+    bi.size = t.bytes.size();
+    bi.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    VkBuffer buffer{};
+    check(vkCreateBuffer(s.device, &bi, nullptr, &buffer));
+    vkGetBufferMemoryRequirements(s.device, buffer, &req);
+    vkDestroyBuffer(s.device, buffer, nullptr);
+    return bytes + req.size;
+}
 TextureHandle VulkanMaterials::uploadTexture(const TextureData &t) {
     auto &s = *impl_;
     s.retireImages();

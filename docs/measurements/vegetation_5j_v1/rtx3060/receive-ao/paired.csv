@@ -1,0 +1,4 @@
+sequence,representation,comparison,variant,repeat,cpu_delta_median_ms,gpu_delta_median_ms,gpu_delta_p95_ms,timestamps
+moving,blades,count,default,0,0.146974,1.38826,1.69331,1
+moving,blades,count,default,1,-0.050625,1.55485,1.90394,1
+moving,blades,count,default,2,0.034464,1.1959,0.583936,1

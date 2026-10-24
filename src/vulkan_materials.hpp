@@ -18,6 +18,7 @@ class VulkanMaterials {
     VkDescriptorSetLayout layout() const;
     VkDescriptorSet set(uint32_t frame) const;
     const MaterialStats &stats() const;
+    uint64_t textureAllocationRequirements(const TextureData &) const; // image + staging, no allocation
     TextureHandle uploadTexture(const TextureData &);
     bool releaseTexture(TextureHandle);
     MaterialHandle createMaterial(const MeshMaterial &);

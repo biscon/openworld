@@ -2,7 +2,15 @@
 #include "mesh_surface.hlsli"
 float4 shadePixel(MeshSurface i,bool front:SV_IsFrontFace):SV_Target0 {
     MaterialRecord r=materialRecords[i.material];float2 dx=ddx(i.uv),dy=ddy(i.uv);
+    #ifdef OW_VEGETATION
+    // Evaluate texture gradients before a nonuniform coverage discard.
+    vegetationMask(i);
+    #endif
     float4 base=meshBase(r,i.uv,dx,dy);SurfaceMaterial m=meshSurface(i,r,base,dx,dy,front);
+    #ifdef OW_VEGETATION
+    if(i.plant.z!=0)return float4(1,1,1,1);
+    m.baseColour*=lerp(.85,1.15,i.plant.y);
+    #endif
     if(lighting.output.y!=0 || lighting.output.w!=0)return float4(m.baseColour*(.22+.78*saturate(dot(m.normal,normalize(float3(-.6,.8,.35)))))*m.opacity,m.opacity);
     float3 colour=r.alpha.w!=0?min((m.baseColour+m.emissive)*lighting.output.x,65504):shadeSurface(m,i.relative,r.alpha.x==2?1:screenVisibility(i.position.xy),i.renderedPosition);
     if(r.alpha.x==2)colour=mediaApply(colour,i.renderedPosition);

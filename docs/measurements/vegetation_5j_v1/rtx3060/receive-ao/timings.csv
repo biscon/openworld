@@ -1,0 +1,7 @@
+sequence,representation,comparison,variant,repeat,enabled,cpu_median_ms,cpu_p95_ms,gpu_median_ms,gpu_p95_ms,prepare_median_ms,prepare_p95_ms,vegetation_gpu_median_ms,vegetation_gpu_p95_ms,allocations,bytes
+moving,blades,count,default,0,0,4.26479,4.4714,1.67837,1.84451,0.0002,0.000241,0,0,0,72332992
+moving,blades,count,default,0,1,4.41177,4.59721,3.06662,3.53782,0.041337,0.044522,1.37734,1.71722,0,72332992
+moving,blades,count,default,1,1,4.31155,4.50024,3.23933,3.95894,0.035135,0.041817,1.38861,2.20755,0,72332992
+moving,blades,count,default,1,0,4.36217,4.6058,1.68448,2.05501,0.00021,0.000261,0,0,0,72332992
+moving,blades,count,default,2,0,4.27588,4.38318,1.87638,3.00083,0.0002,0.00025,0,0,0,72332992
+moving,blades,count,default,2,1,4.31035,4.49187,3.07229,3.58477,0.034905,0.040726,1.37152,1.77581,0,72332992

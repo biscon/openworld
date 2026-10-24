@@ -1,0 +1,5 @@
+Vulkan device: NVIDIA GeForce RTX 3060
+Validation: enabled
+close blades count default repeat 0 enabled 0
+close blades count default repeat 0 enabled 1
+Captured "/tmp/vegetation-rtx3060-canopy-cast/close_blades_count.png.ppm"
