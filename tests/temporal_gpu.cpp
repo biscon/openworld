@@ -63,7 +63,7 @@ void convergence() {
     frame(native, camera, settings);
     frame(reference, camera, settings);
     auto off = native.readHdrSnapshot(), super = reference.readHdrSnapshot();
-    settings.taa.enabled = true;
+    settings.antialiasing = ow::AntialiasingMode::Taa;
     for (int i = 0; i < 24; ++i)
         frame(native, camera, settings);
     auto resolved = native.readPostSnapshot();
@@ -166,7 +166,7 @@ void thinGeometry() {
             for (uint32_t j = 0; j < 8; ++j)
                 for (uint32_t i = 0; i < 8; ++i)
                     expected[y * o.width + x] += super.pixels[(y * 8 + j) * super.width + x * 8 + i].r / 64.;
-    settings.taa.enabled = true;
+    settings.antialiasing = ow::AntialiasingMode::Taa;
     struct Result {
         double variance = 0, error = 0;
     } results[2];
@@ -274,7 +274,7 @@ void transparency() {
     o.forceFixedMaterials = true;
     Renderer r(o);
     auto s = scene();
-    s.taa.enabled = true;
+    s.antialiasing = ow::AntialiasingMode::Taa;
     s.output.ev100 = 15;
     s.bloom.intensity = .05;
     Camera c;
@@ -422,7 +422,7 @@ int main() {
         auto handle = r.createInstance(instance);
         frame(r, c, s);
         auto raw = r.readHdrSnapshot();
-        s.taa.enabled = true;
+        s.antialiasing = ow::AntialiasingMode::Taa;
         frame(r, c, s);
         require(!r.postStats().historyValid, "Initial TAA history invalid");
         auto initial = r.readPostSnapshot();
@@ -483,7 +483,7 @@ int main() {
         s.gtao.mode = GtaoMode::Off;
         s.opaqueDepthPrepass = false;
         s.visibility = VisibilityMode::Indirect;
-        s.taa.enabled = false;
+        s.antialiasing = ow::AntialiasingMode::Off;
         r.removeInstance(replacement);
         s.output.compensation = 0;
         s.background[0] = s.background[1] = s.background[2] = 2;
@@ -510,7 +510,7 @@ int main() {
         small.taaBudgetBytes = 1;
         small.bloomBudgetBytes = 1;
         Renderer constrained(small);
-        s.taa.enabled = true;
+        s.antialiasing = ow::AntialiasingMode::Taa;
         s.bloom.intensity = .05f;
         frame(constrained, c, s);
         require(constrained.postStats().taaFallback == PostFallback::Budget &&

@@ -36,10 +36,23 @@ const char *temporalResetName(TemporalReset r) {
 }
 void validatePost(const TaaSettings &t, const BloomSettings &b) {
     if (!std::isfinite(t.historyWeight) || t.historyWeight < 0 || t.historyWeight > .9f ||
-        !std::isfinite(b.intensity) || b.intensity < 0 || b.intensity > 2 ||
-        !std::isfinite(b.threshold) || b.threshold < 0 || b.threshold > 1e6f || !std::isfinite(b.knee) ||
-        b.knee < 0 || b.knee > 1 || !std::isfinite(b.radius) || b.radius < .5f || b.radius > 2)
+        !std::isfinite(b.intensity) || b.intensity < 0 || b.intensity > 2 || !std::isfinite(b.threshold) ||
+        b.threshold < 0 || b.threshold > 1e6f || !std::isfinite(b.knee) || b.knee < 0 || b.knee > 1 ||
+        !std::isfinite(b.radius) || b.radius < .5f || b.radius > 2)
         throw std::invalid_argument("Invalid TAA/bloom settings");
+}
+const char *antialiasingName(AntialiasingMode mode) {
+    switch (mode) {
+    case AntialiasingMode::Off:
+        return "Off";
+    case AntialiasingMode::Fxaa:
+        return "FXAA";
+    case AntialiasingMode::Smaa1x:
+        return "SMAA 1x";
+    case AntialiasingMode::Taa:
+        return "TAA";
+    }
+    return "Invalid";
 }
 glm::vec2 temporalJitter(uint64_t sequence) {
     auto radical = [](uint32_t n, uint32_t base) {
@@ -93,10 +106,9 @@ TemporalTerrainRecord TerrainHistory::append(const TemporalTerrainKey &key,
     if (pending_.size() >= capacity_)
         return {};
     auto it = std::lower_bound(previousOrder_.begin(), previousOrder_.end(), key,
-                              [&](uint32_t a, const auto &b) { return previous_[a].key < b; });
-    auto result = it != previousOrder_.end() && previous_[*it].key == key
-                      ? previous_[*it].value
-                      : TemporalTerrainRecord{};
+                               [&](uint32_t a, const auto &b) { return previous_[a].key < b; });
+    auto result = it != previousOrder_.end() && previous_[*it].key == key ? previous_[*it].value
+                                                                          : TemporalTerrainRecord{};
     pending_.push_back({key, value});
     return result;
 }

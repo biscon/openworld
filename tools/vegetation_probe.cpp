@@ -137,7 +137,7 @@ struct Coverage {
 Coverage coverage(Renderer &r, const Camera &camera, SceneSettings settings) {
     settings.vegetation.coverage = true;
     settings.shadows.mode = ShadowMode::Off;
-    settings.taa.enabled = false;
+    settings.antialiasing = ow::AntialiasingMode::Off;
     settings.gtao.mode = GtaoMode::Off;
     settings.atmosphere.mode = AtmosphereMode::Off;
     settings.background[0] = settings.background[1] = settings.background[2] = 0;
@@ -504,7 +504,7 @@ int main(int argc, char **argv) {
             scene.vegetation.density = o.density;
             scene.vegetation.shadowDistance = o.grassShadowDistance;
             scene.gtao.mode = o.gtao;
-            scene.taa.enabled = true;
+            scene.antialiasing = ow::AntialiasingMode::Taa;
             scene.shadows.mode = ShadowMode::CSM;
             // Seed upload and query slots before calibration or paired measurements.
             auto first = Clock::now();
@@ -589,7 +589,7 @@ int main(int argc, char **argv) {
                             if (variant == 1)
                                 settings.shadows.mode = ShadowMode::Off;
                             if (variant == 2)
-                                settings.taa.enabled = false;
+                                settings.antialiasing = ow::AntialiasingMode::Off;
                             if (variant == 3)
                                 settings.vegetation.wind = 2;
                             if (variant == 4)

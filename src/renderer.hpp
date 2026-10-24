@@ -41,6 +41,7 @@ struct RendererOptions {
     bool curvedHorizon = false;
     uint64_t taaBudgetBytes = 512ull << 20, bloomBudgetBytes = 128ull << 20;
     bool forceNoTaa = false, forceNoBloom = false;
+    uint64_t spatialAaBudgetBytes = 256ull << 20;
     uint64_t gtaoBudgetBytes = 512ull * 1024 * 1024;
     bool forceNoGtao = false, forceWideGtao = false;
     bool forceFixedIndirect = false, forceSingleIndirect = false, forceDirectVisibility = false,
@@ -61,6 +62,7 @@ struct SceneSettings {
     ShadingMode shading = ShadingMode::Pbr;
     AtmosphereSettings atmosphere;
     VolumetricSettings volumetrics;
+    AntialiasingMode antialiasing = AntialiasingMode::Off;
     TaaSettings taa;
     BloomSettings bloom;
     GtaoSettings gtao;
@@ -131,6 +133,7 @@ class Renderer {
     const AtmosphereStats &atmosphereStats() const;
     AtmosphereSnapshot readAtmosphereSnapshot();
     const PostStats &postStats() const;
+    const SpatialAaStats &spatialAaStats() const;
     PostSnapshot readPostSnapshot();
     HdrSnapshot readHdrSnapshot(); // Blocking diagnostic, pre-exposed pixels.
     const RenderingStats &renderingStats() const;
@@ -176,8 +179,8 @@ class Renderer {
                                                           uint32_t tileLevel = 0);
     std::vector<TerrainSample> normalsForFixture(const std::vector<glm::vec2> &heights);
     // Blocking numerical probe; non-streamed/non-LOD scratch only.
-    std::vector<TerrainSample> sampleCurvatureFixture(const std::vector<TerrainSample> &,
-                                                     glm::vec4 curvature, bool reducedTrigPrecision);
+    std::vector<TerrainSample> sampleCurvatureFixture(const std::vector<TerrainSample> &, glm::vec4 curvature,
+                                                      bool reducedTrigPrecision);
     // Diagnostic observer override; subsequent render must use freezeLod=true.
     void setTerrainLodObserver(const Camera &);
     TerrainLodReviewState terrainLodReviewState() const;

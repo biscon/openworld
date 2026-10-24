@@ -15,6 +15,8 @@ Milestone 4 adds [hierarchical terrain residency](terrain_hierarchy.md): coarse 
 
 ## System design index
 
+- [Spatial antialiasing](rendering_temporal_post.md#spatial-antialiasing) — implemented and natively verified: selectable FXAA and SMAA 1x in the engine output pipeline, preserving current TAA.
+
 - [Thin-geometry TAA stability](rendering_temporal_post.md#thin-geometry-coverage) — implemented and natively verified: material classification, bounded coverage history and local rejection relaxation for grass and future canopy foliage.
 
 - [Vegetation engine integration, visibility and range](rendering_vegetation_visibility.md) — implemented 5J-V4, native validation and full-scene measurements recorded: enabled engine integration, live 200 m range, bounded GPU visibility and shared depth/coverage.

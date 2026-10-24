@@ -281,3 +281,69 @@ show 27–48% lower display-space temporal variance across the sampled grass ban
 this is reduced shimmer, not elimination of every dense subpixel artifact. Coverage
 classification cannot distinguish every variation between overlapping blades of the
 same class. Full TSR contrast-line detection remains outside this correction.
+
+
+## Spatial antialiasing
+
+Status: implemented and natively verified. `AntialiasingMode` selects Off,
+FXAA, SMAA 1x or TAA; new engine sessions default to SMAA 1x. Library scene
+defaults stay Off for explicit fixtures. TAA tuning remains separate; only TAA
+enables jitter, motion attachments and temporal history. Switching back resets
+history. Grass geometry/shading and further temporal improvements are deferred.
+
+Renderer-owned `VulkanSpatialAA` composites bloom and tone maps at scene
+resolution into RGBA8, then runs FXAA reference preset 3 or SMAA 1x High.
+SMAA uses official luma edges, blending weights and neighborhood blending, with
+vendored Area/Search textures and no temporal subsamples or predication. Encoded
+UNORM reads serve FXAA and edge detection; sRGB views decode for SMAA linear
+blending and final output scaling. Presentation encodes once, then draws native
+UI. Off/TAA retain the fused output path; diagnostic views bypass spatial AA.
+
+Two frame slots own reusable source/result images; SMAA additionally owns RG8
+edges and RGBA8 weights. Immutable lookup images are shared. Only the selected
+mode is allocated, at the existing idle reconfiguration boundary. The 256 MiB
+startup budget counts actual image allocations and lookup upload storage;
+unsupported formats or insufficient budget fall back to Off with a visible
+reason. No steady-state allocation or additional frame wait is introduced.
+GPU timestamps include tone-map preparation and filtering.
+
+The Output selector exposes all modes and TAA-only tuning. CLI `--aa` accepts
+`off|fxaa|smaa|taa`; `--no-taa` aliases Off. Last explicit AA argument wins and
+overrides a loaded bookmark. Review format v4 stores the enum; v1–v3 map legacy
+`taa.enabled` to TAA/Off. Existing renderer startup budgets receive defaults
+when migrating old files.
+
+Validation: owned small GPU fixtures cover thin/diagonal edges, uniform color,
+gamma, frozen stability, tiny/odd extents, resize, mode transitions and budget
+fallback; existing temporal/bookmark regression tests and synchronization
+validation protect integration. One engine grass view compares frozen/wind/pan
+behavior and one short warmed 1080p run compares GPU time and memory. No new
+viewer or broad benchmark suite.
+
+Verification (RTX 3060): Debug/Release builds, new spatial GPU fixtures, existing
+temporal/resolution/bookmark checks and new SPIR-V validation pass. Native Vulkan
+synchronization validation reports no errors. Both spatial modes preserve flat
+colors within one UNORM step under ACES/AgX and bloom, and are pixel-identical
+across repeated frozen frames. Legacy v1–v3 AA choices and v4 round trips pass. Actual engine startup checks
+confirm the SMAA default, explicit CLI precedence over a loaded bookmark and the
+`--no-taa` Off alias, with native UI rendering and zero validation errors.
+
+One warmed 1920×1080 engine grass comparison (80 m, 32 warm-up + 120 sampled
+frames per mode) measured these filter costs; spatial times include tone-map
+preparation, while TAA time is its resolve/coverage passes:
+
+| Mode | Median / p95 GPU ms | AA allocations MiB | Full-frame median ms |
+| --- | ---: | ---: | ---: |
+| Off | 0 / 0 | 0.001 | 5.565 |
+| FXAA | 0.215 / 0.219 | 33.751 | 5.688 |
+| SMAA 1x High | 0.308 / 0.460 | 59.432 | 5.867 |
+| TAA + thin coverage | 0.627 / 0.640 | 168.344 | 7.592 |
+
+All four modes recorded zero steady-state render-thread C++ allocation calls.
+Off's tiny allocation is shared view/minimal terrain-record buffers, not history.
+Eight frozen grass captures were identical for Off/FXAA/SMAA; TAA retained
+frame-to-frame variation. Wind/pan captures render correctly; SMAA preserves
+sharper fine detail than FXAA. Spatial AA does not reconstruct missing subpixel
+geometry or guarantee stability during movement. Grass LOD/shading changes and
+further TAA changes remain deferred. `vegetation_stream_probe --aa-check` runs
+this focused comparison through the existing renderer, without a new viewer.

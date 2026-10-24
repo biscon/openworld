@@ -49,7 +49,7 @@ int main(int argc, char **argv) {
         scene.wireframe = scene.normalView = scene.lodColours = false;
         scene.shadows.mode = ShadowMode::Off;
         scene.gtao.mode = GtaoMode::Off;
-        scene.taa.enabled = false;
+        scene.antialiasing = ow::AntialiasingMode::Off;
         scene.bloom.intensity = 0;
         scene.opaqueDepthPrepass = true;
         r.setTerrainSettings(view.terrain);

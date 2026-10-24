@@ -15,8 +15,8 @@ class VulkanPost {
     ~VulkanPost();
     bool needsResize(uint32_t, uint32_t, bool taa, bool bloom) const;
     void resize(uint32_t, uint32_t, bool taa, bool bloom); // Idle boundary.
-    void begin(uint32_t frame, const Camera &, TerrainGrid, const TaaSettings &, const BloomSettings &,
-               float exposure, bool diagnostic);
+    void begin(uint32_t frame, const Camera &, TerrainGrid, bool taa, const TaaSettings &,
+               const BloomSettings &, float exposure, bool diagnostic);
     void reset(TemporalReset reason = TemporalReset::Explicit);
     void submitted();
     const TemporalView &view() const;

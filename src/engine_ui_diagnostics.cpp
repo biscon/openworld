@@ -260,6 +260,11 @@ void EngineUi::drawDiagnostics(UiWindow window, UiContext &context, UiActions &a
     }
     case UiWindow::PostDiagnostics: {
         const auto &post = renderer.postStats();
+        const auto &aa = renderer.spatialAaStats();
+        ImGui::Text("AA: %s (requested %s)", antialiasingName(aa.effective), antialiasingName(aa.requested));
+        ImGui::Text("Spatial AA: %.2f MiB | %s", aa.bytes / 1048576., postFallbackName(aa.fallback));
+        if (aa.timingsAvailable)
+            ImGui::Text("Spatial AA including preparation: %.3f ms", aa.milliseconds);
         ImGui::Text("Thin geometry: %s | %s | %.1f MiB", post.thinGeometry ? "on" : "off",
                     ow::postFallbackName(post.thinGeometryFallback), post.thinGeometryBytes / 1048576.);
         ImGui::TextWrapped("TAA %s | bloom %s | %.1f / %.1f MiB", post.taa ? "on" : "off",

@@ -4,8 +4,9 @@
 #include <stdexcept>
 #include <vector>
 namespace ow {
+enum class AntialiasingMode : uint32_t { Off, Fxaa, Smaa1x, Taa };
+const char *antialiasingName(AntialiasingMode);
 struct TaaSettings {
-    bool enabled = false;
     float historyWeight = .9f;
     bool thinGeometry = true;
 };
@@ -14,6 +15,13 @@ struct BloomSettings {
 };
 enum class PostFallback : uint32_t { None, Disabled, Unsupported, Budget, Diagnostic };
 enum class TemporalReset : uint32_t { None, Initial, Explicit, Extent, CameraCut, Settings };
+struct SpatialAaStats {
+    AntialiasingMode requested = AntialiasingMode::Off, effective = AntialiasingMode::Off;
+    PostFallback fallback = PostFallback::Disabled;
+    uint64_t bytes = 0;
+    bool timingsAvailable = false;
+    double milliseconds = 0;
+};
 struct PostStats {
     bool thinGeometry = false;
     PostFallback thinGeometryFallback = PostFallback::Disabled;

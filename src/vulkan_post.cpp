@@ -421,7 +421,7 @@ void VulkanPost::reset(TemporalReset r) {
     impl_->haveCoverage = false;
     impl_->sequence = 0;
 }
-void VulkanPost::begin(uint32_t frame, const Camera &camera, TerrainGrid grid, const TaaSettings &t,
+void VulkanPost::begin(uint32_t frame, const Camera &camera, TerrainGrid grid, bool taa, const TaaSettings &t,
                        const BloomSettings &b, float exposure, bool diagnostic) {
     auto &s = *impl_;
     s.stats.taaFallback = diagnostic ? PostFallback::Diagnostic : s.taaAllocation;
@@ -431,7 +431,7 @@ void VulkanPost::begin(uint32_t frame, const Camera &camera, TerrainGrid grid, c
     s.bloom = b;
     s.currentExposure = exposure;
     s.pendingCamera = camera;
-    s.stats.taa = t.enabled && s.frames[frame].taa.history.view && !diagnostic;
+    s.stats.taa = taa && s.frames[frame].taa.history.view && !diagnostic;
     s.stats.thinGeometry = s.stats.taa && t.thinGeometry && s.frames[frame].taa.coverage.view;
     s.stats.thinGeometryFallback = !t.thinGeometry         ? PostFallback::Disabled
                                    : !s.stats.taa          ? s.stats.taaFallback

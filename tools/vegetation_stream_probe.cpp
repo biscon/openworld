@@ -99,16 +99,18 @@ struct Samples {
 int main(int argc, char **argv) {
     try {
         if (argc < 2)
-            throw std::invalid_argument(
-                "Usage: vegetation_stream_probe OUTPUT [--cpu-check] "
-                "[--engine-scene] [--distance 20..200] [--occlusion-check] [--route-check] [--taa-check]");
+            throw std::invalid_argument("Usage: vegetation_stream_probe OUTPUT [--cpu-check] "
+                                        "[--engine-scene] [--distance 20..200] [--occlusion-check] "
+                                        "[--route-check] [--taa-check] [--aa-check]");
         bool cpuOnly = false, routeOnly = false, engineScene = false, occlusionCheck = false,
-             taaCheck = false;
+             taaCheck = false, aaCheck = false;
         float distance = 70;
         for (int i = 2; i < argc; ++i) {
             const std::string arg = argv[i];
             if (arg == "--cpu-check")
                 cpuOnly = true;
+            else if (arg == "--aa-check")
+                aaCheck = true;
             else if (arg == "--taa-check")
                 taaCheck = true;
             else if (arg == "--route-check")
@@ -174,7 +176,7 @@ int main(int argc, char **argv) {
             scene.atmosphere.mode = AtmosphereMode::Physical;
             scene.bloom.intensity = .05f;
         }
-        scene.taa.enabled = true;
+        scene.antialiasing = ow::AntialiasingMode::Taa;
         scene.opaqueDepthPrepass = true;
         scene.shadows.mode = ShadowMode::CSM;
         auto start = Clock::now();
@@ -229,6 +231,50 @@ int main(int argc, char **argv) {
         bookmark.scene = scene;
         bookmark.startup = o;
         saveReviewView(output / "close-view.json", bookmark);
+        if (aaCheck) {
+            const Camera origin = camera;
+            for (auto mode : {AntialiasingMode::Off, AntialiasingMode::Fxaa, AntialiasingMode::Smaa1x,
+                              AntialiasingMode::Taa}) {
+                camera = origin;
+                scene.antialiasing = mode;
+                scene.vegetation.wind = 0;
+                scene.vegetation.time = 0;
+                std::vector<double> timings, total;
+                timings.reserve(120);
+                total.reserve(120);
+                uint64_t allocations = 0;
+                for (uint32_t i = 0; i < 152; ++i) {
+                    frame();
+                    if (i >= 32) {
+                        timings.push_back(mode == AntialiasingMode::Taa ? r.postStats().taaMilliseconds
+                                                                        : r.spatialAaStats().milliseconds);
+                        total.push_back(r.renderingStats().frameMilliseconds);
+                        allocations += frameAllocations;
+                    }
+                }
+                const auto prefix = std::string("aa-") + std::to_string(uint32_t(mode));
+                std::cout << antialiasingName(mode) << ": filter median/p95 " << percentile(timings, .5)
+                          << " / " << percentile(timings, .95) << " ms; frame GPU " << percentile(total, .5)
+                          << " ms; AA memory "
+                          << (r.postStats().taaBytes + r.spatialAaStats().bytes) / 1048576.
+                          << " MiB; allocations " << allocations << '\n';
+                for (int i = 0; i < 8; ++i) {
+                    frame();
+                    r.capture(output / (prefix + "-static-" + std::to_string(i) + ".ppm"));
+                }
+                scene.vegetation.wind = 1;
+                for (uint32_t i = 0; i < 32; ++i) {
+                    frame();
+                }
+                r.capture(output / (prefix + "-wind.ppm"));
+                for (uint32_t i = 0; i < 32; ++i) {
+                    camera.yaw += .001f;
+                    frame();
+                }
+                r.capture(output / (prefix + "-pan.ppm"));
+            }
+            return 0;
+        }
         if (taaCheck) {
             scene.vegetation.wind = 0;
             for (bool enabled : {false, true}) {
@@ -352,7 +398,7 @@ int main(int argc, char **argv) {
         recovery.print("post-return recovery");
         if (quiet < 8)
             throw std::runtime_error("Vegetation did not recover within the bounded return interval");
-        scene.taa.enabled = false;
+        scene.antialiasing = ow::AntialiasingMode::Off;
         for (int i = 0; i < 8; ++i)
             frame();
         r.capture(output / "taa-off.ppm");

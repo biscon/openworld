@@ -186,7 +186,7 @@ int main() {
             for (uint32_t samples : {1u, 2u})
                 for (bool taa : {false, true}) {
                     stable.volumetrics.samples = samples;
-                    stable.taa.enabled = taa;
+                    stable.antialiasing = (taa) ? ow::AntialiasingMode::Taa : ow::AntialiasingMode::Off;
                     frame(r, c, stable);
                     auto previous = r.readVolumetricSnapshot();
                     double maximum = 0;
@@ -205,7 +205,7 @@ int main() {
             r.removeFogVolume(handle);
             // Independent fine quadrature through steep height fog, including the
             // far fade. Check every boundary, not just the terminal transmission.
-            stable.taa.enabled = false;
+            stable.antialiasing = ow::AntialiasingMode::Off;
             frame(r, c, stable);
             auto height = r.readVolumetricSnapshot();
             double maxError = 0;
@@ -406,7 +406,7 @@ int main() {
             stable.shadows.mode = ShadowMode::CSM;
             stable.volumetrics.temporal = true;
             stable.volumetrics.samples = 1;
-            stable.taa.enabled = taa;
+            stable.antialiasing = (taa) ? ow::AntialiasingMode::Taa : ow::AntialiasingMode::Off;
             frame(r, c, stable);
             auto previous = r.readVolumetricSnapshot();
             double maximum = 0, peak = 0;
@@ -429,7 +429,7 @@ int main() {
             combined.visibility = visibility;
             combined.shadows.mode = ShadowMode::CSM;
             combined.gtao.mode = GtaoMode::Half;
-            combined.taa.enabled = true;
+            combined.antialiasing = ow::AntialiasingMode::Taa;
             combined.bloom.intensity = .05f;
             frame(r, c, combined);
             frame(r, c, combined);
@@ -538,7 +538,7 @@ int main() {
         r.removeFogVolume(vh);
         frame(r, c, s);
         require(!r.volumetricStats().historyValid, "Volume removal rejects history");
-        s.taa.enabled = true;
+        s.antialiasing = ow::AntialiasingMode::Taa;
         s.bloom.intensity = .05f;
         s.volumetrics.quality = VolumetricQuality::High;
         s.volumetrics.samples = 2;

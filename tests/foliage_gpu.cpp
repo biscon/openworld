@@ -42,7 +42,7 @@ int main() {
             Renderer r(options(library, population, fixed));
             SceneSettings s;
             s.terrainVisible = false;
-            s.taa.enabled = false;
+            s.antialiasing = ow::AntialiasingMode::Off;
             s.shadows.mode = ShadowMode::CSM;
             s.vegetation.depthPrepass = false;
             s.vegetation.wind = 2;
@@ -81,7 +81,7 @@ int main() {
             r.render(c, s);
             require(r.gtaoStats().effective == GtaoMode::Half, "foliage depth feeds GTAO");
             s.gtao.mode = GtaoMode::Off;
-            s.taa.enabled = true;
+            s.antialiasing = ow::AntialiasingMode::Taa;
             for (uint32_t f = 0; f < 4; ++f) {
                 s.vegetation.time = .4f + float(f) / 120;
                 r.render(c, s);
@@ -107,7 +107,7 @@ int main() {
             post = r.readPostSnapshot();
             for (auto v : post.motion)
                 require(v.w == 0, "time scrub invalidates history");
-            s.taa.enabled = false;
+            s.antialiasing = ow::AntialiasingMode::Off;
             s.opaqueDepthPrepass = false;
             s.vegetation.time = .2f;
             s.vegetation.transmission = false;

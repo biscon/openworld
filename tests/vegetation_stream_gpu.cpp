@@ -174,7 +174,7 @@ int main() {
             SceneSettings s;
             s.viewRadius = 1;
             s.frustumCulling = false;
-            s.taa.enabled = true;
+            s.antialiasing = ow::AntialiasingMode::Taa;
             s.vegetation.wind = .5f;
             auto first = settle(r, c, s);
             checkGround(r, first);

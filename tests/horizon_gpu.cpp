@@ -82,7 +82,7 @@ int main() {
         require(r.terrainAllocatedBytes() == bytes, "Horizon move and radius change reuse storage");
         s.shading = ShadingMode::Pbr;
         s.atmosphere.mode = AtmosphereMode::Physical;
-        s.taa.enabled = true;
+        s.antialiasing = ow::AntialiasingMode::Taa;
         s.bloom.intensity = .05f;
         s.gtao.mode = GtaoMode::Half;
         s.shadows.mode = ShadowMode::CSM;

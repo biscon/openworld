@@ -243,8 +243,15 @@ void EngineUi::drawSettings(UiWindow window, UiContext &context, UiActions &acti
         break;
     }
     case UiWindow::Output: {
-        ImGui::Checkbox("Temporal antialiasing", &scene.taa.enabled);
-        ImGui::Checkbox("Thin geometry stability", &scene.taa.thinGeometry);
+        int aa = int(scene.antialiasing);
+        if (ImGui::Combo("Antialiasing", &aa, "Off\0FXAA\0SMAA 1x\0TAA\0"))
+            scene.antialiasing = AntialiasingMode(aa);
+        if (scene.antialiasing == AntialiasingMode::Taa)
+            ImGui::Checkbox("Thin geometry stability", &scene.taa.thinGeometry);
+        const auto &aaStats = renderer.spatialAaStats();
+        if (aaStats.requested == scene.antialiasing && aaStats.effective != scene.antialiasing)
+            ImGui::TextWrapped("Effective AA: %s (%s)", antialiasingName(aaStats.effective),
+                               postFallbackName(aaStats.fallback));
         ImGui::SliderFloat("Bloom intensity", &scene.bloom.intensity, 0, .5f);
         ImGui::SliderFloat("Bloom threshold", &scene.bloom.threshold, 0, 100000, "%.0f");
         ImGui::SliderFloat("Bloom knee", &scene.bloom.knee, 0, 1);

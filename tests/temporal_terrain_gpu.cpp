@@ -44,7 +44,7 @@ void run(bool streaming, bool hierarchy) {
     c.pitch = -.5;
     SceneSettings s;
     s.viewRadius = 1;
-    s.taa.enabled = true;
+    s.antialiasing = ow::AntialiasingMode::Taa;
     s.output.ev100 = 15;
     s.shadows.mode = ShadowMode::Off;
     s.terrainMaterial.enabled = false;

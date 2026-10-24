@@ -194,7 +194,7 @@ int main() {
         // UI is neither jittered nor a bloom/history input, even at threshold zero.
         swatches.clear();
         scene.gtao = {};
-        scene.taa.enabled = true;
+        scene.antialiasing = ow::AntialiasingMode::Taa;
         scene.bloom.intensity = 1;
         scene.bloom.threshold = 0;
         scene.background[0] = scene.background[1] = scene.background[2] = 0;
@@ -207,7 +207,7 @@ int main() {
             for (auto pixel : level)
                 require(glm::vec3(pixel) == glm::vec3(0), "UI does not enter bloom extraction");
         const auto postOutput = capture(renderer, fixture.path / "post-ui.ppm");
-        scene.taa.enabled = false;
+        scene.antialiasing = ow::AntialiasingMode::Off;
         scene.bloom.intensity = 0;
         frame(renderer, camera, scene);
         require(postOutput == capture(renderer, fixture.path / "plain-ui.ppm"),

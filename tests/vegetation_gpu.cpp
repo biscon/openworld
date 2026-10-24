@@ -45,7 +45,7 @@ int main() {
                 s.vegetation.time = .4f;
                 s.vegetation.wind = 2;
                 s.vegetation.coverage = true;
-                s.taa.enabled = false;
+                s.antialiasing = ow::AntialiasingMode::Off;
                 s.shadows.mode = ShadowMode::Off;
                 s.opaqueDepthPrepass = false;
                 r.render(c, s);
@@ -68,7 +68,7 @@ int main() {
                     require(full.count(id), "stable density subset");
                 s.vegetation.density = 1;
                 s.vegetation.coverage = false;
-                s.taa.enabled = true;
+                s.antialiasing = ow::AntialiasingMode::Taa;
                 s.shadows.mode = ShadowMode::CSM;
                 for (uint32_t f = 0; f < 4; ++f) {
                     s.vegetation.time = .4f + f / 120.f;
@@ -96,7 +96,7 @@ int main() {
             // Distances exercise actual middle/far bins, including the hybrid card
             // stage.
             s.shadows.mode = ShadowMode::Off;
-            s.taa.enabled = false;
+            s.antialiasing = ow::AntialiasingMode::Off;
             s.vegetation.representation = 0;
             c.local = {0, 1.2, 30};
             c.pitch = 0;

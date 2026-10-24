@@ -8,6 +8,7 @@
 #include "vulkan_meshes.hpp"
 #include "vulkan_post.hpp"
 #include "vulkan_shadows.hpp"
+#include "vulkan_spatial_aa.hpp"
 #include "vulkan_terrain.hpp"
 #include "vulkan_terrain_stream.hpp"
 #include "vulkan_vegetation.hpp"
@@ -172,6 +173,7 @@ struct Renderer::Impl {
     std::unique_ptr<VulkanVisibility> visibility;
     VisibilityCapabilities visibilityCaps;
     std::unique_ptr<VulkanPost> post;
+    std::unique_ptr<VulkanSpatialAA> spatialAa;
     PostCapabilities postCaps;
     std::unique_ptr<TerrainHistory> terrainHistory;
     std::unique_ptr<VulkanGtao> gtao;
@@ -315,6 +317,8 @@ struct Renderer::Impl {
         post =
             std::make_unique<VulkanPost>(physical, device, queueFamily, postCaps, options.taaBudgetBytes,
                                          options.bloomBudgetBytes, temporalCapacity, options.shaderDirectory);
+        spatialAa = std::make_unique<VulkanSpatialAA>(physical, device, queueFamily,
+                                                      options.spatialAaBudgetBytes, options.shaderDirectory);
         terrainHistory = std::make_unique<TerrainHistory>(options.streaming.enabled ? 0 : temporalCapacity);
         if (options.streaming.enabled)
             streaming = std::make_unique<VulkanTerrainStream>(
@@ -1610,6 +1614,8 @@ struct Renderer::Impl {
             hasRendered = false;
         }
         validateGtao(settings.gtao);
+        if (uint32_t(settings.antialiasing) > uint32_t(AntialiasingMode::Taa))
+            throw std::invalid_argument("Invalid AA mode");
         validatePost(settings.taa, settings.bloom);
         if (sceneDirty)
             updateSceneTargets(true);
@@ -1625,11 +1631,19 @@ struct Renderer::Impl {
             gtao->resize(sceneExtent.width, sceneExtent.height, gtaoMode);
             hasRendered = false;
         }
-        if (post->needsResize(sceneExtent.width, sceneExtent.height, settings.taa.enabled,
-                              settings.bloom.intensity > 0)) {
-            check(vkDeviceWaitIdle(device), "Wait for post-process resource change");
-            post->resize(sceneExtent.width, sceneExtent.height, settings.taa.enabled,
-                         settings.bloom.intensity > 0);
+        const bool spatialResize =
+            spatialAa->needsResize(sceneExtent.width, sceneExtent.height, settings.antialiasing);
+        const bool temporalResize =
+            post->needsResize(sceneExtent.width, sceneExtent.height,
+                              settings.antialiasing == AntialiasingMode::Taa, settings.bloom.intensity > 0);
+        if (spatialResize || temporalResize) {
+            check(vkDeviceWaitIdle(device), "Wait for AA/post-process resource change");
+            // Release inactive temporal images before allocating the spatial mode.
+            if (temporalResize)
+                post->resize(sceneExtent.width, sceneExtent.height,
+                             settings.antialiasing == AntialiasingMode::Taa, settings.bloom.intensity > 0);
+            if (spatialResize)
+                spatialAa->resize(sceneExtent.width, sceneExtent.height, settings.antialiasing);
             hasRendered = false;
         }
         auto &frame = frames[frameIndex];
@@ -1666,9 +1680,14 @@ struct Renderer::Impl {
         const bool atmosphereChanged = atmosphere->historyChanged(settings.atmosphere, postDiagnostic);
         if (atmosphereChanged || volumetrics->historyChanged(settings.volumetrics))
             post->reset(TemporalReset::Settings);
-        post->begin(frameIndex, camera, options.terrainGrid, settings.taa, settings.bloom, frame.preExposure,
+        post->begin(frameIndex, camera, options.terrainGrid, settings.antialiasing == AntialiasingMode::Taa,
+                    settings.taa, settings.bloom, frame.preExposure,
                     postDiagnostic || settings.volumetrics.diagnostic != 0 ||
                         settings.atmosphere.diagnostic != 0);
+        spatialAa->begin(frameIndex,
+                         postDiagnostic || settings.volumetrics.diagnostic != 0 ||
+                             settings.atmosphere.diagnostic != 0,
+                         post->stats());
         volumetrics->begin(frameIndex, camera, options.terrainGrid, settings.volumetrics, settings.lighting,
                            clusters->lights, settings.localLights, post->view(), frame.preExposure,
                            postDiagnostic || settings.atmosphere.diagnostic != 0, atmosphereChanged,
@@ -2139,9 +2158,12 @@ struct Renderer::Impl {
                              VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
                          VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
         post->record(cmd, frame.hdrView, frame.depthView);
+        spatialAa->record(cmd, frame.hdrView, post->bloomView(frame.hdrView), post->stats().bloom,
+                          settings.bloom.intensity, uint32_t(settings.output.toneMapper));
+        const auto spatialResult = spatialAa->result();
         VkDescriptorImageInfo postImages[] = {
             {{},
-             post->resolved(frame.hdrView),
+             spatialResult ? spatialResult : post->resolved(frame.hdrView),
              post->stats().taa ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
             {{},
              post->bloomView(frame.hdrView),
@@ -2173,12 +2195,12 @@ struct Renderer::Impl {
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, outputLayout, 0, 1, &frame.outputSet, 0,
                                 nullptr);
         uint32_t outputConstants[] = {frame.diagnostic ? 1u : 0u,
-                                      uint32_t(settings.output.toneMapper),
+                                      spatialResult ? 2u : uint32_t(settings.output.toneMapper),
                                       gtao->active() ? uint32_t(settings.gtao.diagnostic) : 0u,
                                       extent.width,
                                       extent.height,
                                       0};
-        const float bloomIntensity = post->stats().bloom ? settings.bloom.intensity : 0;
+        const float bloomIntensity = post->stats().bloom && !spatialResult ? settings.bloom.intensity : 0;
         std::memcpy(&outputConstants[5], &bloomIntensity, 4);
         vkCmdPushConstants(cmd, outputLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(outputConstants),
                            outputConstants);
@@ -2349,6 +2371,7 @@ struct Renderer::Impl {
             if (skyLayout)
                 vkDestroyPipelineLayout(device, skyLayout, nullptr);
             gtao.reset();
+            spatialAa.reset();
             post.reset();
             shadows.reset();
             clusters.reset();
@@ -2613,6 +2636,7 @@ void Renderer::resetTemporalHistory() {
 }
 bool Renderer::invalidateInstanceHistory(InstanceHandle h) { return impl_->meshes->invalidateHistory(h); }
 const PostStats &Renderer::postStats() const { return impl_->post->stats(); }
+const SpatialAaStats &Renderer::spatialAaStats() const { return impl_->spatialAa->stats(); }
 PostSnapshot Renderer::readPostSnapshot() { return impl_->readPostSnapshot(); }
 const AtmosphereStats &Renderer::atmosphereStats() const { return impl_->atmosphere->stats(); }
 AtmosphereSnapshot Renderer::readAtmosphereSnapshot() { return impl_->readAtmosphereSnapshot(); }

@@ -135,7 +135,7 @@ int main(int argc, char **argv) {
         s.viewRadius = requestedRadius ? int(requestedRadius) : quick ? 8 : 64;
         if (s.viewRadius > terrainMaximumRadius(o.terrainGrid))
             throw std::invalid_argument("Probe radius exceeds detailed view cap");
-        s.taa.enabled = true;
+        s.antialiasing = ow::AntialiasingMode::Taa;
         s.bloom.intensity = .05f;
         if (streaming) {
             TerrainSettings t;

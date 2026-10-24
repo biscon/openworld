@@ -109,7 +109,7 @@ int main(int argc, char **argv) {
         SceneSettings s;
         s.terrainVisible = false;
         s.atmosphere.mode = AtmosphereMode::Physical;
-        s.taa.enabled = true;
+        s.antialiasing = ow::AntialiasingMode::Taa;
         s.bloom.intensity = .05f;
         s.shadows.nearDistance = 150;
         s.shadows.farDistance = 500;

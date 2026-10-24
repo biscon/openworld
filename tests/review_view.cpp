@@ -13,7 +13,7 @@ int main() {
         ReviewView v;
         v.startup.terrainGrid = {64, .5f};
         v.startup.terrainCapacity = 64;
-        v.startup.lod = {true, 8, 64};
+        v.startup.lod = {false, 8, 64};
         v.startup.curvedHorizon = true;
         v.startup.materialDirectory = "owned-test-palette";
         v.startup.streaming.enabled = v.startup.streaming.hierarchical = true;
@@ -50,7 +50,30 @@ int main() {
             std::ofstream(legacyPath) << legacy.dump();
             require(loadReviewView(legacyPath).scene.taa.thinGeometry, "Old bookmarks enable thin coverage");
         }
+        for (auto mode : {AntialiasingMode::Off, AntialiasingMode::Fxaa, AntialiasingMode::Smaa1x,
+                          AntialiasingMode::Taa}) {
+            v.scene.antialiasing = mode;
+            saveReviewView(path, v);
+            require(loadReviewView(path).scene.antialiasing == mode, "Every AA mode round trips");
+        }
+        for (int version : {1, 2, 3})
+            for (bool enabled : {false, true}) {
+                std::ifstream input(path);
+                auto legacy = nlohmann::json::parse(input);
+                legacy["version"] = version;
+                legacy["scene"].erase("antialiasing");
+                legacy["scene"]["taa"]["enabled"] = enabled;
+                legacy["startup"].erase("spatialAaBudgetBytes");
+                const auto oldPath = dir / "legacy-aa.json";
+                std::ofstream(oldPath) << legacy;
+                const auto old = loadReviewView(oldPath);
+                require(old.scene.antialiasing == (enabled ? AntialiasingMode::Taa : AntialiasingMode::Off),
+                        "Legacy AA choice is preserved");
+                require(old.startup.spatialAaBudgetBytes == RendererOptions{}.spatialAaBudgetBytes,
+                        "Legacy spatial budget defaults");
+            }
         const auto loaded = loadReviewView(path);
+        require(!loaded.startup.lod.enabled, "Terrain LOD enable state survives AA bookmark migration");
         require(!loaded.scene.taa.thinGeometry, "Thin-geometry comparison setting round trips");
         require(loaded.camera.chunk.x == v.camera.chunk.x && loaded.camera.local == v.camera.local &&
                     loaded.camera.speed == 5 && loaded.terrain.seed == 771 &&
@@ -81,7 +104,7 @@ int main() {
         auto invalid = v;
         invalid.version = 99;
         rejects([&] { saveReviewView(path, invalid); }, "unsupported version rejected before replacing file");
-        require(loadReviewView(path).version == 3, "invalid save leaves existing view intact");
+        require(loadReviewView(path).version == 4, "invalid save leaves existing view intact");
         nlohmann::json legacy;
         {
             std::ifstream input(path);
@@ -98,7 +121,7 @@ int main() {
         require(old.scene.vegetation.enabled && old.scene.vegetation.distance == 80,
                 "old bookmarks acquire engine vegetation defaults");
         saveReviewView(dir / "legacy.json", old);
-        require(loadReviewView(dir / "legacy.json").version == 3, "new saves upgrade v1 bookmarks");
+        require(loadReviewView(dir / "legacy.json").version == 4, "new saves upgrade v1 bookmarks");
         for (auto keys : {std::vector<TerrainPatchKey>{{0, 0, 32}},
                           {{1, 0, 0}},
                           {{0, 0, 0}, {0, 0, 1}},
@@ -115,6 +138,9 @@ int main() {
         invalid = v;
         invalid.startup.normalSubdivisions = 4;
         rejects([&] { saveReviewView(path, invalid); }, "unsupported normal subdivision rejected");
+        invalid = v;
+        invalid.scene.antialiasing = AntialiasingMode(99);
+        rejects([&] { saveReviewView(path, invalid); }, "invalid AA enum rejected");
         invalid = v;
         invalid.scene.visibility = VisibilityMode(99);
         rejects([&] { saveReviewView(path, invalid); }, "invalid enum rejected");

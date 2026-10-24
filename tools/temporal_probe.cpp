@@ -157,7 +157,7 @@ int main(int argc, char **argv) {
         passes << "mode,level,width,height,down_median_ms,down_p95_ms,up_median_ms,up_p95_ms\n";
         const auto sizes = bloomExtents(width, height);
         for (uint32_t mode = 0; mode < 4; ++mode) {
-            settings.taa.enabled = (mode & 1) != 0;
+            settings.antialiasing = ((mode & 1) != 0) ? ow::AntialiasingMode::Taa : ow::AntialiasingMode::Off;
             settings.bloom.intensity = (mode & 2) ? .05f : 0;
             renderer.resetTemporalHistory();
             std::vector<double> cpu, gpu, taa, bloom;

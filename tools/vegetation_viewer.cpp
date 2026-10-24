@@ -107,7 +107,7 @@ int main(int argc, char **argv) {
         r.createInstance(instance);
         SceneSettings scene;
         scene.terrainVisible = false;
-        scene.taa.enabled = true;
+        scene.antialiasing = ow::AntialiasingMode::Taa;
         scene.shadows.mode = ShadowMode::CSM;
         Camera camera = viewpoint(0);
         bool running = true, captured = false, paused = false;
@@ -183,7 +183,9 @@ int main(int argc, char **argv) {
                 ImGui::Checkbox("Vegetation depth prepass", &scene.vegetation.depthPrepass);
                 ImGui::SliderAngle("Sun elevation", &sunAngle, 5, 175);
                 ImGui::SliderFloat("Exposure EV100", &scene.output.ev100, 12, 17);
-                ImGui::Checkbox("TAA", &scene.taa.enabled);
+                int aa = int(scene.antialiasing);
+                if (ImGui::Combo("AA", &aa, "Off\0FXAA\0SMAA 1x\0TAA\0"))
+                    scene.antialiasing = ow::AntialiasingMode(aa);
                 ImGui::Combo("GTAO", &ao, "Off\0Half\0Full\0");
                 bool shadows = scene.shadows.mode == ShadowMode::CSM;
                 if (ImGui::Checkbox("Scene shadows", &shadows))

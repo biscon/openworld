@@ -90,10 +90,9 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(GtaoSettings, mode, radius, diagnostic)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ShadowSettings, mode, nearDistance, farDistance, biasTexels,
                                    normalBiasTexels, diagnostic)
 void to_json(json &j, const TaaSettings &v) {
-    j = {{"enabled", v.enabled}, {"historyWeight", v.historyWeight}, {"thinGeometry", v.thinGeometry}};
+    j = {{"historyWeight", v.historyWeight}, {"thinGeometry", v.thinGeometry}};
 }
 void from_json(const json &j, TaaSettings &v) {
-    j.at("enabled").get_to(v.enabled);
     j.at("historyWeight").get_to(v.historyWeight);
     v.thinGeometry = j.value("thinGeometry", true);
 }
@@ -104,10 +103,10 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(VegetationHabitatInput, revision, weights, mi
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(VegetationExclusionInput, revision, centre, radius)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(VegetationSettings, enabled, habitat, exclusion, density, time, wind,
                                    windDirection, distance, transmission, depthPrepass, occlusion)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SceneSettings, shading, atmosphere, taa, bloom, gtao, shadows,
-                                   terrainVisible, localLights, clusterDiagnostic, material, terrainMaterial,
-                                   lighting, output, viewRadius, lod, lodColours, freezeLod, visibility,
-                                   opaqueDepthPrepass, terrainLodQuality, terrainLodErrorView,
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SceneSettings, shading, atmosphere, antialiasing, taa, bloom, gtao,
+                                   shadows, terrainVisible, localLights, clusterDiagnostic, material,
+                                   terrainMaterial, lighting, output, viewRadius, lod, lodColours, freezeLod,
+                                   visibility, opaqueDepthPrepass, terrainLodQuality, terrainLodErrorView,
                                    terrainLodPixelError, frustumCulling, eroded, normalView, wireframe,
                                    chunkBorders, filteredNormals, background, vegetation)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(RendererOptions, materialDirectory, terrainGrid, normalSubdivisions,
@@ -116,9 +115,9 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(RendererOptions, materialDirectory, terrainGr
                                    forceRgbaMaterials, forceTrilinear, materialBudgetBytes,
                                    forceDirectShadows, forceManualShadowFiltering, forceNoShadowDepth,
                                    visibilityCapacity, atmosphereBudgetBytes, forceNoAtmosphere,
-                                   taaBudgetBytes, bloomBudgetBytes, forceNoTaa, forceNoBloom,
-                                   gtaoBudgetBytes, forceNoGtao, forceWideGtao, forceFixedIndirect,
-                                   forceSingleIndirect, forceDirectVisibility, forceNoHiZ)
+                                   taaBudgetBytes, bloomBudgetBytes, spatialAaBudgetBytes, forceNoTaa,
+                                   forceNoBloom, gtaoBudgetBytes, forceNoGtao, forceWideGtao,
+                                   forceFixedIndirect, forceSingleIndirect, forceDirectVisibility, forceNoHiZ)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ReviewView, version, camera, terrain, terrainOrigin, scene, lod, startup)
 namespace {
 void check(bool valid, const char *message) {
@@ -144,7 +143,8 @@ void cameraValid(const Camera &c) {
 }
 } // namespace
 void validateReviewView(const ReviewView &v) {
-    check(v.version == 1 || v.version == 2 || v.version == 3, "Unsupported review view version");
+    check(v.version == 1 || v.version == 2 || v.version == 3 || v.version == 4,
+          "Unsupported review view version");
     finite(json(v));
     cameraValid(v.camera);
     cameraValid(v.lod.observer);
@@ -192,6 +192,7 @@ void validateReviewView(const ReviewView &v) {
         }
     validateAtmosphere(s.atmosphere);
     validateGtao(s.gtao);
+    check(uint32_t(s.antialiasing) <= uint32_t(AntialiasingMode::Taa), "Invalid AA mode");
     validatePost(s.taa, s.bloom);
     validate(s.shadows);
     validate(s.vegetation);
@@ -221,6 +222,11 @@ ReviewView loadReviewView(const std::filesystem::path &path) {
         defaults.distance = 80;
         j["scene"]["vegetation"] = defaults;
     }
+    if (j.value("version", 0) < 4) {
+        j["scene"]["antialiasing"] =
+            j.at("scene").at("taa").value("enabled", false) ? AntialiasingMode::Taa : AntialiasingMode::Off;
+        j["startup"]["spatialAaBudgetBytes"] = RendererOptions{}.spatialAaBudgetBytes;
+    }
     auto v = j.get<ReviewView>();
     validateReviewView(v);
     return v;
@@ -235,7 +241,7 @@ void saveReviewView(const std::filesystem::path &path, const ReviewView &v) {
         std::ofstream f(temp, std::ios::trunc);
         f.exceptions(std::ios::failbit | std::ios::badbit);
         auto document = json(v);
-        document["version"] = 3; // Loading v1/v2 remains supported; every new save
+        document["version"] = 4; // Loading v1–v3 remains supported; every new save
                                  // uses the current format.
         const auto bytes = document.dump(2);
         check(bytes.size() + 1 <= 1024 * 1024, "Review file exceeds 1 MiB");

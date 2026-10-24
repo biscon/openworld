@@ -3,7 +3,7 @@
 namespace ow {
 // Explicit diagnostic bookmark; no GPU handles, assets or streaming residency.
 struct ReviewView {
-    uint32_t version = 3;
+    uint32_t version = 4;
     Camera camera;
     TerrainSettings terrain;
     ChunkCoord terrainOrigin; // Fixed inspection terrain may differ from the

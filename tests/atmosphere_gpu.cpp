@@ -24,7 +24,7 @@ void finite(const std::vector<glm::vec4> &v) {
             require(std::isfinite(p[k]) && p[k] >= 0, "Finite atmosphere product");
 }
 void referenceChecks(Renderer &r, Camera c, SceneSettings s) {
-    s.taa.enabled = false;
+    s.antialiasing = ow::AntialiasingMode::Off;
     s.bloom.intensity = 0;
     s.atmosphere.multipleScattering = false;
     s.atmosphere.groundAlbedo = 0;
@@ -215,7 +215,7 @@ void extendedHorizonChecks() {
     instance.scale = {10000, 10000, 1};
     auto handle = r.createInstance(instance);
     s.atmosphere.mode = AtmosphereMode::Off;
-    s.taa.enabled = true;
+    s.antialiasing = ow::AntialiasingMode::Taa;
     for (auto mode : {VisibilityMode::Direct, VisibilityMode::Indirect, VisibilityMode::HiZ}) {
         s.visibility = mode;
         s.opaqueDepthPrepass = true;
@@ -235,7 +235,7 @@ void extendedHorizonChecks() {
     frame(r, c, s);
     require(r.postStats().historyValid, "Curved camera rebase retains temporal history");
     s.atmosphere.mode = AtmosphereMode::Physical;
-    s.taa.enabled = false;
+    s.antialiasing = ow::AntialiasingMode::Off;
     frame(r, c, s);
     auto opaque = r.readHdrSnapshot();
     material.alpha = AlphaMode::Blend;
@@ -300,7 +300,7 @@ int main() {
         auto updates = r.atmosphereStats().profileUpdates;
         frame(r, c, s);
         require(r.atmosphereStats().profileUpdates == updates, "Static atmosphere reuses profiles");
-        s.taa.enabled = true;
+        s.antialiasing = ow::AntialiasingMode::Taa;
         s.bloom.intensity = .1f;
         for (int i = 0; i < 4; ++i)
             frame(r, c, s);

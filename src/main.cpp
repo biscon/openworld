@@ -88,7 +88,8 @@ void help() {
                  "  --agx                 Use AgX neutral instead of ACES fitted\n"
                  "  --no-depth-prepass    Disable default opaque depth prepass\n"
                  "  --terrain-triangles N Terrain triangle budget (default 2097152)\n"
-                 "  --no-taa              Disable temporal antialiasing\n"
+                 "  --aa MODE             off, fxaa, smaa or taa (default smaa)\n"
+                 "  --no-taa              Alias for --aa off\n"
                  "  --no-bloom            Disable HDR bloom\n"
                  "  --bloom-intensity N   Bloom strength, 0..2 (default 0.05)\n"
                  "  --ev100 VALUE         Manual camera exposure (default 15)\n"
@@ -110,7 +111,8 @@ int main(int argc, char **argv) {
         scene.vegetation.distance = 80;
         std::optional<bool> vegetationEnabled;
         std::optional<float> vegetationDistance;
-        scene.taa.enabled = true;
+        scene.antialiasing = ow::AntialiasingMode::Smaa1x;
+        std::optional<ow::AntialiasingMode> aaOverride;
         scene.opaqueDepthPrepass = true;
         scene.bloom.intensity = .05f;
         std::filesystem::path capture, reviewPath, reviewSavePath;
@@ -205,8 +207,20 @@ int main(int argc, char **argv) {
                 if (n < 8192 || n > 33554432)
                     throw std::invalid_argument("Terrain triangle budget must be 8192..33554432");
                 options.lod.triangleBudget = n;
+            } else if (arg == "--aa") {
+                const auto mode = value();
+                if (mode == "off")
+                    aaOverride = ow::AntialiasingMode::Off;
+                else if (mode == "fxaa")
+                    aaOverride = ow::AntialiasingMode::Fxaa;
+                else if (mode == "smaa")
+                    aaOverride = ow::AntialiasingMode::Smaa1x;
+                else if (mode == "taa")
+                    aaOverride = ow::AntialiasingMode::Taa;
+                else
+                    throw std::invalid_argument("--aa requires off, fxaa, smaa or taa");
             } else if (arg == "--no-taa")
-                scene.taa.enabled = false;
+                aaOverride = ow::AntialiasingMode::Off;
             else if (arg == "--no-bloom")
                 scene.bloom.intensity = 0;
             else if (arg == "--bloom-intensity")
@@ -331,6 +345,8 @@ int main(int argc, char **argv) {
             terrain = {review->terrainOrigin, review->terrain};
             singleChunk = !options.streaming.enabled;
         }
+        if (aaOverride)
+            scene.antialiasing = *aaOverride;
         if (vegetationEnabled)
             scene.vegetation.enabled = *vegetationEnabled;
         if (vegetationDistance)

@@ -25,7 +25,7 @@ int main(int argc, char **argv) {
             Renderer r(o);
             SceneSettings s;
             s.terrainVisible = false;
-            s.taa.enabled = false;
+            s.antialiasing = ow::AntialiasingMode::Off;
             s.shadows.mode = ShadowMode::Off;
             s.vegetation.wind = 0;
             s.vegetation.coverage = true;
