@@ -35,6 +35,7 @@ Repeat with `cmake-build-release`. On native hardware the precision fixture can
 also be run directly as `cmake-build-release/curvature_gpu_tests`.
 
 The correction adds no frame resources, allocations, or CPU work. Native cost is
-not measured. The supplied live walking view must still be reviewed on RTX 3060
-after rebuilding and restarting: these tests prove removal of the numerical
-hazard, not that every reported artifact shares that cause.
+not measured. On 2026-10-24 the user confirmed that the rebuilt application on
+RTX 3060 resolves the walking-speed wobble and apparent texture swimming.
+The remaining CSM jagged edges and distant filtering are separate observations;
+this confirmation is not a native performance measurement.

@@ -1,6 +1,7 @@
 #pragma once
 #include "scene.hpp"
 #include <array>
+#include <stdexcept>
 #include <vector>
 namespace ow {
 struct TaaSettings {
@@ -58,17 +59,23 @@ class TerrainHistory {
         TemporalTerrainRecord value;
     };
     std::vector<Entry> previous_, pending_;
+    std::vector<uint32_t> previousOrder_;
     size_t capacity_;
 
   public:
     explicit TerrainHistory(size_t capacity) : capacity_(capacity) {
+        if (capacity > UINT32_MAX)
+            throw std::invalid_argument("Terrain history capacity exceeds index range");
         previous_.reserve(capacity);
         pending_.reserve(capacity);
+        previousOrder_.reserve(capacity);
     }
     void begin(bool valid) {
         pending_.clear();
-        if (!valid)
+        if (!valid) {
             previous_.clear();
+            previousOrder_.clear();
+        }
     }
     TemporalTerrainRecord append(const TemporalTerrainKey &, const TemporalTerrainRecord &);
     void submitted();

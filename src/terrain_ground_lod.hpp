@@ -56,7 +56,7 @@ class TerrainGroundLod {
     std::vector<VisibilityBounds> bounds_, casterBounds_;
     TerrainRenderStats stats_{};
     static int64_t side(uint32_t cells, uint32_t level);
-    uint32_t covering(const Table &, int64_t x, int64_t z) const;
+    uint32_t covering(const Table &, int64_t x, int64_t z, uint32_t hint) const;
     void measure(uint32_t, const TerrainLod &);
     void enqueue(uint32_t);
     bool gather(uint32_t);

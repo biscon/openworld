@@ -52,6 +52,53 @@ at startup and included in managed memory accounting.
 
 ## Verification and acceptance
 
+### CPU preparation cost
+
+Native review after the wobble correction reports lower FPS even with shadows off
+and substantially fewer visible triangles. Selection operates on the complete
+partition before culling, so visible triangle count does not bound its CPU cost.
+An isolated 14-level, 4,096-patch workload measured about 3.2 ms for Release
+selection and 0.7 ms for 4,095 temporal records on the available CPU. These are
+synthetic CPU measurements, not attribution of the complete native frame time.
+
+The correction keeps topology, refinement thresholds, the protected region and
+triangle allowance unchanged. Neighbour/history coverage searches start at the
+query patch's level, then check nearby levels before searching the remainder.
+Every possible level is still checked on a miss; no assumption about balanced
+startup residency is needed. The disjoint partition permits at most one matching
+leaf, so lookup order cannot change the result. Once even one split cannot fit,
+reject it before collecting neighbour closures. The complete closure check still
+applies when a split might fit. Exhausted-budget attempts are counted as budget
+limits without first searching for an additional residency limitation. No new
+selection storage is needed.
+
+Terrain temporal history retains submitted/pending record ownership and full-key
+identity checks. It sorts a preallocated array of 32-bit indices into the previous
+records instead of moving 432-byte records during sorting. This adds at most four
+bytes per configured history slot (256 KiB at 65,536 slots), with no frame-time
+allocation or GPU layout change. Reset, abandoned preparation and bounded overflow
+must retain their existing behaviour.
+
+Validate with owned mixed-level selection/temporal regressions, allocation checks,
+unchanged selected-patch fingerprints, a separate CPU benchmark at 0.5M/2M triangle
+budgets, and terrain temporal/horizon GPU integration under Vulkan validation.
+The saved mountain view is additional review evidence. Measure native total frame
+time before attributing the remaining cost to geometry, shading or TAA resolve.
+
+The lighting window now exposes streamed-terrain CPU selection, draw preparation
+and submission finalization times. These exclude fence/acquisition/presentation
+waits. Selection includes resident weight updates and the complete partition;
+preparation includes batching, temporal correspondence and visibility records;
+finalization includes submitted-history indexing and residency publication.
+They describe current CPU work, alongside the existing completed GPU timers.
+
+Implemented and measured with `terrain_cpu_probe` (owned workload, outside CTest).
+In the 2M-budget workload, Release median selection drops from 3.06 to 1.24 ms and
+4,095-record temporal history from 0.65 to 0.49 ms. All selected patch and stitch
+fingerprints match across 480 moving frames. See the
+[measurement record](measurements/terrain_cpu_preparation/README.md) for settings
+and limitations. Native Release FPS acceptance remains pending.
+
 Owned plane, slope, corrugation and ridge tests verify static world positions,
 topology coverage/winding for every stitch combination, edge/corner balance,
 selection hysteresis, bounded work, allocation-free selection and budget failures.
@@ -105,5 +152,7 @@ Subsequent native review still found moving wireframe diagonals and apparent
 texture swimming with frozen LOD and TAA disabled. Flat-position and round-trip
 checks do not establish stability of the final curved surface. The follow-up
 [curvature precision correction](rendering_horizon.md#curvature-precision-correction)
-tests that final transform under bounded absolute trig error. Native acceptance
-of the combined result remains open.
+tests that final transform under bounded absolute trig error. Subsequent RTX 3060
+review confirms that the curvature correction resolves the wobble and apparent
+texture swimming. Full-scale performance and remaining shadow quality remain
+separate acceptance items.

@@ -44,9 +44,10 @@ that history. Replacement mesh/material identities reject correspondence. Call
 `invalidateInstanceHistory(handle)` for object teleports. Camera origins retain
 integer cells plus double local coordinates before conversion to relative floats.
 
-Terrain previous/current records live in preallocated contiguous arrays. The prior
-array is sorted by surface key at submission and queried with binary search during
-preparation; cost is O(n log n), with no allocator traffic. Keys include world/slot
+Terrain previous/current records live in preallocated contiguous arrays. A compact
+32-bit index array is sorted by surface key at submission and queried with binary
+search during preparation; 432-byte records stay in append order. Cost remains
+O(n log n), with no allocator traffic. Keys include world/slot
 identity, generation/content revision, patch coordinates, topology, LOD and relevant
 residency/detail state. The original 128-byte draw ABI remains unchanged. A separate
 368-byte GPU record stores previous draw constants, blend weights, observer and
@@ -60,8 +61,9 @@ Tracking is bounded by visibility capacity, further reduced to the actual maximu
 draw count for non-streamed terrain. Overflow rejects temporal correspondence,
 reports a counter and keeps direct rendering intact. Mesh storage follows instance
 capacity. The streaming terrain tracker uses at most two arrays of 432-byte CPU
-entries and two GPU record buffers; at 65536 entries these are about 54 MiB CPU and
-46 MiB GPU. Residency budgets and world/cache identities are unchanged.
+entries, one 32-bit index per slot and two GPU record buffers; at 65536 entries
+these are about 54.25 MiB CPU and 46 MiB GPU. Residency budgets and world/cache
+identities are unchanged.
 
 `resetTemporalHistory()` handles explicit camera cuts. Automatic cuts exceed 256 m
 translation or 45 degrees rotation between submitted frames. Scene extent changes,

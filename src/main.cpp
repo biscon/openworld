@@ -908,6 +908,9 @@ int main(int argc, char **argv) {
                                     stats.outputMilliseconds);
                     if (stats.timingsAvailable)
                         ImGui::Text("Full GPU frame: %.2f ms", stats.frameMilliseconds);
+                    ImGui::Text("Terrain CPU: select %.2f | prep %.2f | final %.2f ms",
+                                stats.terrainSelectionMilliseconds, stats.terrainPreparationMilliseconds,
+                                stats.terrainFinalizeMilliseconds);
                     ImGui::PopItemWidth();
                 }
                 ImGui::End();

@@ -130,23 +130,34 @@ void TerrainGroundLod::tile(uint32_t slot, ChunkCoord origin, uint32_t level, ui
             ++leafCount_;
         }
 }
-uint32_t TerrainGroundLod::covering(const Table &table, int64_t x, int64_t z) const {
-    for (uint32_t level = 0; level <= table.maximumLevel; ++level) {
+uint32_t TerrainGroundLod::covering(const Table &table, int64_t x, int64_t z, uint32_t hint) const {
+    const auto at = [&](uint32_t level) {
         auto s = side(cells_, level);
         // Power-of-two cell sizes: bit alignment also floors negative world
         // coordinates, avoiding integer division in the neighbour lookup loop.
-        auto i = table.get({x & -s, z & -s, level});
-        if (i != ~0u)
-            return i;
+        return table.get({x & -s, z & -s, level});
+    };
+    hint = std::min(hint, table.maximumLevel);
+    if (const auto i = at(hint); i != ~0u)
+        return i;
+    // Most neighbours and prior leaves have the same or an adjacent level.
+    // Keep the complete search for missing/unbalanced residency and camera cuts.
+    const auto extent = std::max(hint, table.maximumLevel - hint);
+    for (uint32_t distance = 1; distance <= extent; ++distance) {
+        if (distance <= hint)
+            if (const auto i = at(hint - distance); i != ~0u)
+                return i;
+        if (hint + distance <= table.maximumLevel)
+            if (const auto i = at(hint + distance); i != ~0u)
+                return i;
     }
     return ~0u;
 }
 void TerrainGroundLod::neighbours(const Node &n, std::array<uint32_t, 8> &out) const {
     const auto s = side(cells_, n.key.level), x = n.key.x, z = n.key.z;
-    out = {covering(current_, x - 1, z + s / 2), covering(current_, x + s, z + s / 2),
-           covering(current_, x + s / 2, z - 1), covering(current_, x + s / 2, z + s),
-           covering(current_, x - 1, z - 1),     covering(current_, x + s, z - 1),
-           covering(current_, x - 1, z + s),     covering(current_, x + s, z + s)};
+    const auto at = [&](int64_t px, int64_t pz) { return covering(current_, px, pz, n.key.level); };
+    out = {at(x - 1, z + s / 2), at(x + s, z + s / 2), at(x + s / 2, z - 1), at(x + s / 2, z + s),
+           at(x - 1, z - 1), at(x + s, z - 1), at(x - 1, z + s), at(x + s, z + s)};
 }
 void TerrainGroundLod::measure(uint32_t index, const TerrainLod &source) {
     auto &n = nodes_[index];
@@ -177,7 +188,8 @@ void TerrainGroundLod::measure(uint32_t index, const TerrainLod &source) {
         n.transition = (child.displacement[eroded_ ? 1 : 0] + curvatureError) * projection;
     }
     const auto p =
-        covering(previous_, n.key.x + side(cells_, n.key.level) / 2, n.key.z + side(cells_, n.key.level) / 2);
+        covering(previous_, n.key.x + side(cells_, n.key.level) / 2,
+                 n.key.z + side(cells_, n.key.level) / 2, n.key.level);
     const bool refined = p != ~0u && previousKeys_[p].level < n.key.level;
     const bool transition = n.transition > (refined ? .5f : 1.f);
     const bool baseline = !enabled_ || n.protectedGround ||
@@ -227,6 +239,14 @@ bool TerrainGroundLod::gather(uint32_t index) {
     return true;
 }
 bool TerrainGroundLod::split(uint32_t index, const TerrainLod &source) {
+    // Once even an unbalanced single split cannot fit, do not walk neighbour
+    // closures for every remaining candidate merely to reject them afterwards.
+    const uint64_t minimumLeaves = uint64_t(leafCount_) + 3;
+    if (minimumLeaves > leafCapacity_ || nodes_.size() + 4 > nodes_.capacity() ||
+        minimumLeaves * cells_ * cells_ * 2 > budget_) {
+        ++stats_.budgetLimited;
+        return false;
+    }
     closure_.clear();
     if (++mark_ == 0) {
         for (auto &n : nodes_)

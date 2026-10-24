@@ -4,6 +4,48 @@ Status: implemented and software-validated on 2026-10-23. The virtual shadow
 implementation and its dense clipmap fallback are removed. Native RTX 3060
 visual/performance acceptance remains pending; software validation is not that gate.
 
+## Native review after the curvature correction (2026-10-24)
+
+The user confirms that the curvature precision correction resolves the moving
+terrain/wireframe distortion. CSM is now generally acceptable up close, with
+remaining sawtooth edges on curved receivers and smudged distant mountain shadows.
+Shadow darkness is a separate lighting choice: physical-sky diffuse/specular IBL
+is already present, and CSM multiplies only direct sunlight. Do not change ambient
+lighting to conceal shadow filtering artifacts.
+
+The saved closeup was copied to `/tmp/shadow-closeup-review/original.json` and
+replayed with the same camera, terrain settings, sun and biases on llvmpipe under
+Vulkan validation. The diagnostic reduces output to 960x540 and detailed coverage
+to 4 km, retaining the 8,192 m far shadow range; it does not reproduce native
+performance or exactly the original 1080p terrain selection. At 2048-square maps,
+the five world texel sizes are 0.06256, 0.18052, 0.47864, 1.19338 and 10.0942 m.
+The closeup teeth reproduce in shadow-visibility view. Increasing bias moves the
+edge without resolving its shape. An isolated 4096-square comparison makes the
+teeth visibly finer with the same terrain selection, identifying shadow-map
+sampling as a contributor distinct from the resolved moving mesh. Both runs
+finish with zero validation errors. Captures and the standalone replay source are
+in `/tmp/shadow-closeup-review`; they are investigation artifacts, not routine test
+fixtures. The far panorama was not saved/replayed, so the coarse final cascade is
+an explanation for its smudging, not a verified diagnosis of every dark patch.
+
+No shadow algorithm, resolution, sample count, bias default or lighting setting
+was changed for this investigation. Doubling map resolution would quadruple raw
+shadow image storage from 80 to 320 MiB, exceeding the normal budget. It is a
+diagnostic comparison, not the proposed remedy. The user reports roughly
+120-to-80 FPS with CSM and requests that further quality work respect performance.
+Before enlarging any quality budget, measure paired uncapped native frame times,
+including forward shadow sampling as well as cascade raster time. The displayed
+shadow GPU counter measures raster work and does not include those forward reads.
+Prefer removing wasted caster/filter work and improving use of existing map
+coverage; evaluate any sampling change against the grazing-plane regression so
+the earlier self-shadowing stripes cannot return. A wider blur alone would worsen
+the distant smudging. Native performance and final edge quality remain open.
+
+Subsequent native review corrects the performance attribution: the mountain view
+is around 84 FPS with CSM **off**, and toggling CSM costs only about 4–5 FPS there.
+The larger regression must not be attributed to shadows from the earlier capped
+FPS comparison. See the [terrain CPU investigation](terrain_stationary_lod.md#cpu-preparation-cost).
+
 ## Rendering contract
 
 One default-on CSM path renders four near cascades ending at 50, 150, 400 and

@@ -15,7 +15,9 @@ Milestone 4 adds [hierarchical terrain residency](terrain_hierarchy.md): coarse 
 
 ## System design index
 
-- [Curvature precision correction](rendering_horizon.md#curvature-precision-correction) — implemented; native acceptance pending: stable small-angle position and tangent mapping, with GPU regression coverage for bounded trigonometric error. Addresses a precision hazard consistent with the moving circular band that persists with LOD frozen.
+- [Terrain CPU preparation cost](terrain_stationary_lod.md#cpu-preparation-cost) — implemented and CPU-benchmarked: retain the stationary mesh and quality budgets while reducing neighbour lookup work and sorting compact temporal indices instead of whole surface records. Native frame-time acceptance remains required.
+
+- [Curvature precision correction](rendering_horizon.md#curvature-precision-correction) — implemented; native wobble correction confirmed: stable small-angle position and tangent mapping, with GPU regression coverage for bounded trigonometric error. RTX 3060 review confirms the moving circular band is resolved; performance acceptance remains separate.
 
 - [Stationary ground terrain LOD](terrain_stationary_lod.md) — implemented; native acceptance pending: local selection, immutable patch interiors, stitched boundaries and explicit transition/resource limits, replacing the unresolved radial morph.
 

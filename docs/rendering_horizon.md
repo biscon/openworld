@@ -70,13 +70,13 @@ detailed footprint, independent of the visible outer boundary.
 
 ## Curvature precision correction
 
-The native walking-speed review still shows wobbling wireframe diagonals with
+The native walking-speed review showed wobbling wireframe diagonals with
 LOD frozen and TAA disabled. The old GPU mapping changes from a series to
 `sin(a)/a` at `a=1e-6`, or 6.36 m at the default radius. This is a numerical
 hazard: [Vulkan specifies an absolute error for sine](https://docs.vulkan.org/spec/latest/appendices/spirvenv.html#spirvenv-precision-operation), not small-angle relative
 accuracy, and division by `a` magnifies that error. The flat vertex and UV checks
-do not exercise this final mapping. This is a candidate cause of the native
-artifact, not yet native-confirmed.
+do not exercise this final mapping. The user confirmed on RTX 3060 after rebuilding that this correction resolves
+the wobble. Remaining CSM edge/filter quality is a separate issue.
 
 The correction replaces both the position and tangent-frame mapping for `a<=0.5` radians with
 shared Horner polynomials for `sin(a)/a` and `(1-cos(a))/a²`. Compute vertical
@@ -103,7 +103,8 @@ formula: the controlled sine perturbation displaces near vertices by up to
 0.312531 m at the default radius. The corrected near path is independent of that
 perturbation; maximum position error against the double reference is 6.974e-6 m
 within 256 m. Both builds' 77 SPIR-V modules validate. These establish the
-numerical correction, not native visual acceptance or performance. See the
+numerical correction. Subsequent RTX 3060 visual review confirms the wobble fix;
+native performance has not been measured. See the
 [measurement record](measurements/curvature_precision/README.md).
 
 ## Atmosphere and materials

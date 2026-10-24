@@ -1694,6 +1694,7 @@ struct Renderer::Impl {
                 ? conservativeProjection(post->view().current, {sceneExtent.width, sceneExtent.height})
                 : vp;
         visibility->begin(frameIndex, settings.visibility, settings.wireframe, settings.frustumCulling, vp);
+        renderingStats.terrainSelectionMilliseconds = renderingStats.terrainPreparationMilliseconds = 0;
         if (settings.terrainVisible) {
             if (!settings.freezeLod || !observerInitialized) {
                 lodObserver = camera;
@@ -1702,10 +1703,17 @@ struct Renderer::Impl {
             const auto observer =
                 camera.terrainOffset(lodObserver.chunk, options.terrainGrid) + glm::vec3(lodObserver.local);
             if (streaming) {
+                const auto start = std::chrono::steady_clock::now();
                 streaming->prepareDraw(frameIndex, camera, lodObserver, cullVp, settings, sceneExtent.height);
                 renderStats = streaming->renderStats();
+                const auto selected = std::chrono::steady_clock::now();
+                renderingStats.terrainSelectionMilliseconds =
+                    std::chrono::duration<double, std::milli>(selected - start).count();
                 streaming->prepareVisibility(*visibility, frameIndex, camera, lodObserver, settings,
                                              post.get());
+                renderingStats.terrainPreparationMilliseconds =
+                    std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - selected)
+                        .count();
             } else {
                 terrain->setView(frameIndex, vp, observer);
                 auto *lod = terrain->lod();
@@ -2092,9 +2100,13 @@ struct Renderer::Impl {
         post->submitted();
         meshes->submitted();
         terrainHistory->submitted();
-        if (streaming)
+        renderingStats.terrainFinalizeMilliseconds = 0;
+        if (streaming) {
+            const auto start = std::chrono::steady_clock::now();
             streaming->submitted(frameIndex);
-        else
+            renderingStats.terrainFinalizeMilliseconds =
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+        } else
             terrain->submitted(generated);
         if (surface) {
             VkPresentInfoKHR present{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
