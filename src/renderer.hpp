@@ -10,6 +10,7 @@
 #include "terrain_lod.hpp"
 #include "terrain_stream.hpp"
 #include "visibility.hpp"
+#include "volumetrics.hpp"
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -31,6 +32,8 @@ struct RendererOptions {
     ShadowCapacity shadowCapacity;
     bool forceDirectShadows = false, forceManualShadowFiltering = false, forceNoShadowDepth = false;
     uint32_t visibilityCapacity = 65536;
+    VolumetricCapacity volumetricCapacity;
+    bool forceNoVolumetrics = false;
     uint64_t atmosphereBudgetBytes = 64ull << 20;
     bool forceNoAtmosphere = false;
     bool curvedHorizon = false;
@@ -54,6 +57,7 @@ struct RendererOptions {
 struct SceneSettings {
     ShadingMode shading = ShadingMode::Pbr;
     AtmosphereSettings atmosphere;
+    VolumetricSettings volumetrics;
     TaaSettings taa;
     BloomSettings bloom;
     GtaoSettings gtao;
@@ -90,6 +94,12 @@ class Renderer {
     ~Renderer();
     Renderer(const Renderer &) = delete;
     Renderer &operator=(const Renderer &) = delete;
+
+    FogVolumeHandle createFogVolume(const FogVolume &);
+    bool updateFogVolume(FogVolumeHandle, const FogVolume &);
+    bool removeFogVolume(FogVolumeHandle);
+    const VolumetricStats &volumetricStats() const;
+    VolumetricSnapshot readVolumetricSnapshot();
 
     LightHandle createLight(const LocalLight &);
     bool updateLight(LightHandle, const LocalLight &);

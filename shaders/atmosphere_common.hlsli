@@ -105,17 +105,27 @@ float3 atmDiffuse(float3 n) {
     float3 c=0;[unroll]for(uint i=0;i<9;++i)c+=atmosphereIrradiance[i].rgb*b[i];
     return max(c,0)*atmosphere.illumination.rgb*atmosphere.options.w;
 }
-float atmSliceDistance(float index) {
+float atmBaseSliceDistance(float index) {
     float nearCount=atmosphere.view.w,n=atmosphere.extent.w;
     if(nearCount==0)return pow(index/(n-1),2)*atmosphere.view.y;
     if(index<=nearCount-1)return pow(index/(nearCount-1),2)*64000;
     return 64000*pow(max(1,atmosphere.view.y/64000),(index-nearCount+1)/(n-nearCount));
 }
-float atmDistanceSlice(float depth) {
+float atmBaseDistanceSlice(float depth) {
     float nearCount=atmosphere.view.w,n=atmosphere.extent.w;
     if(nearCount==0)return sqrt(saturate(depth/atmosphere.view.y))*(n-1);
     if(depth<=64000)return sqrt(saturate(depth/64000))*(nearCount-1);
     return nearCount-1+(n-nearCount)*saturate(log(depth/64000)/max(1e-6,log(atmosphere.view.y/64000)));
+}
+// A local-medium consumer replaces the prefix. Tail slice zero is exactly the
+// shared endpoint, so interpolation cannot introduce a discontinuity there.
+float atmSliceDistance(float index) {
+    float base=atmBaseSliceDistance(index),cut=atmosphere.profile.z;
+    return cut+(atmosphere.view.y-cut)*base/atmosphere.view.y;
+}
+float atmDistanceSlice(float depth) {
+    float cut=atmosphere.profile.z;
+    return atmBaseDistanceSlice(max(0,depth-cut)*atmosphere.view.y/max(1,atmosphere.view.y-cut));
 }
 float3 atmApply(float3 colour,float3 position) {
     if(atmosphere.options.x!=2 || atmosphere.options.y==0)return colour;

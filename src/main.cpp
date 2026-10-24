@@ -1,6 +1,7 @@
 #include "lighting_demo.hpp"
 #include "renderer.hpp"
 #include "review_view.hpp"
+#include "volumetric_demo.hpp"
 #include <optional>
 
 #include <SDL3/SDL.h>
@@ -69,6 +70,7 @@ void help() {
                  "  --base                Show uneroded terrain\n"
                  "  --atmosphere MODE     off, analytic or physical (default physical)\n"
                  "  --no-horizon          Disable distant coverage and visual curvature\n"
+                 "  --fog PRESET          off, mist or shafts (default off)\n"
                  "  --lighting-demo       Enable generated lights and mesh fixtures\n"
                  "  --material-dir PATH   Override imported terrain palette directory\n"
                  "  --no-material-assets  Use the constant fallback without loading assets\n"
@@ -93,6 +95,7 @@ void help() {
 int main(int argc, char **argv) {
     try {
         bool headless = false, lightingDemoEnabled = false;
+        uint32_t fogPreset = 0;
         uint64_t frameLimit = 0;
         ow::SceneSettings scene;
         scene.taa.enabled = true;
@@ -137,7 +140,17 @@ int main(int argc, char **argv) {
                 reviewPath = value();
             else if (arg == "--save-review-view")
                 reviewSavePath = value();
-            else if (arg == "--lighting-demo")
+            else if (arg == "--fog") {
+                const auto preset = value();
+                if (preset == "off")
+                    fogPreset = 0;
+                else if (preset == "mist")
+                    fogPreset = 1;
+                else if (preset == "shafts")
+                    fogPreset = 2;
+                else
+                    throw std::invalid_argument("--fog expects off, mist or shafts");
+            } else if (arg == "--lighting-demo")
                 lightingDemoEnabled = true;
             else if (arg == "--atmosphere") {
                 auto v = value();
@@ -367,6 +380,21 @@ int main(int argc, char **argv) {
                 reviewStatus = "Review path unavailable: " + std::string(SDL_GetError());
         }
         const auto resetCamera = [&] { resetTerrainCamera(); };
+        ow::VolumetricDemo fogDemo(renderer);
+        const auto applyFogPreset = [&](uint32_t preset) {
+            scene.volumetrics.enabled = preset != 0;
+            scene.volumetrics.extinction = preset == 1 ? .0008f : .0002f;
+            scene.volumetrics.height = float(camera.local.y);
+            scene.volumetrics.scaleHeight = 40;
+            scene.volumetrics.localDensity = 1;
+            scene.volumetrics.samples = 2;
+            scene.volumetrics.anisotropy = preset == 2 ? .7f : .5f;
+            auto anchor = ow::translated(ow::worldPosition(camera, options.terrainGrid),
+                                         glm::dvec3(camera.forward()) * 45.);
+            fogDemo.configure(preset, anchor);
+        };
+        if (fogPreset)
+            applyFogPreset(fogPreset);
         ow::LightingDemo lightingDemo(renderer);
         int demoLightCount = 32, demoLayers = 3;
         bool demoOverlap = false, demoAnimation = false, demoDirty = lightingDemoEnabled;
@@ -814,6 +842,73 @@ int main(int argc, char **argv) {
                         int mapper = int(scene.output.toneMapper);
                         if (ImGui::Combo("Tone mapper", &mapper, "ACES fitted\0AgX neutral\0"))
                             scene.output.toneMapper = ow::ToneMapper(mapper);
+                    }
+                    if (ImGui::CollapsingHeader("Local volumetrics")) {
+                        auto &fog = scene.volumetrics;
+                        ImGui::Checkbox("Enable local fog", &fog.enabled);
+                        if (ImGui::Button("Mist preset"))
+                            applyFogPreset(1);
+                        ImGui::SameLine();
+                        if (ImGui::Button("Shafts preset"))
+                            applyFogPreset(2);
+                        ImGui::SameLine();
+                        if (ImGui::Button("Clear fog fixtures"))
+                            applyFogPreset(0);
+                        int quality = int(fog.quality), samples = int(fog.samples),
+                            diagnostic = int(fog.diagnostic);
+                        if (ImGui::Combo("Fog quality", &quality, "Normal\0High\0"))
+                            fog.quality = ow::VolumetricQuality(quality);
+                        ImGui::SliderFloat("Fog distance (m)", &fog.distance, 50, 4000);
+                        if (ImGui::IsItemHovered())
+                            ImGui::SetTooltip("Depth covered by the fog grid, not fog thickness.\n"
+                                              "Shorter distances give finer depth detail.");
+                        ImGui::TextUnformatted("Height fog (world-wide layer)");
+                        ImGui::SliderFloat("Base density (/m)", &fog.extinction, 0, .02f, "%.5f");
+                        if (ImGui::IsItemHovered())
+                            ImGui::SetTooltip("Extinction at the reference altitude. Higher = thicker.\n"
+                                              "0 disables the height layer. Local volumes are separate.\n"
+                                              "At 0.001/m, 37%% of light remains after 1000 m at that altitude.");
+                        ImGui::SliderFloat("Reference altitude (m)", &fog.height, -1000, 10000);
+                        if (ImGui::IsItemHovered())
+                            ImGui::SetTooltip("Altitude where Base density applies, not a top boundary.\n"
+                                              "Density increases below it and decreases above it.");
+                        ImGui::SliderFloat("Vertical falloff (m)", &fog.scaleHeight, 1, 500);
+                        if (ImGui::IsItemHovered())
+                            ImGui::SetTooltip("Rise this far and density falls to 37%%.\n"
+                                              "Larger = a deeper layer; smaller = a sharper height transition.");
+                        ImGui::ColorEdit3("Height-fog albedo", &fog.albedo.x);
+                        if (ImGui::IsItemHovered())
+                            ImGui::SetTooltip("Fraction of removed light scattered instead of absorbed.\n"
+                                              "This changes brightness/colour, not extinction.");
+                        ImGui::SliderFloat("Local volume density", &fog.localDensity, 0, 4, "%.2fx");
+                        if (ImGui::IsItemHovered())
+                            ImGui::SetTooltip("Thickness multiplier for all authored boxes/spheres, including presets.\n"
+                                              "0 disables local volumes; height fog is unaffected.\n"
+                                              "At 1x the preset box is 0.025/m (mist) or 0.035/m (shafts).");
+                        ImGui::SliderFloat("Fog anisotropy", &fog.anisotropy, -.9f, .9f);
+                        if (ImGui::IsItemHovered())
+                            ImGui::SetTooltip("Scattering direction for height fog and local volumes.\n"
+                                              "Positive values brighten fog when looking toward the light.\n"
+                                              "0 scatters equally in all directions; this is not density.");
+                        if (ImGui::SliderInt("Samples per cell", &samples, 1, 2))
+                            fog.samples = uint32_t(samples);
+                        ImGui::Checkbox("Fog temporal history", &fog.temporal);
+                        ImGui::SliderFloat("Fog history weight", &fog.historyWeight, 0, .9f);
+                        if (ImGui::Combo(
+                                "Fog diagnostic", &diagnostic,
+                                "Shaded\0Transmission\0Scattering\0Shadow coverage\0History rejection\0"))
+                            fog.diagnostic = uint32_t(diagnostic);
+                        const auto &v = renderer.volumetricStats();
+                        ImGui::Text("%s | %ux%ux%u | %.2f MiB", ow::volumetricFallbackName(v.fallback),
+                                    v.grid.x, v.grid.y, v.grid.z, v.bytes / 1048576.);
+                        ImGui::Text("Lights %u | excluded %u | overflow %u | rejected %u", v.selectedLights,
+                                    v.excludedLights, v.overflowClusters, v.rejectedCells);
+                        if (v.timingsAvailable)
+                            ImGui::Text("Assign %.3f | inject %.3f | history %.3f | integrate %.3f | sky "
+                                        "%.3f | composite %.3f ms",
+                                        v.assignmentMilliseconds, v.injectionMilliseconds,
+                                        v.temporalMilliseconds, v.integrationMilliseconds, v.skyMilliseconds,
+                                        v.compositeMilliseconds);
                     }
                     if (ImGui::CollapsingHeader("Atmosphere", ImGuiTreeNodeFlags_DefaultOpen)) {
                         int mode = int(scene.atmosphere.mode), quality = int(scene.atmosphere.quality);

@@ -19,9 +19,9 @@ class VulkanAtmosphere {
     bool historyChanged(const AtmosphereSettings &, bool diagnostic) const;
     void begin(uint32_t frame, const Camera &, const AtmosphereSettings &, const LightingSettings &,
                const TemporalView &, float preExposure, bool diagnostic, float outerDistance,
-               VkDescriptorSet lighting, VkImageView hdr, VkImageView depth);
+               VkDescriptorSet lighting, VkImageView hdr, VkImageView depth, float localDistance = 0);
     void record(VkCommandBuffer);
-    void composite(VkCommandBuffer, uint32_t width, uint32_t height);
+    void composite(VkCommandBuffer, uint32_t width, uint32_t height, bool apply = true);
     void submitted();
     bool active() const;
     bool physical() const;

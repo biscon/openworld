@@ -15,6 +15,9 @@ Milestone 4 adds [hierarchical terrain residency](terrain_hierarchy.md): coarse 
 
 ## System design index
 
+- [Local froxel volumetrics](rendering_volumetrics.md) — implemented slice 5I: bounded local media, mixed atmospheric transport and independent scattering history. The [stability correction](rendering_volumetrics.md#stability-correction) addresses reported opacity flicker, depth bands and ambiguous preset controls; target-GPU acceptance remains pending.
+  The implemented [shaft filtering correction](rendering_volumetrics.md#shaft-filtering-correction) addresses the remaining repeating slat-shadow pattern with bounded spatial integration, preserving stable mist opacity; native acceptance remains pending.
+
 - [Terrain CPU preparation cost](terrain_stationary_lod.md#cpu-preparation-cost) — implemented and CPU-benchmarked: retain the stationary mesh and quality budgets while reducing neighbour lookup work and sorting compact temporal indices instead of whole surface records. Native frame-time acceptance remains required.
 
 - [Curvature precision correction](rendering_horizon.md#curvature-precision-correction) — implemented; native wobble correction confirmed: stable small-angle position and tangent mapping, with GPU regression coverage for bounded trigonometric error. RTX 3060 review confirms the moving circular band is resolved; performance acceptance remains separate.

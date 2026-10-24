@@ -31,6 +31,8 @@ struct LocalLight {
     float intensity = 1000, range = 20, sourceRadius = .05f;
     float innerAngle = .35f, outerAngle = .6f;
     LightType type = LightType::Point;
+    float volumetricScattering = 1;
+    bool volumetricHistory = true;
 };
 void validate(const LocalLight &);
 float lightAttenuation(const LocalLight &, glm::vec3 lightToSurface);

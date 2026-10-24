@@ -1,0 +1,16 @@
+Test project /home/bison/Projects/openworld/cmake-build-debug
+    Start  1: volumetrics_cpu
+1/4 Test  #1: volumetrics_cpu ..................   Passed    0.03 sec
+    Start 14: volumetrics_gpu
+2/4 Test #14: volumetrics_gpu ..................   Passed   15.33 sec
+    Start 15: atmosphere_gpu
+3/4 Test #15: atmosphere_gpu ...................   Passed   18.50 sec
+    Start 22: terrain_hierarchy_gpu
+4/4 Test #22: terrain_hierarchy_gpu ............   Passed  103.28 sec
+
+100% tests passed out of 4
+
+Label Time Summary:
+gpu    = 137.11 sec*proc (3 tests)
+
+Total Test time (real) = 137.14 sec

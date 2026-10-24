@@ -394,8 +394,8 @@ bool VulkanAtmosphere::historyChanged(const AtmosphereSettings &s, bool diagnost
 }
 void VulkanAtmosphere::begin(uint32_t frame, const Camera &camera, const AtmosphereSettings &s,
                              const LightingSettings &l, const TemporalView &v, float exposure,
-                             bool diagnostic, float outer, VkDescriptorSet lighting,
-                             VkImageView hdr, VkImageView depth) {
+                             bool diagnostic, float outer, VkDescriptorSet lighting, VkImageView hdr,
+                             VkImageView depth, float localDistance) {
     auto &i = *impl_;
     i.current = frame;
     i.settings = s;
@@ -431,7 +431,7 @@ void VulkanAtmosphere::begin(uint32_t frame, const Camera &camera, const Atmosph
     u.mie = {s.mieScattering * s.aerosolDensity * 1000, s.mieAbsorption * s.aerosolDensity * 1000,
              s.mieHeight * .001f, s.mieG};
     u.ozone = {s.ozone * 1000.f, 0};
-    u.profile = {s.ozoneCentre * .001f, s.ozoneWidth * .001f, 0, 0};
+    u.profile = {s.ozoneCentre * .001f, s.ozoneWidth * .001f, localDistance, 0};
     u.sun = {sun, s.sunRadius};
     const float intensity = l.sunEnabled ? std::clamp(l.sunLux, 0.f, 200000.f) : 0;
     u.illumination = {glm::clamp(l.sunColour, glm::vec3(0), glm::vec3(1)) * intensity, exposure};
@@ -532,14 +532,14 @@ void VulkanAtmosphere::record(VkCommandBuffer cmd) {
                              i.current * 6 + 3);
     dependency(cmd);
 }
-void VulkanAtmosphere::composite(VkCommandBuffer cmd, uint32_t w, uint32_t h) {
+void VulkanAtmosphere::composite(VkCommandBuffer cmd, uint32_t w, uint32_t h, bool apply) {
     auto &i = *impl_;
     if (!physical())
         return;
     if (i.queries)
         vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, i.queries,
                              i.current * 6 + 4);
-    if (aerial())
+    if (apply && aerial())
         i.dispatch(cmd, 12, 6, w, h);
     if (i.queries)
         vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, i.queries,
@@ -619,6 +619,7 @@ AtmosphereSnapshot VulkanAtmosphere::decodeSnapshot(const void *data) const {
     out.skyExtent = {f.sky.width, f.sky.height};
     out.volumeSize = f.t.width;
     out.volumeDepth = f.t.depth;
+    out.aerialStartDistance = static_cast<const AtmosphereUniform *>(f.constants.mapped)->profile.z;
     auto bytes = static_cast<const uint8_t *>(data);
     uint64_t offset = 0;
     std::vector<glm::vec4> *arrays[] = {&out.transmittance, &out.multipleScattering, &out.sky,
