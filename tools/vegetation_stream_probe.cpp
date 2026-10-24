@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <new>
 #include <numeric>
 
@@ -101,16 +102,19 @@ struct Samples {
 int main(int argc, char **argv) {
     try {
         if (argc < 2)
-            throw std::invalid_argument("Usage: vegetation_stream_probe OUTPUT [--cpu-check] "
-                                        "[--engine-scene] [--distance 20..200] [--occlusion-check] "
-                                        "[--route-check] [--taa-check] [--aa-check] [--grass-check]");
+            throw std::invalid_argument(
+                "Usage: vegetation_stream_probe OUTPUT [--cpu-check] "
+                "[--engine-scene] [--distance 20..200] [--occlusion-check] "
+                "[--route-check] [--taa-check] [--aa-check] [--grass-check] [--flicker-check]");
         bool cpuOnly = false, routeOnly = false, engineScene = false, occlusionCheck = false,
-             taaCheck = false, aaCheck = false, grassCheck = false, v5Check = false;
+             taaCheck = false, aaCheck = false, grassCheck = false, v5Check = false, flickerCheck = false;
         float distance = 70;
         uint32_t outputWidth = 1920, outputHeight = 1080;
         for (int i = 2; i < argc; ++i) {
             const std::string arg = argv[i];
-            if (arg == "--v5-check")
+            if (arg == "--flicker-check")
+                flickerCheck = true;
+            else if (arg == "--v5-check")
                 v5Check = true;
             else if (arg == "--size" && i + 2 < argc) {
                 outputWidth = uint32_t(std::stoul(argv[++i]));
@@ -155,6 +159,7 @@ int main(int argc, char **argv) {
         o.vegetation.library =
             std::make_shared<VegetationLibrary>(readVegetationLibrary(OPENWORLD_VEGETATION_LIBRARY_DIR));
         o.vegetation.streaming.enabled = true;
+        o.vegetation.streaming.diagnostics = flickerCheck;
         o.shadowCapacity.resolution = 1024;
         if (engineScene || distance > 80) {
             o.vegetation.streaming.cellCapacity = 12288;
@@ -182,7 +187,7 @@ int main(int argc, char **argv) {
         SceneSettings scene;
         scene.viewRadius = engineScene ? 64 : 3;
         scene.vegetation.distance = distance;
-        if (v5Check)
+        if (v5Check || flickerCheck)
             scene.vegetation.habitat.mode = VegetationHabitatMode::Blended;
         if (engineScene) {
             scene.atmosphere.mode = AtmosphereMode::Physical;
@@ -243,6 +248,55 @@ int main(int argc, char **argv) {
         bookmark.scene = scene;
         bookmark.startup = o;
         saveReviewView(output / "close-view.json", bookmark);
+        if (flickerCheck) {
+            using Key = std::pair<int64_t, int64_t>;
+            std::map<Key, uint32_t> lastSeen;
+            std::map<Key, uint64_t> previous;
+            std::ofstream log(output / "continuity.csv");
+            log << "frame,ready,pending,updated,generated,lost_front,returned_front,surface_changes,history_"
+                   "rejections\n";
+            uint32_t totalLost = 0, totalReturned = 0;
+            auto inView = [&](Key key) {
+                auto d = relativePosition(vegetationCellOrigin({key.first, key.second}),
+                                          worldPosition(camera, o.terrainGrid));
+                return d.z < -4 && std::abs(d.x) < -d.z * .6 &&
+                       glm::length(glm::dvec2(d.x, d.z)) < distance - 4;
+            };
+            for (uint32_t i = 0; i < 480; ++i) {
+                if (i < 360)
+                    camera.local.z -= .1;
+                frame();
+                auto snapshot = r.readVegetationSnapshot();
+                std::map<Key, uint64_t> current;
+                uint32_t lost = 0, returned = 0, changed = 0, rejected = 0;
+                for (const auto &cell : snapshot.cells) {
+                    Key key{cell.key.x, cell.key.z};
+                    current[key] = cell.surface.signature;
+                    if (inView(key)) {
+                        auto seen = lastSeen.find(key);
+                        returned += seen != lastSeen.end() && seen->second + 1 < i;
+                        auto old = previous.find(key);
+                        changed += old != previous.end() && old->second != cell.surface.signature;
+                        rejected += !cell.historyValid;
+                    }
+                    lastSeen[key] = i;
+                }
+                for (const auto &[key, signature] : previous)
+                    lost += inView(key) && !current.count(key);
+                totalLost += lost;
+                totalReturned += returned;
+                const auto &v = snapshot.stats;
+                log << i << ',' << current.size() << ',' << v.pendingCells << ',' << v.updatedCells << ','
+                    << v.generatedCells << ',' << lost << ',' << returned << ',' << changed << ',' << rejected
+                    << '\n';
+                previous = std::move(current);
+                if (i % 120 == 0 || i == 479)
+                    r.capture(output / ("forward-" + std::to_string(i) + ".ppm"));
+            }
+            std::cout << "Forward continuity: " << totalLost << " visible-front cell disappearances; "
+                      << totalReturned << " returns\n";
+            return r.validationErrors() ? 1 : 0;
+        }
         if (v5Check) {
             auto anchor = translated(worldPosition(camera, o.terrainGrid), {0, 0, -3});
             scene.vegetation.proxy.position = anchor;

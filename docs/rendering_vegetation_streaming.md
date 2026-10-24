@@ -85,6 +85,45 @@ default per-frame CSV or full V2 matrix. Planned GPU execution is capped at five
 minutes; unavailable or unfinished checks remain explicit. Targets remain 1.5 ms
 incremental GPU, 0.25 ms CPU and 128 MiB, not claims of achieved performance.
 
+## Continuous attachment publication
+
+The original scheduler hides dirty cells when its 32-cell repair budget is exhausted.
+Two independently cached frame attachments also repeat each repair. A 36 m forward
+route reproduced 653 front-of-camera cell disappearances and 665 returns after the
+initial population had settled. This is a streaming publication issue, independent
+of the range fade and mesh LOD transitions.
+
+Replace the frame attachment copies with shared current and previous-repair buffers
+of the same total size. Queue barriers protect prior graphics readers before writes.
+Only changed, previously published cells copy their 2 KiB attachment range to the
+previous buffer before compute updates the current buffer (at most 64 KiB per frame).
+Frame-owned jobs, descriptors and cell records remain fenced. Unchanged cells use
+current attachments for both submitted times; repaired cells use the saved old roots
+and slope for previous-position evaluation. New generations and newly valid plants
+still reject temporal history. Publication metadata commits on successful submission.
+
+If a valid surface has a pending repair, a published cell keeps its last attachment
+and conservative bounds enclosing both old and new surface heights. New cells still
+wait for generation; missing/overflowed terrain and recycled generations never borrow
+stale roots. Published attachment values contain no live terrain references. Only
+actual compute jobs retain terrain height readers. Repairs remain near-first, capped
+at 32 cells / the existing estimated 0.5 ms allowance, ahead of new population.
+
+This deliberately allows roots to lag a terrain refinement while its bounded repair
+queue drains, instead of blanking a visible patch. After repair, roots use the exact
+current rendered triangles. It does not add a terrain LOD lock, change population
+identity, increase GPU capacity, or allocate during frame processing. Extreme motion
+can still outpace population supply. Validate continuity under a one-cell update
+budget, repaired motion history, exact settled attachment, teleport/retirement and
+both material paths with Vulkan synchronization validation; repeat the same native
+forward route and report allocation/update cost separately from diagnostic readbacks.
+
+Native verification: the repeated route has zero front-of-camera disappearances or
+returns, with 830 surface changes delivered continuously and the same 32-cell cap.
+The normal traversal/teleport run records zero warm render-thread allocations,
+163.889 MiB, and update GPU p95/max 0.052/0.057 ms.
+[Traces, checks and limitations](measurements/vegetation_attachment_continuity/README.md).
+
 ## Usage and measured verification (2026-10-24)
 
 Build/run `cmake-build-release/engine --vegetation`, or enable Vegetation under

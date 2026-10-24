@@ -20,7 +20,7 @@ ordinary UI persistence continues to save window state only. No new viewer is ad
 Keep 4 m cells, 128 candidate identities per cell, canonical suitability and rendered
 triangle attachment. Runtime demand is max(render distance, caster distance) +16 m;
 retention adds another 16 m. Neither radius nor quality changes population identity. The engine preallocates
-12,288 slots and allows 256 MiB of actual GPU allocations including both frame
+12,288 slots and allows 256 MiB of actual GPU allocations including current/previous
 attachments, selection lists/scratch, assets, staging and retirement. Smaller owned
 fixtures retain explicit capacities. Expansion schedules outward work; contraction
 changes rendering immediately and retires cells only after submitted readers finish.
@@ -83,7 +83,9 @@ scanned by one lane per bin, followed by bounded indirect command construction a
 stable group/lane scatter. Prefix/choice scratch is reused serially between views with
 read/write barriers. This removes repeated per-instance classification and makes
 capacity truncation deterministic. Sparse caster indices remain immutable and exclude
-grass. Both frames own all mutable work, descriptors and attachments.
+grass. Both frames own mutable selection work and descriptors. Shared attachments
+use [continuous publication](rendering_vegetation_streaming.md#continuous-attachment-publication)
+with explicit queue barriers and previous-repair snapshots.
 
 The borrowed Hi-Z image descriptor is finalized before caster commands first bind the
 vegetation descriptor set. The image is built later from solid depth; occlusion uses

@@ -30,6 +30,8 @@ Milestone 4 adds [hierarchical terrain residency](terrain_hierarchy.md): coarse 
 - [Vegetation engine integration, visibility and range](rendering_vegetation_visibility.md) — implemented 5J-V4, native validation and full-scene measurements recorded: enabled engine integration, live 200 m range, bounded GPU visibility and shared depth/coverage.
 
 - [Streamed vegetation and terrain attachment](rendering_vegetation_streaming.md) — implemented 5J-V3; deterministic GPU cells, bounded residency and rendered-triangle attachment.
+  [Continuous attachment publication](rendering_vegetation_streaming.md#continuous-attachment-publication)
+  addresses moving-camera cells disappearing while terrain attachment repairs are queued.
 
 - [Vegetation asset and foliage foundation](rendering_vegetation_assets.md) — implemented 5J-V2; saved reusable assets, compact instancing, foliage lighting, submitted wind history and isolated review tools.
 

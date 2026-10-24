@@ -1,0 +1,10 @@
+Vulkan device: NVIDIA GeForce RTX 3060
+Validation: disabled
+cold: CPU median/p95 8.10962 / 9.99204 ms; GPU 3.31424 / 8.34256 ms; vegetation CPU 0.660595 / 1.29703 ms; update GPU p95/max 0.048384 / 0.059392 ms; 163.889 MiB; 31592 visible entries; 6239 updates, 2568 generated, 0 pending; 4 render-thread C++ allocation calls
+  vegetation GPU medians: select 0.181568, depth 0, colour 0, shadows 0, interaction 0.002048 ms
+warm traversal / teleport / return: CPU median/p95 9.45428 / 11.2339 ms; GPU 8.4727 / 10.0193 ms; vegetation CPU 0.530041 / 1.94644 ms; update GPU p95/max 0.052224 / 0.057344 ms; 163.889 MiB; 31567 visible entries; 5769 updates, 2950 generated, 0 pending; 0 render-thread C++ allocation calls
+  vegetation GPU medians: select 0.7624, depth 0.712704, colour 1.60256, shadows 0.002048, interaction 0.002048 ms
+post-return recovery: CPU median/p95 8.67625 / 8.80874 ms; GPU 7.96918 / 8.78394 ms; vegetation CPU 0.260299 / 0.277328 ms; update GPU p95/max 0 / 0 ms; 163.889 MiB; 31567 visible entries; 0 updates, 0 generated, 0 pending; 0 render-thread C++ allocation calls
+  vegetation GPU medians: select 0.753888, depth 0.712704, colour 1.5872, shadows 0.003072, interaction 0.003072 ms
+Captured "/tmp/vegetation-continuity-timing/taa-off.ppm"
+Total seconds: 8.22521

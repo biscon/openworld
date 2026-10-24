@@ -1,0 +1,28 @@
+Debug/Release engine builds passed. 103 SPIR-V modules in each build validated for Vulkan 1.3.
+
+cmake-build-debug
+Test project /home/bison/Projects/openworld/cmake-build-debug
+    Start 52: vegetation_stream_gpu
+1/1 Test #52: vegetation_stream_gpu ............   Passed   31.10 sec
+
+100% tests passed out of 1
+
+Label Time Summary:
+gpu    =  31.10 sec*proc (1 test)
+
+Total Test time (real) =  31.10 sec
+cmake-build-release
+Test project /home/bison/Projects/openworld/cmake-build-release
+    Start 48: foliage_gpu
+1/3 Test #48: foliage_gpu ......................   Passed    3.97 sec
+    Start 52: vegetation_stream_gpu
+2/3 Test #52: vegetation_stream_gpu ............   Passed   10.75 sec
+    Start 54: vegetation_interaction_gpu
+3/3 Test #54: vegetation_interaction_gpu .......   Passed    0.81 sec
+
+100% tests passed out of 3
+
+Label Time Summary:
+gpu    =  15.53 sec*proc (3 tests)
+
+Total Test time (real) =  15.53 sec

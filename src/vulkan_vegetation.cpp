@@ -525,7 +525,7 @@ VulkanVegetation::VulkanVegetation(VkPhysicalDevice p, VkDevice d, uint32_t fami
     std::memcpy(data + s.indexOffset, indices.data(), indices.size() * 4);
     if (instanceBytes && !options.streaming.enabled)
         std::memcpy(data + geometryBytes, s.population.instances.data(), instanceBytes);
-    VkDescriptorSetLayoutBinding bindings[13]{};
+    VkDescriptorSetLayoutBinding bindings[14]{};
     for (uint32_t i = 0; i < 10; ++i)
         bindings[i] = {i, i == 1 ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
                        VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT, nullptr};
@@ -533,10 +533,11 @@ VulkanVegetation::VulkanVegetation(VkPhysicalDevice p, VkDevice d, uint32_t fami
     bindings[10] = {10, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr};
     bindings[11] = {11, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT, nullptr};
     bindings[12] = {12, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT, nullptr};
-    li.bindingCount = 13;
+    bindings[13] = {13, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT, nullptr};
+    li.bindingCount = 14;
     li.pBindings = bindings;
     check(vkCreateDescriptorSetLayout(d, &li, nullptr, &s.setLayout));
-    VkDescriptorPoolSize sizes[] = {{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 22},
+    VkDescriptorPoolSize sizes[] = {{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 24},
                                     {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2},
                                     {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 2}};
     VkDescriptorPoolCreateInfo pi{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
@@ -579,9 +580,8 @@ VulkanVegetation::VulkanVegetation(VkPhysicalDevice p, VkDevice d, uint32_t fami
         descriptor(d, f.set, 6, s.casters);
         descriptor(d, f.set, 8, f.prefixes);
         descriptor(d, f.set, 9, f.choices);
-        descriptor(d, f.set, 7,
-                   s.streaming ? s.streaming->attachments(uint32_t(&f - s.frames.data()))
-                               : s.emptyAttachment);
+        descriptor(d, f.set, 7, s.streaming ? s.streaming->attachments() : s.emptyAttachment);
+        descriptor(d, f.set, 13, s.streaming ? s.streaming->previousAttachments() : s.emptyAttachment);
     }
     if (!options.streaming.enabled || options.streaming.diagnostics)
         s.allocate(s.diagnostic, uint64_t(s.listEntries) * 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT, true);

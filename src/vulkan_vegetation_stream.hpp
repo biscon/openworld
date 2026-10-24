@@ -4,6 +4,7 @@
 #include "vulkan_terrain_stream.hpp"
 namespace ow {
 struct VegetationGpuCell {
+    // phase.xy is the stable wind phase; phase.w selects the saved pre-repair attachment.
     glm::vec4 lo{}, hi{}, origin{}, previousOrigin{}, phase{}, casterLo{}, casterHi{};
 };
 static_assert(sizeof(VegetationGpuCell) == 112);
@@ -19,7 +20,8 @@ class VulkanVegetationStream {
     void record(VkCommandBuffer);
     void submitted();
     void observe(double milliseconds, uint32_t updates);
-    const render_detail::Buffer &attachments(uint32_t frame) const { return frames_[frame].attachments; }
+    const render_detail::Buffer &attachments() const { return attachments_; }
+    const render_detail::Buffer &previousAttachments() const { return previousAttachments_; }
     uint64_t bytes() const { return bytes_; }
     float demandRadius(float distance) const {
         return std::min(config_.demandRadius, std::max(distance, shadowDistance_) + 16);
@@ -42,12 +44,10 @@ class VulkanVegetationStream {
     };
     static_assert(sizeof(Job) == 1936);
     struct Frame {
-        render_detail::Buffer attachments, jobs;
+        render_detail::Buffer jobs;
         VkDescriptorSet set{};
         VkBuffer heightBuffer{};
         uint64_t serial = 0;
-        std::vector<uint64_t> signatures;
-        std::vector<uint32_t> generations;
     };
     VkPhysicalDevice physical_;
     VkDevice device_;
@@ -57,6 +57,12 @@ class VulkanVegetationStream {
     VkPipeline pipeline_{};
     std::array<Frame, 2> frames_;
     std::array<Job, 32> jobs_;
+    std::array<VkBufferCopy, 32> previousCopies_{};
+    uint32_t previousCopyCount_ = 0;
+    render_detail::Buffer attachments_, previousAttachments_;
+    std::vector<uint64_t> publishedSignatures_;
+    std::vector<uint32_t> publishedGenerations_;
+    std::vector<glm::vec2> publishedBounds_;
     struct SurfaceCache {
         VegetationTerrainCell surface;
         uint64_t version = 0;

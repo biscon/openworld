@@ -353,6 +353,7 @@ int main() {
             o.vegetation.streaming.cellCapacity = 64;
             o.vegetation.streaming.demandRadius = 8;
             o.vegetation.streaming.retentionRadius = 12;
+            o.vegetation.streaming.updatesPerFrame = 1;
             o.shadowCapacity.resolution = 128;
             Renderer r(o);
             TerrainRequest terrain;
@@ -368,7 +369,7 @@ int main() {
             s.viewRadius = 1;
             s.frustumCulling = false;
             s.antialiasing = ow::AntialiasingMode::Taa;
-            s.vegetation.wind = .5f;
+            s.vegetation.wind = 0;
             auto first = settle(r, c, s);
             checkGround(r, first);
             require(first.stats.visible > 0, "streamed plants rendered");
@@ -387,6 +388,7 @@ int main() {
             s.gtao.mode = GtaoMode::Off;
             s.vegetation.distance = 70;
             const auto fineReview = r.terrainLodReviewState();
+            uint32_t repairedMotion = 0, deferredRepairs = 0;
             for (uint32_t quadrant = 0; quadrant < 4; ++quadrant) {
                 auto review = fineReview;
                 std::set<std::tuple<int64_t, int64_t, uint32_t>> leaves;
@@ -406,12 +408,26 @@ int main() {
                                                 // from the owned partition
                 r.setTerrainLodReviewState(review);
                 s.freezeLod = true;
-                r.render(c, s);
-                auto transition = r.readVegetationSnapshot();
-                bool rejected = false;
-                for (const auto &cell : transition.cells)
-                    rejected |= !cell.historyValid;
-                require(rejected, "changed attachments reject temporal correspondence locally");
+                for (uint32_t frame = 0; frame < 96; ++frame) {
+                    r.render(c, s);
+                    auto transition = r.readVegetationSnapshot();
+                    require(transition.cells.size() == first.cells.size(),
+                            "published cells never disappear while terrain repairs are queued");
+                    require(transition.stats.updatedCells <= o.vegetation.streaming.updatesPerFrame,
+                            "continuous publication respects the repair work cap");
+                    deferredRepairs += transition.stats.pendingCells != 0;
+                    for (const auto &cell : transition.cells)
+                        require(cell.historyValid, "repair retains submitted attachment correspondence");
+                    const auto post = r.readPostSnapshot();
+                    for (size_t pixel = 0; pixel < post.motion.size(); ++pixel) {
+                        auto motion = post.motion[pixel];
+                        require(std::isfinite(motion.x) && std::isfinite(motion.y), "finite repaired motion");
+                        repairedMotion += post.thinGeometry[pixel] && motion.w > 0 &&
+                                          glm::length(glm::vec2(motion)) > 1e-6f;
+                    }
+                    if (!transition.stats.pendingCells && frame > 2)
+                        break;
+                }
                 auto stitched = settle(r, c, s);
                 samePopulation(first, stitched);
                 checkGround(r, stitched);
@@ -430,6 +446,9 @@ int main() {
                 }
                 require(edge, "fixture exercised real stitched boundaries");
             }
+            require(repairedMotion > 0,
+                    "terrain repair emits valid foliage motion with camera and wind fixed");
+            require(deferredRepairs > 0, "one-cell budget exercises retained pending attachments");
             s.freezeLod = false;
             first = settle(r, c, s);
             checkGround(r, first);

@@ -43,6 +43,9 @@ VulkanVegetationStream::VulkanVegetationStream(VkPhysicalDevice physical, VkDevi
     if (assets_.y == ~0u)
         assets_.y = assets_.x;
     surfaces_.resize(config.cellCapacity);
+    publishedSignatures_.resize(config.cellCapacity);
+    publishedGenerations_.resize(config.cellCapacity);
+    publishedBounds_.resize(config.cellCapacity);
     previousSignatures_.resize(config.cellCapacity);
     currentSignatures_.resize(config.cellCapacity);
     previousGenerations_.resize(config.cellCapacity);
@@ -84,12 +87,12 @@ VulkanVegetationStream::VulkanVegetationStream(VkPhysicalDevice physical, VkDevi
                     "main",
                     nullptr};
         check(vkCreateComputePipelines(device, {}, 1, &ci, nullptr, &pipeline_));
+        allocate(attachments_, uint64_t(config.cellCapacity) * 128 * 16,
+                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+        allocate(previousAttachments_, uint64_t(config.cellCapacity) * 128 * 16,
+                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
         for (auto &f : frames_) {
-            allocate(f.attachments, uint64_t(config.cellCapacity) * 128 * 16,
-                     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
             allocate(f.jobs, 32 * sizeof(Job), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
-            f.signatures.resize(config.cellCapacity);
-            f.generations.resize(config.cellCapacity);
             VkDescriptorSetAllocateInfo ai{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
             ai.descriptorPool = pool_;
             ai.descriptorSetCount = 1;
@@ -103,7 +106,7 @@ VulkanVegetationStream::VulkanVegetationStream(VkPhysicalDevice physical, VkDevi
             w.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
             w.pBufferInfo = &info;
             vkUpdateDescriptorSets(device, 1, &w, 0, nullptr);
-            descriptor(device, f.set, 1, f.attachments);
+            descriptor(device, f.set, 1, attachments_);
             descriptor(device, f.set, 2, f.jobs);
         }
     } catch (...) {
@@ -139,6 +142,7 @@ void VulkanVegetationStream::prepare(uint32_t frame, WorldPosition camera, World
     auto &f = frames_[frame];
     completed_ = std::max(completed_, f.serial);
     updateCount_ = 0;
+    previousCopyCount_ = 0;
     uint64_t revision = terrain ? terrain->vegetationRevision() : 0;
     revision = revision * 1099511628211ull ^ 6u; // population algorithm revision, not candidate hash salt
     revision = revision * 1099511628211ull ^ settings.habitat.revision;
@@ -206,11 +210,21 @@ void VulkanVegetationStream::prepare(uint32_t frame, WorldPosition camera, World
                 ++stats.pendingCells;
                 continue;
             }
-            const bool dirty = f.signatures[i] != surface.signature || f.generations[i] != slot.generation;
-            if (dirty) {
-                if (updateCount_ >= allowance) {
-                    ++stats.pendingCells;
+            const bool published =
+                publishedGenerations_[i] == slot.generation && publishedSignatures_[i] != 0;
+            const bool dirty = !published || publishedSignatures_[i] != surface.signature;
+            const bool update = dirty && updateCount_ < allowance;
+            if (dirty && !update) {
+                ++stats.pendingCells;
+                // A queued repair must not blink an already published cell. The
+                // attachment contains owned values, not references to retired heights.
+                if (!published)
                     continue;
+            }
+            if (update) {
+                if (published) {
+                    const VkDeviceSize offset = uint64_t(i) * 128 * 16;
+                    previousCopies_[previousCopyCount_++] = {offset, offset, 128 * 16};
                 }
                 terrain->vegetationSurface(slot.key, surface, true);
                 auto &job = jobs[updateCount_++];
@@ -235,30 +249,31 @@ void VulkanVegetationStream::prepare(uint32_t frame, WorldPosition camera, World
                 if (!slot.generated) {
                     ++stats.generatedCells;
                 }
-                slot.generated = true;
-                f.signatures[i] = surface.signature;
-                f.generations[i] = slot.generation;
             }
             auto origin = vegetationCellOrigin(slot.key);
             auto &cell = cells[i];
             cell.origin = {glm::vec3(relativePosition(origin, camera)), 1};
-            cell.previousOrigin = {glm::vec3(relativePosition(origin, previous)),
-                                   previousSignatures_[i] == surface.signature &&
-                                           previousGenerations_[i] == slot.generation
-                                       ? 1
-                                       : 0};
+            cell.previousOrigin = {
+                glm::vec3(relativePosition(origin, previous)),
+                previousSignatures_[i] != 0 && previousGenerations_[i] == slot.generation ? 1 : 0};
             const float verticalEnvelope = envelope_ / settings.habitat.minimumUp;
-            cell.lo = {-envelope_, surface.bounds.x - verticalEnvelope, -envelope_, 0};
-            cell.hi = {4 + envelope_, surface.bounds.y + verticalEnvelope, 4 + envelope_, 0};
+            auto bounds = surface.bounds;
+            if (published && !update) {
+                bounds.x = std::min(bounds.x, publishedBounds_[i].x);
+                bounds.y = std::max(bounds.y, publishedBounds_[i].y);
+            }
+            cell.lo = {-envelope_, bounds.x - verticalEnvelope, -envelope_, 0};
+            cell.hi = {4 + envelope_, bounds.y + verticalEnvelope, 4 + envelope_, 0};
             cell.casterLo = cell.lo;
             cell.casterHi = cell.hi;
             cell.phase = {float((slot.key.x % 64 + 64) % 64) * 4, float((slot.key.z % 64 + 64) % 64) * 4, 1,
-                          0};
+                          published && update ? 1.f : 0.f};
             if (config_.diagnostics) {
-                diagnosticSurfaces_[i] = surface;
+                if (update)
+                    diagnosticSurfaces_[i] = surface;
                 diagnosticHistory_[i] = cell.previousOrigin.w != 0;
             }
-            currentSignatures_[i] = surface.signature;
+            currentSignatures_[i] = update ? surface.signature : publishedSignatures_[i];
             currentGenerations_[i] = slot.generation;
             residency_.used(i, serial_ + 1);
             ++stats.residentCells;
@@ -271,7 +286,6 @@ void VulkanVegetationStream::prepare(uint32_t frame, WorldPosition camera, World
 }
 void VulkanVegetationStream::restrictPopulation(double remaining, VegetationGpuCell *cells,
                                                 VegetationStats &stats) {
-    auto &f = frames_[frame_];
     auto *jobs = jobs_.data();
     uint32_t repairs = 0;
     while (repairs < updateCount_ && !jobs[repairs].config.z)
@@ -281,8 +295,6 @@ void VulkanVegetationStream::restrictPopulation(double remaining, VegetationGpuC
     for (uint32_t j = allowed; j < updateCount_; ++j) {
         uint32_t i = jobs[j].config.x;
         residency_.slot(i).generated = false;
-        f.signatures[i] = 0;
-        f.generations[i] = 0;
         currentSignatures_[i] = 0;
         currentGenerations_[i] = 0;
         cells[i] = {};
@@ -301,6 +313,17 @@ void VulkanVegetationStream::record(VkCommandBuffer cmd) {
             VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT,
             VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
             VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+    if (previousCopyCount_) {
+        barrier(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT, VK_PIPELINE_STAGE_2_COPY_BIT,
+                VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT);
+        vkCmdCopyBuffer(cmd, attachments_.buffer, previousAttachments_.buffer, previousCopyCount_,
+                        previousCopies_.data());
+        barrier(cmd, VK_PIPELINE_STAGE_2_COPY_BIT,
+                VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
+                VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+    }
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, layout_, 0, 1, &frames_[frame_].set, 0,
                             nullptr);
@@ -311,6 +334,14 @@ void VulkanVegetationStream::record(VkCommandBuffer cmd) {
 }
 void VulkanVegetationStream::submitted() {
     frames_[frame_].serial = ++serial_;
+    for (uint32_t j = 0; j < updateCount_; ++j) {
+        const uint32_t i = jobs_[j].config.x;
+        auto &slot = residency_.slot(i);
+        slot.generated = true;
+        publishedSignatures_[i] = currentSignatures_[i];
+        publishedGenerations_[i] = slot.generation;
+        publishedBounds_[i] = surfaces_[i].surface.bounds;
+    }
     previousSignatures_ = currentSignatures_;
     previousGenerations_ = currentGenerations_;
 }
@@ -325,7 +356,7 @@ void VulkanVegetationStream::copySnapshot(VkCommandBuffer cmd) {
     VkBufferCopy copy{0, 0, uint64_t(config_.cellCapacity) * 128 * 32};
     vkCmdCopyBuffer(cmd, population_, diagnostic_.buffer, 1, &copy);
     copy = {0, copy.size, uint64_t(config_.cellCapacity) * 128 * 16};
-    vkCmdCopyBuffer(cmd, frames_[frame_].attachments.buffer, diagnostic_.buffer, 1, &copy);
+    vkCmdCopyBuffer(cmd, attachments_.buffer, diagnostic_.buffer, 1, &copy);
 }
 std::vector<VegetationCellSnapshot> VulkanVegetationStream::snapshot() const {
     std::vector<VegetationCellSnapshot> out;

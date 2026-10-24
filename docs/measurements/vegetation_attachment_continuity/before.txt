@@ -1,0 +1,9 @@
+Vulkan device: NVIDIA GeForce RTX 3060
+Validation: disabled
+Settling: 600 frames; vegetation ready/pending/missing 480/2088/0; terrain 0 + detail 0
+Captured "/tmp/vegetation-continuity-before/forward-0.ppm"
+Captured "/tmp/vegetation-continuity-before/forward-120.ppm"
+Captured "/tmp/vegetation-continuity-before/forward-240.ppm"
+Captured "/tmp/vegetation-continuity-before/forward-360.ppm"
+Captured "/tmp/vegetation-continuity-before/forward-479.ppm"
+Forward continuity: 653 visible-front cell disappearances; 665 returns

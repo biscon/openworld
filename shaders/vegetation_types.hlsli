@@ -22,6 +22,7 @@ struct VegetationUniform {
 struct Cell {float4 lo,hi,origin,previousOrigin,phase,casterLo,casterHi;};
 [[vk::binding(4,0)]] StructuredBuffer<Cell> cells;
 [[vk::binding(7,0)]] StructuredBuffer<float4> attachments;
+[[vk::binding(13,0)]] StructuredBuffer<float4> previousAttachments;
 [[vk::binding(11,0)]] StructuredBuffer<float2> interactionField;
 [[vk::binding(12,0)]] StructuredBuffer<float2> previousInteractionField;
 float2 interactionTexel(int2 p,bool previous) {
@@ -111,7 +112,7 @@ float windBend(Plant p,Cell cell,float4 weights,float time,float strength,uint l
     float flutter=.025*sin(time*4.7+weights.w*6.28+p.variation*6.28);
     return strength*vegetation.deformation[p.assetCell&7].x*(gust*weights.y+flutter*weights.z*(1-smoothstep(15,55,length(p.rootScale.xyz+(previous?cell.previousOrigin.xyz:cell.origin.xyz)))));
 }
-float3 plantPosition(Plant p,Cell cell,float3 vertex,float4 weights,float time,float strength,float2 direction,uint asset,uint lod,bool previous) {
+float3 plantPosition(Plant p,Cell cell,float3 vertex,float4 weights,float time,float strength,float2 direction,uint asset,uint lod,bool previous,float2 slope) {
     if(vegetation.profile.x!=0) {
         if(asset%2!=0)vertex.xz*=previous?vegetation.previousCards.x:vegetation.cards.x;
         float3 pos=rotatePlant(vertex*p.rootScale.w,p.yaw);
@@ -124,7 +125,7 @@ float3 plantPosition(Plant p,Cell cell,float3 vertex,float4 weights,float time,f
     float4 response=vegetation.interactionResponse[asset];
     pos.xz+=contact*response.x*weights.y;
     pos.y-=length(contact)*response.y*weights.y;
-    pos.y+=dot(plantSlope,pos.xz);
+    pos.y+=dot(slope,pos.xz);
     return pos*p.rootScale.w+p.rootScale.xyz+(previous?cell.previousOrigin.xyz:cell.origin.xyz);
 }
 // Conservative local curvature enclosure; vegetation is bounded to the nearby world.

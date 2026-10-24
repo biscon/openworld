@@ -33,10 +33,14 @@ Output main(Input i,uint id:SV_InstanceID) {
     uint view=plantPush.view,bin=plantPush.bin;
     uint index=visiblePlants[vegetation.lists[view].x+work[view*plantViewWords+bin*8+7]+id];
     Plant p=loadPlant(index);Cell cell=cells[p.assetCell>>3];Output o;
-    float d=length(p.rootScale.xyz+cell.origin.xyz),oldD=length(p.rootScale.xyz+cell.previousOrigin.xyz);
+    Plant oldP=p;float2 oldSlope=plantSlope;bool oldAttached=true;
+    if(vegetation.inspection.y!=0&&cell.phase.w!=0) {
+        float4 old=previousAttachments[index];oldP.rootScale.y=old.x;oldSlope=old.yz;oldAttached=old.w!=0;
+    }
+    float d=length(p.rootScale.xyz+cell.origin.xyz),oldD=length(oldP.rootScale.xyz+cell.previousOrigin.xyz);
     uint asset=vegetation.geometry[bin].w,lod=plantLod(p,d,asset),oldAsset=plantAsset(p,vegetation.modes.y,oldD),oldLod=plantLod(p,oldD,oldAsset,true);
     float coverage=plantCoverage(p,d,asset,vegetation.settings,vegetation.cards,view);
-    float oldCoverage=plantCoverage(p,oldD,oldAsset,vegetation.previousSettings,vegetation.previousCards);
+    float oldCoverage=plantCoverage(oldP,oldD,oldAsset,vegetation.previousSettings,vegetation.previousCards);
     float3 vertex=i.position,oldVertex=i.position,normal=i.normal,oldNormal;
     float4 weights=i.deformation,oldWeights=i.deformation;
     float width=1,oldWidth=1;
@@ -44,7 +48,7 @@ Output main(Input i,uint id:SV_InstanceID) {
         morphGrass(i,grassMorph(p,d,asset,lod),coverage,vertex,weights,normal,width);
         morphGrass(i,grassMorph(p,oldD,asset,lod,true),oldCoverage,oldVertex,oldWeights,oldNormal,oldWidth);
     }
-    o.relative=plantPosition(p,cell,vertex,weights,vegetation.cameraTime.w,vegetation.settings.y,vegetation.wind.xy,asset,lod,false);
+    o.relative=plantPosition(p,cell,vertex,weights,vegetation.cameraTime.w,vegetation.settings.y,vegetation.wind.xy,asset,lod,false,plantSlope);
     o.renderedPosition=curvePosition(o.relative,temporal.curvature);
     o.position=view==0?mul(lighting.viewProjection,float4(o.renderedPosition,1)):mul(vegetation.views[view],float4(o.renderedPosition,1));
     o.normal=rotatePlant(normal,p.yaw);float3 tangent=rotatePlant(i.tangent.xyz,p.yaw);
@@ -60,7 +64,7 @@ Output main(Input i,uint id:SV_InstanceID) {
     o.normal.y-=dot(o.normal.xz,shear);tangent.xz+=shear*tangent.y;
     o.normal.xz-=plantSlope*o.normal.y;tangent.y+=dot(plantSlope,tangent.xz);
     o.tangent=float4(tangent,i.tangent.w);o.uv=i.uv;o.material=vegetation.geometry[bin].z;
-    bool valid=vegetation.modes.z!=0&&(vegetation.inspection.y==0||cell.previousOrigin.w!=0)&&oldAsset==asset&&oldLod==lod&&oldCoverage>0&&oldWidth>1e-5;
+    bool valid=oldAttached&&vegetation.modes.z!=0&&(vegetation.inspection.y==0||cell.previousOrigin.w!=0)&&oldAsset==asset&&oldLod==lod&&oldCoverage>0&&oldWidth>1e-5;
     if(vegetation.interaction.w!=0 || vegetation.interaction.z!=vegetation.previousInteraction.z) {
         float2 root=p.rootScale.xz+cell.origin.xz;
         float2 oldRoot=p.rootScale.xz+cell.previousOrigin.xz;
@@ -68,7 +72,7 @@ Output main(Input i,uint id:SV_InstanceID) {
                       (vegetation.previousInteraction.z!=0&&all(abs(oldRoot-vegetation.previousInteraction.xy-16)<16));
         if(affected)valid=false;
     }
-    float3 previous=plantPosition(p,cell,oldVertex,oldWeights,vegetation.previousCameraTime.w,vegetation.previousSettings.y,vegetation.previousWind.xy,asset,lod,true);
+    float3 previous=plantPosition(oldP,cell,oldVertex,oldWeights,vegetation.previousCameraTime.w,vegetation.previousSettings.y,vegetation.previousWind.xy,asset,lod,true,oldSlope);
     o.previousClip=valid?mul(temporal.previous,float4(curvePosition(previous,temporal.previousCurvature),1)):0;
     o.plant=float4(coverage,p.variation,vegetation.cards.z,oldCoverage);o.identity=p.identity;
     o.foliage=vegetation.foliage[bin];o.foliage.w*=vegetation.profile.w;
