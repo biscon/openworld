@@ -167,7 +167,10 @@ Implemented: four stable near cascades plus one coarse mountain cascade.
 The virtual implementation failed native motion/quality and performance review and
 has been removed completely, including its dense clipmap fallback. Debug/Release
 and software Vulkan checks pass; native CSM acceptance remains pending. See the
-[CSM design and acceptance gates](rendering_shadows.md).
+[CSM design and acceptance gates](rendering_shadows.md). The subsequent
+[surface review correction](rendering_surface_review.md) replaces slope-sensitive
+PCF references, removes partial horizontal terrain collapse, tightens patch bounds,
+and adds completed triangle counters and saved review views.
 
 Use texel-snapped fixed-extent projections, overlapping filtered cascades, shared
 rendered terrain geometry and bounded independent offscreen caster residency.
@@ -204,7 +207,7 @@ Optional auto-exposure follows the tested manual-exposure baseline, with bounded
 
 ### 5H — Physical sky, aerial perspective and distant coverage
 
-Status: implemented; [design, controls and verification](rendering_atmosphere.md). Target-GPU, production-scale horizon and live flight acceptance remain pending.
+Status: implemented; [design, controls and verification](rendering_atmosphere.md). The [continuous-horizon extension](rendering_horizon.md) adds compact distant levels, visual curvature and long-range aerial transport. Target-GPU and live flight acceptance remain pending.
 
 **Scattering versus froxels.** Rayleigh scattering describes molecular scattering; aerosols add Mie-like scattering and absorption. Extinction removes surface light and in-scattering adds atmospheric light, reducing contrast and changing colour with distance. This is not simply a saturation slider. A froxel is a frustum volume cell used to discretize transport. Aerial perspective can itself use a coarse froxel-like volume; local fog often uses a finer one. They overlap in the transport calculation, while differing in scale and density fields.
 

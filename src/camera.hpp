@@ -1,4 +1,5 @@
 #pragma once
+#include "horizon.hpp"
 #include "terrain.hpp"
 namespace ow {
 struct CameraInput {
@@ -8,6 +9,8 @@ struct CameraInput {
 };
 struct Camera {
     static constexpr float nearPlane = .5f, farPlane = 64000.f, verticalFovDegrees = 60.f;
+    float renderFar = farPlane;
+    glm::vec4 curvature{0};
     ChunkCoord chunk;
     glm::dvec3 local{};
     float yaw = 0, pitch = 0;

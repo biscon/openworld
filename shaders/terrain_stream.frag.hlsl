@@ -26,13 +26,13 @@ float4 shadePixel(TerrainSurface input) : SV_Target0 {
                           / max(fwidth(input.gridPosition), 1e-6);
         colour = lerp(float3(0.9,0.35,0.04), colour, smoothstep(0.5,1.5,min(distance.x,distance.y)));
     }
-    if(lighting.output.y==0) colour=shadeTerrain(normal,input.relativePosition,screenVisibility(input.position.xy));
+    if(lighting.output.y==0) colour=shadeTerrain(normal,input.relativePosition,screenVisibility(input.position.xy),input.renderedPosition);
     return float4(colour,1);
 }
 
 #ifdef OW_TEMPORAL_OUTPUT
 TemporalOutput main(TerrainSurface input) {
-    return temporalOutput(shadePixel(input),input.relativePosition,input.previousClip,float(input.previousClip.w>0),saturate(dot(lighting.emissive.rgb,float3(.2126,.7152,.0722))/10000));
+    return temporalOutput(shadePixel(input),input.renderedPosition,input.previousClip,float(input.previousClip.w>0),saturate(dot(lighting.emissive.rgb,float3(.2126,.7152,.0722))/10000));
 }
 
 #else

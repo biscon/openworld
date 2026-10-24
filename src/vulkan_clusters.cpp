@@ -188,9 +188,16 @@ void VulkanClusters::prepare(uint32_t frame, const Camera &camera, TerrainGrid t
     auto *records = static_cast<LightRecord *>(f.lights.mapped);
     uint32_t n = 0;
     for (const auto &l : lights.values()) {
-        records[n++] = {glm::vec4(glm::vec3(relativePosition(l.position, origin)), l.range),
+        const auto flat = relativePosition(l.position, origin);
+        const bool local = glm::length(flat) <= camera.renderFar * 2.0 + l.range;
+        const auto curved = local ? curvePosition(flat, camera.curvature) : flat;
+        const auto direction =
+            local ? glm::normalize(glm::vec3(
+                        curvePosition(flat + glm::dvec3(l.direction), camera.curvature) - curved))
+                  : glm::normalize(l.direction);
+        records[n++] = {glm::vec4(glm::vec3(curved), l.range),
                         glm::vec4(l.colour, l.intensity),
-                        glm::vec4(glm::normalize(l.direction), std::cos(l.outerAngle)),
+                        glm::vec4(direction, std::cos(l.outerAngle)),
                         {l.sourceRadius, std::cos(l.innerAngle), float(l.type), 0}};
     }
     std::memcpy(f.uniform.mapped, &u, sizeof(u));

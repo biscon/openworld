@@ -58,6 +58,7 @@ struct VulkanVisibility::Impl {
     VisibilityCapabilities caps;
     VisibilityStats stats;
     Params params{};
+    uint64_t serial = 0;
     VkDescriptorSetLayout setLayout{};
     VkPipelineLayout pipelineLayout{};
     VkDescriptorPool pool{};
@@ -77,6 +78,9 @@ struct VulkanVisibility::Impl {
         uint32_t n = 0, b = 0, total = 0;
         bool issued = false;
         uint32_t stamps = 0;
+        VisibilityTriangles triangles{};
+        VisibilityMode mode = VisibilityMode::Direct;
+        uint64_t serial = 0;
     };
     std::array<Frame, 2> frames;
     Impl(VkPhysicalDevice p, VkDevice d, uint32_t c, VisibilityCapabilities capabilities)
@@ -134,7 +138,11 @@ struct VulkanVisibility::Impl {
         vkUpdateDescriptorSets(device, 1, &w, 0, nullptr);
     }
     void collect(Frame &f) {
-        stats.countsAvailable = f.issued;
+        stats.countsAvailable = (f.stamps & (1u << 9)) != 0;
+        stats.completedMode = f.mode;
+        stats.completedFrame = f.serial;
+        stats.depthTriangles = {};
+        stats.colourTriangles = {};
         stats.timingsAvailable = false;
         stats.submitted = stats.frustumRejected = stats.occlusionRejected = 0;
         stats.cullingMilliseconds = stats.depthMilliseconds = stats.pyramidMilliseconds =
@@ -142,13 +150,29 @@ struct VulkanVisibility::Impl {
         if (!f.stamps && !f.issued)
             return;
         const auto *counts = static_cast<const glm::uvec4 *>(f.counts.mapped);
-        if (!f.issued)
+        if (!f.issued) {
             stats.submitted = f.total;
+            stats.colourTriangles = f.triangles;
+            if (f.stamps & (1u << 2))
+                stats.depthTriangles = f.triangles;
+        }
         if (f.issued)
             for (uint32_t i = 0; i < f.b; ++i) {
-                stats.submitted += counts[i].x;
-                stats.frustumRejected += counts[i].y;
-                stats.occlusionRejected += counts[i].z;
+                stats.submitted += counts[i * 3].x;
+                stats.frustumRejected += counts[i * 3].y;
+                stats.occlusionRejected += counts[i * 3].z;
+                const auto decode = [](glm::uvec4 v) {
+                    return VisibilityTriangles{uint64_t(v.x) | (uint64_t(v.y) << 32),
+                                               uint64_t(v.z) | (uint64_t(v.w) << 32)};
+                };
+                const auto depth = decode(counts[i * 3 + 1]);
+                const auto colour = decode(counts[i * 3 + 2]);
+                if (f.stamps & (1u << 2)) {
+                    stats.depthTriangles.terrain += depth.terrain;
+                    stats.depthTriangles.meshes += depth.meshes;
+                }
+                stats.colourTriangles.terrain += colour.terrain;
+                stats.colourTriangles.meshes += colour.meshes;
             }
         if (queries) {
             uint64_t q[20]{};
@@ -227,7 +251,7 @@ VulkanVisibility::VulkanVisibility(VkPhysicalDevice p, VkDevice d, uint32_t fami
         f.batches.create(p, d, uint64_t(capacity) * 16, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
         f.commands.create(p, d, uint64_t(capacity) * sizeof(VkDrawIndexedIndirectCommand),
                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT);
-        f.counts.create(p, d, uint64_t(capacity) * 16,
+        f.counts.create(p, d, uint64_t(capacity) * 48,
                         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, true);
         s.stats.allocatedBytes +=
             f.records.bytes + f.candidates.bytes + f.batches.bytes + f.commands.bytes + f.counts.bytes;
@@ -333,6 +357,9 @@ void VulkanVisibility::begin(uint32_t frame, VisibilityMode mode, bool wire, boo
     auto &f = s.frames[frame];
     s.collect(f);
     f.n = f.b = f.total = 0;
+    f.triangles = {};
+    f.serial = ++s.serial;
+    s.stats.selectedTriangles = {};
     f.issued = false;
     f.stamps = 0;
     s.stats.requested = mode;
@@ -357,6 +384,8 @@ uint32_t VulkanVisibility::append(VisibilityBounds b, uint32_t count, uint32_t f
     auto &f = s.frames[s.current];
     ++s.stats.candidates;
     ++f.total;
+    (record ? f.triangles.terrain : f.triangles.meshes) += count / 3;
+    s.stats.selectedTriangles = f.triangles;
     if (f.n == s.capacity) {
         s.stats.effective = VisibilityMode::Direct;
         s.stats.fallback = VisibilityFallback::Capacity;
@@ -371,7 +400,9 @@ uint32_t VulkanVisibility::append(VisibilityBounds b, uint32_t count, uint32_t f
     b.lo -= padding;
     b.hi += padding;
     static_cast<Candidate *>(f.candidates.mapped)[f.n] = {
-        glm::vec4(b.lo, b.valid ? 1.f : 0.f), glm::vec4(b.hi, 0), {count, first, record ? f.n : source, 0}};
+        glm::vec4(b.lo, b.valid ? 1.f : 0.f),
+        glm::vec4(b.hi, 0),
+        {count, first, record ? f.n : source, record ? 1u : 0u}};
     if (record) {
         if (bytes > 128)
             throw std::logic_error("Terrain draw record too large");
@@ -394,7 +425,8 @@ void VulkanVisibility::beginGpu(VkCommandBuffer cmd) {
     auto &s = *impl_;
     if (s.queries)
         vkCmdResetQueryPool(cmd, s.queries, s.current * 10, 10);
-    if (s.caps.hiZ) { // Valid initialized image descriptors even for the no-occlusion shader branch.
+    if (s.caps.hiZ) { // Valid initialized image descriptors even for the
+                      // no-occlusion shader branch.
         auto &f = s.frames[s.current];
         imageDependency(cmd, f.image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
                         VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
@@ -405,10 +437,11 @@ void VulkanVisibility::beginGpu(VkCommandBuffer cmd) {
 }
 void VulkanVisibility::stamp(VkCommandBuffer cmd, uint32_t index) {
     auto &s = *impl_;
-    if (s.queries) {
+    s.frames[s.current].stamps |= 1u << index;
+    if (index == 9)
+        s.frames[s.current].mode = s.stats.effective;
+    if (s.queries)
         vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, s.queries, s.current * 10 + index);
-        s.frames[s.current].stamps |= 1u << index;
-    }
 }
 void VulkanVisibility::cull(VkCommandBuffer cmd, bool occlusion) {
     if (!indirect())
@@ -468,7 +501,7 @@ void VulkanVisibility::draw(VkCommandBuffer cmd, uint32_t b) const {
     auto batch = static_cast<const glm::uvec4 *>(f.batches.mapped)[b];
     const auto offset = VkDeviceSize(batch.x) * sizeof(VkDrawIndexedIndirectCommand);
     if (s.caps.count && s.caps.multiDraw)
-        vkCmdDrawIndexedIndirectCount(cmd, f.commands.buffer, offset, f.counts.buffer, VkDeviceSize(b) * 16,
+        vkCmdDrawIndexedIndirectCount(cmd, f.commands.buffer, offset, f.counts.buffer, VkDeviceSize(b) * 48,
                                       batch.y, sizeof(VkDrawIndexedIndirectCommand));
     else if (s.caps.multiDraw)
         vkCmdDrawIndexedIndirect(cmd, f.commands.buffer, offset, batch.y,

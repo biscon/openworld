@@ -25,21 +25,28 @@ float4 heightSample(uint2 p) {
     Sample s=samples[p.y*(params.dimensions.x+1)+p.x];
     return draw.options.x!=0?s.eroded:s.base;
 }
-float4 interpolateSample(float2 p) {
-    uint2 a=min(uint2(p),params.dimensions.x-1);
-    float2 f=p-float2(a);
-    return lerp(lerp(heightSample(a),heightSample(a+uint2(1,0)),f.x),
-                lerp(heightSample(a+uint2(0,1)),heightSample(a+uint2(1,1)),f.x),f.y);
+#include "terrain_morph.hlsli"
+float3 fixedPosition(uint2 grid) {
+    return float3(grid.x*params.shape.x,heightSample(grid).w,grid.y*params.shape.x)+draw.offset.xyz;
 }
-float3 previousSurface(uint vertex,float3 observer) {
+float3 fixedSurface(uint vertex,float3 observer,float4 curvature,out float2 grid,out float3 rendered,out float morph) {
     uint width=(draw.patch.w!=0?draw.patch.w:params.dimensions.x)+1;
-    uint2 local=uint2(vertex%width,vertex/width);
-    float2 grid=float2(draw.patch.xy+local*draw.patch.z);
-    uint2 anchor=uint2(grid)-(local&1)*draw.patch.z;
-    float3 reference=float3(anchor.x*params.shape.x,heightSample(anchor).w,anchor.y*params.shape.x)+draw.offset.xyz;
-    float m=draw.morph.w!=0?saturate((distance(reference,observer)-draw.morph.x)/(draw.morph.y-draw.morph.x)):0;
-    grid-=float2(local&1)*float(draw.patch.z)*m;
-    return float3(grid.x*params.shape.x,interpolateSample(grid).w,grid.y*params.shape.x)+draw.offset.xyz;
+    grid=float2(draw.patch.xy+uint2(vertex%width,vertex/width)*draw.patch.z);
+    float3 fine=fixedPosition(uint2(grid));
+    morph=draw.morph.w!=0?saturate((distance(fine,observer)-draw.morph.x)/(draw.morph.y-draw.morph.x)):0;
+    rendered=curvePosition(fine,curvature);
+    if(morph==0)return fine;
+    uint2 anchor=uint2(grid)/(draw.patch.z*2)*(draw.patch.z*2);
+    if(morph==1 && distance(fixedPosition(anchor),observer)>=draw.morph.y) {
+        grid=float2(anchor);
+        float3 endpoint=fixedPosition(uint2(grid));rendered=curvePosition(endpoint,curvature);return endpoint;
+    }
+    uint2 a,b,c;float3 w;
+    terrainParentTriangle(uint2(grid),draw.patch.z*2,params.dimensions.x,a,b,c,w);
+    float3 pa=fixedPosition(a),pb=fixedPosition(b),pc=fixedPosition(c);
+    float3 flat=terrainEndpointBlend(fine,terrainTrianglePoint(pa,pb,pc,w),morph);flat.xz=fine.xz;
+    rendered=curvature.z!=0?terrainEndpointBlend(rendered,terrainTrianglePoint(curvePosition(pa,curvature),curvePosition(pb,curvature),curvePosition(pc,curvature),w),morph):flat;
+    return flat;
 }
 #ifdef TERRAIN_SHADOW
 float4 main(uint id:SV_VertexID,uint instance:SV_InstanceID) : SV_Position {
@@ -53,32 +60,21 @@ TerrainSurface main(uint id:SV_VertexID,uint instance:SV_InstanceID) {
 #endif
     bool wire=(draw.options.w&2)!=0;
     uint vertex=wire?topology[draw.indices.x+id]:id;
-    uint width=(draw.patch.w!=0?draw.patch.w:params.dimensions.x)+1;
-    uint2 local=uint2(vertex%width,vertex/width);
-    float2 grid=float2(draw.patch.xy+local*draw.patch.z);
+    float2 grid;float3 rendered;float morph;
+    float3 position=fixedSurface(vertex,view.observer.xyz,temporal.curvature,grid,rendered,morph);
     float4 s=heightSample(uint2(grid));
-    float3 position=float3(grid.x*params.shape.x,s.w,grid.y*params.shape.x)+draw.offset.xyz;
-    // A shared coarse-grid anchor keeps each collapsing group coherent,
-    // including the final triangles approaching zero area.
-    uint2 anchor=uint2(grid)-(local&1)*draw.patch.z;
-    float3 reference=float3(anchor.x*params.shape.x,heightSample(anchor).w,anchor.y*params.shape.x)+draw.offset.xyz;
-    float m=draw.morph.w!=0?saturate((distance(reference,view.observer.xyz)-draw.morph.x)/(draw.morph.y-draw.morph.x)):0;
-    grid-=float2(local&1)*float(draw.patch.z)*m;
-    s=interpolateSample(grid);
-    position=float3(grid.x*params.shape.x,s.w,grid.y*params.shape.x)+draw.offset.xyz;
 #ifdef TERRAIN_SHADOW
-    return shadowPosition(position);
+    return shadowPosition(rendered);
 #else
     TerrainSurface o;
     o.relativePosition=position;
-    o.position=mul(view.viewProjection,float4(position,1));
+    o.renderedPosition=rendered;
+    o.position=mul(view.viewProjection,float4(o.renderedPosition,1));
     o.gridPosition=grid;
     o.normal=s.xyz;
     o.options=draw.options;
     o.normalInfo=float4(float(draw.normals.z)/float(draw.patch.z),draw.normals.x,draw.normals.y,draw.morph.z);
-    // Collapsed vertices may have different original distances. Evaluate the
-    // shading blend at their final shared position to avoid a lighting split.
-    o.morph=draw.morph.w!=0?saturate((distance(position,view.observer.xyz)-draw.morph.x)/(draw.morph.y-draw.morph.x)):0;
+    o.morph=morph;
     o.barycentric=float3(id%3==0?1:0,id%3==1?1:0,id%3==2?1:0);
     o.previousClip=0;
     if(temporal.state.x!=0 && instance<uint(temporal.state.w)) {
@@ -87,7 +83,9 @@ TerrainSurface main(uint id:SV_VertexID,uint instance:SV_InstanceID) {
             Draw current=draw;
             draw.offset=asfloat(old.draw[0]);draw.options=old.draw[1];draw.patch=old.draw[2];
             draw.morph=asfloat(old.draw[3]);draw.normals=old.draw[4];draw.indices=old.draw[5];
-            o.previousClip=mul(temporal.previous,float4(previousSurface(vertex,old.observer.xyz),1));
+            float2 unused;float3 previous;float previousMorph;
+            fixedSurface(vertex,old.observer.xyz,temporal.previousCurvature,unused,previous,previousMorph);
+            o.previousClip=mul(temporal.previous,float4(previous,1));
             draw=current;
         }
     }

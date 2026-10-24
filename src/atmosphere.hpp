@@ -32,7 +32,7 @@ struct AtmosphereStats {
 };
 struct AtmosphereSnapshot {
     glm::uvec2 skyExtent{};
-    uint32_t volumeSize = 0;
+    uint32_t volumeSize = 0, volumeDepth = 0;
     std::vector<glm::vec4> transmittance, multipleScattering, sky, aerialTransmittance,
         aerialScattering;
     std::array<glm::vec4, 9> irradiance{};

@@ -1,6 +1,6 @@
 # Terrain ridge LOD quality
 
-Status: implemented; validation/review results below. This correction precedes material slice 5C.
+Status: filtered height/normal representations remain implemented. The shared-range controller and geometry morph described below are historical and superseded by [stationary ground LOD](terrain_stationary_lod.md). Earlier measurements below describe the earlier implementation, not current selection.
 
 The hierarchical renderer previously point-sampled all erosion frequencies on sparse grids. Narrow ridges alias into alternating peaks and depressions. Normal filtering cannot repair their silhouettes. The correction preserves the level-zero world and uses filtered height representations plus bounded screen-error-driven extension of the shared LOD ranges.
 
@@ -26,7 +26,7 @@ This is **not independent per-patch screen-error refinement**. The initially pro
 
 ## Connected filtered transitions
 
-Filtered representations differ at coincident vertices. The existing coherent even-vertex horizontal collapse now also blends height from the current level to its parent triangle surface, including even vertices. Exact endpoint interpolation avoids float rounding differences at tile boundaries. The same absolute-level samples make these targets agree across data representations. Normals retain sub-mesh relief through independent normal-resolution filtering and existing distance/residency fades. Parent/child coverage remains non-overlapping; bounds cover both endpoints. Height availability retains its existing 0.25-second residency transition.
+Filtered representations differ at coincident vertices. Vertices blend height from the current level to its parent triangle surface, including even vertices. The [surface correction](rendering_surface_review.md) keeps geographic XZ fixed throughout partial transitions and only coalesces redundant vertices at the completed endpoint. Exact endpoint interpolation avoids float rounding differences at tile boundaries. The same absolute-level samples make these targets agree across data representations. Normals retain sub-mesh relief through independent normal-resolution filtering and existing distance/residency fades. Parent/child coverage remains non-overlapping; bounds cover both endpoints. Height availability retains its existing 0.25-second residency transition.
 
 ## Tests and review
 

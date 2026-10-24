@@ -163,8 +163,107 @@ void referenceChecks(Renderer &r, Camera c, SceneSettings s) {
     r.releaseMaterial(halfBlend);
     r.releaseMesh(mesh);
 }
+void extendedHorizonChecks() {
+    auto o = options();
+    o.curvedHorizon = true;
+    o.shadowCapacity.resolution = 128;
+    o.shadowCapacity.casters = 128;
+    Renderer r(o);
+    Camera c;
+    c.local = {0, 2000, 0};
+    SceneSettings s;
+    s.terrainVisible = false;
+    s.atmosphere.mode = AtmosphereMode::Physical;
+    s.atmosphere.multipleScattering = false;
+    s.atmosphere.groundAlbedo = 0;
+    s.lighting.sunDirection = glm::normalize(glm::vec3(-.6, .8, .35));
+    frame(r, c, s);
+    auto a = r.readAtmosphereSnapshot();
+    require(a.volumeSize == 32 && a.volumeDepth == 64,
+            "Normal distant volume preserves 32 near samples and adds 32 far samples");
+    Camera projection = c;
+    projection.renderFar = 1572864;
+    const auto inverse = glm::inverse(projection.viewProjection(float(o.width) / o.height));
+    const uint32_t x = 16, y = 15, n = a.volumeSize;
+    auto point = inverse * glm::vec4((x + .5f) / n * 2 - 1, (y + .5f) / n * 2 - 1, 0, 1);
+    auto ray = glm::normalize(glm::dvec3(point) / double(point.w));
+    double maxT = 0, maxS = 0;
+    for (uint32_t z : {1u, 15u, 30u, 31u, 32u, 40u, 50u, 63u}) {
+        double depth = z <= 31 ? std::pow(double(z) / 31, 2) * 64000
+                               : 64000 * std::pow(1572864. / 64000, double(z - 31) / 32);
+        auto ref = atmosphereReference(s.atmosphere, 2000, ray, glm::dvec3(s.lighting.sunDirection),
+                                       depth / -ray.z, 4096, 256);
+        const auto index = (z * n + y) * n + x;
+        maxT = std::max(maxT,
+                        glm::length(glm::dvec3(a.aerialTransmittance[index]) - ref.transmittance));
+        maxS = std::max(maxS, glm::length(glm::dvec3(a.aerialScattering[index]) - ref.scattering) /
+                                  std::max(.0001, glm::length(ref.scattering)));
+    }
+    std::cout << "Extended aerial reference errors T " << maxT << " S " << maxS << '\n';
+    require(maxT < .015 && maxS < .08,
+            "Near and long-range transport match independent integration");
+    auto mesh = r.uploadMesh(makeQuad());
+    MeshMaterial material;
+    material.unlit = true;
+    material.doubleSided = true;
+    material.baseColour = {1, 1, 1, 1};
+    auto m = r.createMaterial(material);
+    MeshInstance instance;
+    instance.mesh = mesh;
+    instance.material = m;
+    instance.position.local = {0, 2000, -100000};
+    instance.scale = {10000, 10000, 1};
+    auto handle = r.createInstance(instance);
+    s.atmosphere.mode = AtmosphereMode::Off;
+    s.taa.enabled = true;
+    for (auto mode : {VisibilityMode::Direct, VisibilityMode::Indirect, VisibilityMode::HiZ}) {
+        s.visibility = mode;
+        s.opaqueDepthPrepass = true;
+        for (int i = 0; i < 5; ++i)
+            frame(r, c, s);
+        auto post = r.readPostSnapshot();
+        const auto index = (post.height / 2) * post.width + post.width / 2;
+        near(glm::length(glm::vec2(post.motion[index])), 0, 1e-5,
+             "Stationary curved triangles have no phantom motion");
+        require(post.motion[index].z > 90000 && post.motion[index].z < 110000,
+                "Public motion snapshots retain metres");
+        require(post.depth[index] > 90000 && post.depth[index] < 110000,
+                "Curved far mesh retains finite, accepted temporal depth beyond half-float range");
+    }
+    c.local.x += 10;
+    c.update({}, 0, o.terrainGrid);
+    frame(r, c, s);
+    require(r.postStats().historyValid, "Curved camera rebase retains temporal history");
+    s.atmosphere.mode = AtmosphereMode::Physical;
+    s.taa.enabled = false;
+    frame(r, c, s);
+    auto opaque = r.readHdrSnapshot();
+    material.alpha = AlphaMode::Blend;
+    auto transparent = r.createMaterial(material);
+    instance.material = transparent;
+    r.updateInstance(handle, instance);
+    frame(r, c, s);
+    auto blend = r.readHdrSnapshot();
+    const auto centre = (o.height / 2) * o.width + o.width / 2;
+    near(glm::length(glm::vec3(opaque.pixels[centre] - blend.pixels[centre])), 0, .001,
+         "Opaque and own-depth transparent transport agree at 100 km");
+    s.gtao.mode = GtaoMode::Half;
+    s.shadows.mode = ShadowMode::CSM;
+    frame(r, c, s);
+    s.atmosphere.quality = AtmosphereQuality::High;
+    frame(r, c, s);
+    a = r.readAtmosphereSnapshot();
+    require(a.volumeSize == 64 && a.volumeDepth == 96, "High long-range volume dimensions");
+    r.removeInstance(handle);
+    r.releaseMaterial(transparent);
+    r.releaseMaterial(m);
+    r.releaseMesh(mesh);
+    r.waitIdle();
+    require(r.validationErrors() == 0, "Extended atmosphere and curved mesh validation");
+}
 int main() {
     try {
+        extendedHorizonChecks();
         auto o = options();
         Renderer r(o);
         Camera c;

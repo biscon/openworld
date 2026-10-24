@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <chrono>
 #include <iostream>
+#include <map>
 #include <numeric>
+#include <tuple>
 using namespace ow;
 namespace {
 double ridge(double x, double z, uint32_t seed, double height) {
@@ -86,22 +88,24 @@ void detailResidency() {
     o.requireValidation = true;
     o.shaderDirectory = OPENWORLD_SHADER_DIR;
     o.width = o.height = 96;
-    // Preserve the production detail-range/chunk-extent ratio (2),
-    // so corner tiles cross the eligibility threshold when ranges expand.
-    o.terrainGrid = {64, .5f};
-    o.terrainCapacity = 64;
+    // A 64 m tile footprint spans the protected region and exercises coarse
+    // geometry. The previous 32 m fixture refined every tile to its finest level.
+    o.terrainGrid = {128, .5f};
+    o.terrainCapacity = 128;
     o.lod = {true, 32, 64};
     o.streaming.shadowCasterBytes = 0;
     o.streaming.enabled = o.streaming.hierarchical = true;
+    o.streaming.vertexDiagnostics = true;
     o.streaming.diskCache = false;
-    o.streaming.maximumDistance = 256;
+    o.streaming.maximumDistance = 512;
     o.streaming.diagnosticFrameSeconds = 1. / 60;
     Renderer r(o);
     Camera c;
     c.chunk = {40, 28};
-    c.local = {16, 1, 16};
+    c.local = {32, 1, 32};
     c.pitch = -.65f;
     TerrainSettings terrain;
+    terrain.heightScale = 30; // Owned gentle ground still contains measurable filtered-level differences.
     terrain.erosionStrength = .674f;
     r.setTerrainSettings(terrain);
     SceneSettings s;
@@ -120,7 +124,7 @@ void detailResidency() {
                     "detail diagnostics retain ready/selected/eligible ordering");
             require(st.detailSelected <= st.detailCapacity, "detail requests remain within pool");
             quiet = st.pending || st.detailPending || st.ioJobs ? 0 : quiet + 1;
-            require(std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count() < 30,
+            require(std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count() < 90,
                     "expanded detail demand converges");
         }
     };
@@ -132,7 +136,7 @@ void detailResidency() {
     s.terrainLodQuality = true;
     s.terrainLodPixelError = .5f;
     settle();
-    require(r.terrainRenderStats().qualityScale > 1.5f, "fixture expands geometry ranges");
+    require(r.terrainRenderStats().refined > 0, "fixture performs local geometry refinement");
     unsigned newDetails = 0;
     for (const auto &tile : r.readTerrainResidency()) {
         const auto old =
@@ -145,7 +149,8 @@ void detailResidency() {
     std::cout << "expanded demand=" << r.terrainStreamingStats().detailEligible << ","
               << r.terrainStreamingStats().detailSelected << " scale=" << r.terrainRenderStats().qualityScale
               << std::endl;
-    near(r.terrainStreamingStats().detailFirstRange, 128, 1e-3, "streaming uses expanded committed range");
+    near(r.terrainStreamingStats().detailFirstRange, 64, 1e-3,
+         "normal demand is independent of local geometry selection");
     require(r.terrainStreamingStats().detailReady == r.terrainStreamingStats().detailSelected,
             "all selected normals settle when the pool has capacity");
     std::cout << "new detail tiles after geometry expansion=" << newDetails << '\n';
@@ -154,10 +159,65 @@ void detailResidency() {
     for (int i = 0; i < 4; ++i)
         r.render(c, s);
     near(r.terrainRenderStats().qualityScale, frozen, 0, "stationary frozen scale is retained");
+    const auto saved = r.terrainLodReviewState();
+    const auto originalCamera = c;
+    for (float yaw : {0.f, 1.57f, 3.14f, 4.71f}) {
+        c.yaw = yaw;
+        c.local.y += 15;
+        r.render(c, s);
+        require(r.terrainLodReviewState().patches == saved.patches,
+                "turning frozen camera retains complete partition");
+        require(r.terrainLodReviewState().observer.local == saved.observer.local,
+                "turning frozen camera retains observer");
+    }
+    c = originalCamera;
+    r.setTerrainLodReviewState(saved);
+    r.render(c, s);
+    require(r.terrainLodReviewState().patches == saved.patches, "restored review partition is exact");
+    // A fixed viewing camera exposes observer-driven deformation independently
+    // of texture reprojection or camera motion. Include both quality policies.
+    using Key = std::tuple<uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t>;
+    size_t compared = 0, farCompared = 0;
+    for (bool quality : {false, true}) {
+        s.terrainLodQuality = quality;
+        std::map<Key, std::vector<glm::vec4>> previous;
+        for (double movement : {0., .05, .1, .15, 0.}) {
+            auto observer = saved.observer;
+            observer.local.x += movement;
+            r.setTerrainLodObserver(observer);
+            r.render(c, s);
+            const auto positions = r.readTerrainVertexPositions();
+            size_t offset = 0;
+            std::map<Key, std::vector<glm::vec4>> current;
+            for (const auto &p : r.readTerrainPatches()) {
+                const size_t count = (p.cells + 1) * (p.cells + 1);
+                Key key{p.slot, p.x, p.z, p.level, p.edges, p.corners};
+                auto it = previous.find(key);
+                if (it != previous.end())
+                    for (size_t j = 0; j < count; ++j) {
+                        require(positions[offset + j] == it->second[j],
+                                "Unchanged ground patches never deform when only observer moves");
+                        ++compared;
+                        if (p.level > 0)
+                            ++farCompared;
+                    }
+                current.emplace(key, std::vector<glm::vec4>(positions.begin() + offset,
+                                                            positions.begin() + offset + count));
+                offset += count;
+            }
+            require(offset == positions.size(), "Diagnostic vertices follow actual patch dimensions");
+            previous = std::move(current);
+        }
+    }
+    require(compared > 1000 && farCompared > 100, "Stability fixture exercises near and coarser geometry");
+    r.setTerrainLodReviewState(saved);
+    r.render(c, s);
     // Inspect from above the terrain while preserving the selected LOD observer.
     const auto centreHeights = r.readStreamedHeights(c.chunk);
-    c.local.y = centreHeights[32 * 65 + 32].y + 30;
-    // Settled hierarchy includes partial outer patches and parent/child morphing.
+    c.local.y = centreHeights[64 * 129 + 64].y + 8;
+    c.pitch = -1.35f;
+    // Inspect close enough to resolve the wireframe at this small framebuffer.
+    // Selection remains frozen, including outer patches and parent/child seams.
     for (bool wire : {false, true}) {
         s.wireframe = wire;
         s.opaqueDepthPrepass = false;
@@ -174,8 +234,7 @@ void detailResidency() {
         }
         require(variation > .001f, "hierarchical prepass fixture contains visible terrain");
         require(error < .003f, "hierarchical depth prepass preserves clipping and morph coverage");
-        require(r.terrainRenderStats().triangles == triangles,
-                "hierarchical depth prepass reuses selection");
+        require(r.terrainRenderStats().triangles == triangles, "hierarchical depth prepass reuses selection");
     }
     s.wireframe = s.opaqueDepthPrepass = false;
     s.terrainLodQuality = false;

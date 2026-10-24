@@ -17,14 +17,15 @@ profiles, altitude datum, an environment multiplier, optional boundary haze and
 transport diagnostics. Nonfinite/out-of-range settings are rejected. The demo has
 clear (aerosol density 1) and hazy (4) presets, quality/transport controls and GPU
 cost/memory/readiness displays. `--atmosphere off|analytic|physical` selects the
-sky mode; `--no-horizon` removes the optional outer terrain reservation at startup.
+sky mode; `--no-horizon` disables distant coverage and visual curvature at startup.
 `multipleScattering=false` is an owned reference comparison, normally left enabled.
 
 World distances are metres, scattering coefficients inverse metres, and sun input
 is top-of-atmosphere illuminance in Physical mode. Integration converts to kilometres
 to retain useful FP32 precision around the 6360 km virtual planet. Its centre is
-below the camera's horizontal position at a shared altitude datum. Horizontal
-travel never curves terrain or changes procedural identity. CPU altitude subtraction
+below the camera's horizontal position at a shared altitude datum. Flat library
+callers retain flat terrain. The [continuous-horizon mode](rendering_horizon.md)
+adds a matching visual curvature transform without changing procedural identity. CPU altitude subtraction
 uses doubles. Camera/surface evaluation at or below the datum uses an atmosphere
 origin one metre above its bottom boundary; density below the datum is ground density.
 This local virtual-planet approximation is intended for ground and low-flight views.
@@ -140,39 +141,17 @@ reactivity weights for both physical surfaces and sky. Exposure changes retain
 history rescaling. No separate sky or volume history is allocated. Transparent
 layers retain the existing reduced-history approximation.
 
-## Coarse terrain coverage
+## Distant terrain coverage
 
-Detailed view radius retains its existing approximately 16 km cap. Coarse outer
-coverage targets twice the effective detailed radius, capped by that relation at
-32,768 m. The demo reserves up to 64 MiB of extra GPU coverage storage; library
-streaming defaults leave this extension disabled.
+The original 5H outer ring is superseded by [continuous distant terrain and a
+natural horizon](rendering_horizon.md): compact dyadic levels, a protected 128 MiB
+demo reservation, render-space curvature and extended aerial sampling. The detailed
+view-radius control and near/shadow budgets retain their roles. Curved-horizon
+callers preserve the near aerial samples and append 32 far slices; ordinary flat
+library callers retain the original volume layout.
 
-Implementation refinement from the initial plan: extend the **existing coarsest
-level** instead of adding a new hierarchy level. Its spacing is sufficient for the
-bounded outer ring, and keeping the level preserves current shadow-caster resolution
-and cache representations. Reserve 48 extra slots after sizing the existing camera,
-fine-normal and shadow pools. Require the whole reservation to fit actual image/buffer
-requirements and device limits; otherwise keep the old outer range and expose the
-requested/effective difference. No protected near or shadow capacity is reduced.
-
-Only top-level coverage is requested outside the detailed square/prefetch ring.
-The existing parent neighbourhood, activation, quadrant suppression and morphing
-rules connect it to detail. Draw selection and depth/colour clipping use outer
-coverage; shadow demand retains its existing detailed range and sampling level.
-Horizon-only tiles never request fine normals. Near coverage and transition
-requirements precede horizon work in the shared bounded generation scheduler.
-
-Cache keys and payload formats are unchanged. Handles, epochs, publication and
-fence retirement remain owned by the existing streamer. Radius changes reuse fixed
-storage. Transient pressure defers requests and reports readiness/pressure; it does
-not promise a fully resident edge during movement or teleports. Stats expose outer
-requested/effective radii, horizon allocation, requested tiles and ready tiles.
-
-The review envelope is ground-level views through 2 km above terrain, with detailed
-views around 8–16 km and coarse coverage up to 32 km. Natural atmosphere does not
-guarantee invisible clear-air cutoffs. Looking down from altitude, dry air,
-cold-start coverage and views outside this envelope remain explicit review cases.
-The virtual ground colour beyond resident terrain is not generated terrain.
+The original software measurements below describe the initial 5H implementation;
+new horizon verification and costs are recorded in the linked design.
 
 ## Verification and reproduction
 

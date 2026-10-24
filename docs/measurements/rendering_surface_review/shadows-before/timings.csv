@@ -1,0 +1,3 @@
+mode,scene,moving,flight,low_sun,width,height,cpu_median_ms,cpu_p95_ms,prepare_p95_ms,raster_p95_ms,gpu_median_ms,gpu_p95_ms,shadow_bytes,terrain_shadow_bytes,casters,triangles,overflow,incomplete
+off,plain,0,0,0,320,180,2.50768,2.74342,0,0,2.28068,2.50615,3253152,0,0,0,0,0
+csm,plain,0,0,0,320,180,4.03531,4.15006,3.81731,1.73105,3.70185,3.81813,3253152,0,33,40970,0,0

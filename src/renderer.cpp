@@ -243,14 +243,14 @@ struct Renderer::Impl {
                                    limits.maxViewportDimensions[1]});
         createCommands();
         const auto lightingStart = std::chrono::steady_clock::now();
-        materials = std::make_unique<VulkanMaterials>(physical, device, materialCaps,
-                                                      options.materialBudgetBytes);
+        materials =
+            std::make_unique<VulkanMaterials>(physical, device, materialCaps, options.materialBudgetBytes);
         if (!options.materialDirectory.empty())
             materials->load(options.materialDirectory, options.forceRgbaMaterials);
         createLighting();
         atmosphere = std::make_unique<VulkanAtmosphere>(
             physical, device, queueFamily, options.atmosphereBudgetBytes, options.forceNoAtmosphere,
-            options.shaderDirectory);
+            options.shaderDirectory, options.curvedHorizon);
         renderingStats.lightingStartupMilliseconds =
             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - lightingStart)
                 .count();
@@ -260,8 +260,8 @@ struct Renderer::Impl {
         visibility =
             std::make_unique<VulkanVisibility>(physical, device, queueFamily, options.visibilityCapacity,
                                                visibilityCaps, options.shaderDirectory);
-        gtao = std::make_unique<VulkanGtao>(physical, device, queueFamily, gtaoCaps,
-                                            options.gtaoBudgetBytes, options.shaderDirectory);
+        gtao = std::make_unique<VulkanGtao>(physical, device, queueFamily, gtaoCaps, options.gtaoBudgetBytes,
+                                            options.shaderDirectory);
         {
             auto cmd = beginImmediate();
             gtao->initialize(cmd);
@@ -274,27 +274,26 @@ struct Renderer::Impl {
             shadows->initialize(cmd);
             endImmediate(cmd);
         }
-        meshes = std::make_unique<VulkanMeshes>(physical, device, options.sceneCapacity,
-                                                lightingSetLayout, *materials, options.shaderDirectory,
-                                                materialCaps.bindless, shadows->layout(), postCaps.taa);
+        meshes = std::make_unique<VulkanMeshes>(physical, device, options.sceneCapacity, lightingSetLayout,
+                                                *materials, options.shaderDirectory, materialCaps.bindless,
+                                                shadows->layout(), postCaps.taa);
         terrain = std::make_unique<VulkanTerrain>(
-            TerrainDevice{physical, device, queue, commandPool}, options.terrainGrid,
-            options.terrainCapacity, options.normalSubdivisions,
-            options.streaming.enabled ? 1 : options.terrainChunkCapacity, options.shaderDirectory,
-            options.lod, lightingSetLayout, materials->layout(), visibility->layout());
+            TerrainDevice{physical, device, queue, commandPool}, options.terrainGrid, options.terrainCapacity,
+            options.normalSubdivisions, options.streaming.enabled ? 1 : options.terrainChunkCapacity,
+            options.shaderDirectory, options.lod, lightingSetLayout, materials->layout(),
+            visibility->layout());
         shadowTerrainDraws.reserve(options.shadowCapacity.casters);
         preparedTerrain.reserve(terrain->lod() ? terrain->lod()->drawCapacity() : maxTerrainChunks);
         const auto temporalCapacity =
             options.streaming.enabled
                 ? options.visibilityCapacity
-                : uint32_t(std::min<size_t>(options.visibilityCapacity,
-                                            terrain->lod() ? terrain->lod()->drawCapacity()
-                                                           : options.terrainChunkCapacity));
-        post = std::make_unique<VulkanPost>(physical, device, queueFamily, postCaps,
-                                            options.taaBudgetBytes, options.bloomBudgetBytes,
-                                            temporalCapacity, options.shaderDirectory);
-        terrainHistory =
-            std::make_unique<TerrainHistory>(options.streaming.enabled ? 0 : temporalCapacity);
+                : uint32_t(std::min<size_t>(options.visibilityCapacity, terrain->lod()
+                                                                            ? terrain->lod()->drawCapacity()
+                                                                            : options.terrainChunkCapacity));
+        post =
+            std::make_unique<VulkanPost>(physical, device, queueFamily, postCaps, options.taaBudgetBytes,
+                                         options.bloomBudgetBytes, temporalCapacity, options.shaderDirectory);
+        terrainHistory = std::make_unique<TerrainHistory>(options.streaming.enabled ? 0 : temporalCapacity);
         if (options.streaming.enabled)
             streaming = std::make_unique<VulkanTerrainStream>(
                 *terrain, options.streaming, options.shaderDirectory, options.visibilityCapacity);
@@ -303,8 +302,8 @@ struct Renderer::Impl {
         createPipelines();
         if (options.ui)
             initImGui();
-        std::cout << "Vulkan device: " << gpuName
-                  << "\nValidation: " << (validation ? "enabled" : "disabled") << '\n';
+        std::cout << "Vulkan device: " << gpuName << "\nValidation: " << (validation ? "enabled" : "disabled")
+                  << '\n';
     }
 
     void createInstance() {
@@ -344,10 +343,9 @@ struct Renderer::Impl {
         if (validation)
             extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 
-        VkDebugUtilsMessengerCreateInfoEXT debug{
-            VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT};
-        debug.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
-                                VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+        VkDebugUtilsMessengerCreateInfoEXT debug{VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT};
+        debug.messageSeverity =
+            VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
         debug.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
                             VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
                             VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
@@ -365,9 +363,8 @@ struct Renderer::Impl {
             check(vkEnumerateInstanceExtensionProperties(validationLayer, &count, nullptr),
                   "Enumerate validation extensions");
             std::vector<VkExtensionProperties> layerExtensions(count);
-            check(
-                vkEnumerateInstanceExtensionProperties(validationLayer, &count, layerExtensions.data()),
-                "Enumerate validation extensions");
+            check(vkEnumerateInstanceExtensionProperties(validationLayer, &count, layerExtensions.data()),
+                  "Enumerate validation extensions");
             if (hasExtension(layerExtensions, VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME)) {
                 extensions.push_back(VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME);
                 debug.pNext = &validationFeatures;
@@ -402,8 +399,7 @@ struct Renderer::Impl {
         uint32_t count = 0;
         check(vkEnumeratePhysicalDevices(instance, &count, nullptr), "Enumerate physical devices");
         std::vector<VkPhysicalDevice> devices(count);
-        check(vkEnumeratePhysicalDevices(instance, &count, devices.data()),
-              "Enumerate physical devices");
+        check(vkEnumeratePhysicalDevices(instance, &count, devices.data()), "Enumerate physical devices");
         int best = -1;
         for (const auto candidate : devices) {
             VkPhysicalDeviceProperties props{};
@@ -420,10 +416,10 @@ struct Renderer::Impl {
                 continue;
             VkFormatProperties format{};
             vkGetPhysicalDeviceFormatProperties(candidate, hdrFormat, &format);
-            const auto hdrRequired =
-                VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
-                VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT | VK_FORMAT_FEATURE_TRANSFER_SRC_BIT |
-                VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
+            const auto hdrRequired = VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT |
+                                     VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
+                                     VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT |
+                                     VK_FORMAT_FEATURE_TRANSFER_SRC_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
             if ((format.optimalTilingFeatures & hdrRequired) != hdrRequired)
                 continue;
             vkGetPhysicalDeviceFormatProperties(candidate, depthFormat, &format);
@@ -480,8 +476,7 @@ struct Renderer::Impl {
         VkPhysicalDeviceVulkan13Features v13{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
         v13.dynamicRendering = VK_TRUE;
         v13.synchronization2 = VK_TRUE;
-        materialCaps =
-            materialCapabilities(physical, options.forceFixedMaterials, options.forceTrilinear);
+        materialCaps = materialCapabilities(physical, options.forceFixedMaterials, options.forceTrilinear);
         VkPhysicalDeviceFeatures supported{};
         vkGetPhysicalDeviceFeatures(physical, &supported);
         VkPhysicalDeviceFeatures features{};
@@ -553,9 +548,9 @@ struct Renderer::Impl {
         buffer = {};
     }
 
-    VkDeviceSize createImage(VkImage &image, VkDeviceMemory &memory, VkFormat format,
-                             VkImageUsageFlags usage, uint32_t width = 0, uint32_t height = 0,
-                             uint32_t levels = 1, uint32_t layers = 1) {
+    VkDeviceSize createImage(VkImage &image, VkDeviceMemory &memory, VkFormat format, VkImageUsageFlags usage,
+                             uint32_t width = 0, uint32_t height = 0, uint32_t levels = 1,
+                             uint32_t layers = 1) {
         VkImageCreateInfo info{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
         info.imageType = VK_IMAGE_TYPE_2D;
         info.format = format;
@@ -580,8 +575,8 @@ struct Renderer::Impl {
         return requirements.size;
     }
 
-    VkImageView createView(VkImage image, VkFormat format, VkImageAspectFlags aspect,
-                           uint32_t levels = 1, uint32_t layers = 1) {
+    VkImageView createView(VkImage image, VkFormat format, VkImageAspectFlags aspect, uint32_t levels = 1,
+                           uint32_t layers = 1) {
         VkImageViewCreateInfo info{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
         info.image = image;
         info.viewType = layers == 6 ? VK_IMAGE_VIEW_TYPE_CUBE : VK_IMAGE_VIEW_TYPE_2D;
@@ -629,8 +624,7 @@ struct Renderer::Impl {
             allocation.commandPool = commandPool;
             allocation.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
             allocation.commandBufferCount = 1;
-            check(vkAllocateCommandBuffers(device, &allocation, &frame.commands),
-                  "Allocate frame commands");
+            check(vkAllocateCommandBuffers(device, &allocation, &frame.commands), "Allocate frame commands");
             VkFenceCreateInfo fence{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
             fence.flags = VK_FENCE_CREATE_SIGNALED_BIT;
             check(vkCreateFence(device, &fence, nullptr, &frame.fence), "Create frame fence");
@@ -692,8 +686,8 @@ struct Renderer::Impl {
                 copy.bufferOffset = offset;
                 copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, mip, 0, layers};
                 copy.imageExtent = {width, width, 1};
-                vkCmdCopyBufferToImage(cmd, upload.handle, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                                       1, &copy);
+                vkCmdCopyBufferToImage(cmd, upload.handle, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
+                                       &copy);
                 offset += VkDeviceSize(width) * width * layers * 8;
             }
             imageBarrier(cmd, image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -757,8 +751,7 @@ struct Renderer::Impl {
             {3, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr}};
         li.bindingCount = 4;
         li.pBindings = ob;
-        check(vkCreateDescriptorSetLayout(device, &li, nullptr, &outputSetLayout),
-              "Create output layout");
+        check(vkCreateDescriptorSetLayout(device, &li, nullptr, &outputSetLayout), "Create output layout");
         VkDescriptorPoolSize sizes[] = {{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 10},
                                         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 14},
                                         {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 26},
@@ -774,8 +767,7 @@ struct Renderer::Impl {
         pl.pSetLayouts = &outputSetLayout;
         pl.pushConstantRangeCount = 1;
         pl.pPushConstantRanges = &push;
-        check(vkCreatePipelineLayout(device, &pl, nullptr, &outputLayout),
-              "Create output pipeline layout");
+        check(vkCreatePipelineLayout(device, &pl, nullptr, &outputLayout), "Create output pipeline layout");
         VkSamplerCreateInfo sampler{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
         sampler.magFilter = sampler.minFilter = VK_FILTER_LINEAR;
         sampler.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
@@ -787,8 +779,7 @@ struct Renderer::Impl {
         uploadLightingImage(environmentImage, environmentMemory, environmentView, bake.cube, 64, 7, 6);
         uploadLightingImage(brdfImage, brdfMemory, brdfView, bake.brdf, 128, 1, 1);
         for (auto &frame : frames) {
-            createBuffer(frame.lightingBuffer, sizeof(LightingUniform),
-                         VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+            createBuffer(frame.lightingBuffer, sizeof(LightingUniform), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
                          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
             check(vkMapMemory(device, frame.lightingBuffer.memory, 0, sizeof(LightingUniform), 0,
                               &frame.lightingMapped),
@@ -842,8 +833,7 @@ struct Renderer::Impl {
             VkQueryPoolCreateInfo query{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
             query.queryType = VK_QUERY_TYPE_TIMESTAMP;
             query.queryCount = 8;
-            check(vkCreateQueryPool(device, &query, nullptr, &renderQueries),
-                  "Create rendering timing pool");
+            check(vkCreateQueryPool(device, &query, nullptr, &renderQueries), "Create rendering timing pool");
         }
     }
     void updateLighting(const Camera &camera, const SceneSettings &settings, Frame &frame) {
@@ -862,9 +852,8 @@ struct Renderer::Impl {
             throw std::invalid_argument("Lighting/material parameters must be finite");
         const bool legacyDiagnostic =
             settings.shading == ShadingMode::Legacy ||
-            (settings.terrainVisible &&
-             (settings.normalView || settings.lodColours || settings.wireframe ||
-              settings.chunkBorders || settings.terrainLodErrorView));
+            (settings.terrainVisible && (settings.normalView || settings.lodColours || settings.wireframe ||
+                                         settings.chunkBorders || settings.terrainLodErrorView));
         const bool materialDiagnostic =
             settings.terrainMaterial.enabled && materials->stats().loaded &&
             (settings.terrainMaterial.weights || settings.terrainMaterial.diagnostic > 0);
@@ -1040,8 +1029,8 @@ struct Renderer::Impl {
             throw std::runtime_error("Atmosphere snapshot requires a rendered frame");
         check(vkDeviceWaitIdle(device), "Wait before atmosphere snapshot");
         render_detail::Buffer readback;
-        readback.create(physical, device, atmosphere->snapshotBytes(),
-                        VK_BUFFER_USAGE_TRANSFER_DST_BIT, true);
+        readback.create(physical, device, atmosphere->snapshotBytes(), VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                        true);
         auto cmd = beginImmediate();
         atmosphere->copySnapshot(cmd, readback.buffer);
         endImmediate(cmd);
@@ -1183,8 +1172,7 @@ struct Renderer::Impl {
             check(vkCreateSwapchainKHR(device, &info, nullptr, &swapchain), "Create swapchain");
             check(vkGetSwapchainImagesKHR(device, swapchain, &count, nullptr), "Get swapchain images");
             std::vector<VkImage> images(count);
-            check(vkGetSwapchainImagesKHR(device, swapchain, &count, images.data()),
-                  "Get swapchain images");
+            check(vkGetSwapchainImagesKHR(device, swapchain, &count, images.data()), "Get swapchain images");
             targets.resize(count);
             for (uint32_t i = 0; i < count; ++i)
                 targets[i].image = images[i];
@@ -1205,8 +1193,8 @@ struct Renderer::Impl {
     }
 
     void updateSceneTargets(bool wait) {
-        const auto next = sceneRenderExtent(extent.width, extent.height, options.renderHeight,
-                                            maxSceneWidth, maxSceneHeight);
+        const auto next = sceneRenderExtent(extent.width, extent.height, options.renderHeight, maxSceneWidth,
+                                            maxSceneHeight);
         sceneDirty = false;
         if (next.width == sceneExtent.width && next.height == sceneExtent.height)
             return;
@@ -1219,13 +1207,13 @@ struct Renderer::Impl {
         gtao->resize(sceneExtent.width, sceneExtent.height, gtaoMode);
         clusters->resize(sceneExtent.width, sceneExtent.height);
         for (auto &frame : frames) {
-            createImage(frame.depth, frame.depthMemory, depthFormat,
-                        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
-                            ((visibilityCaps.hiZ || gtaoCaps.supported || postCaps.taa ||
-                              atmosphere->supported())
-                                 ? VK_IMAGE_USAGE_SAMPLED_BIT
-                                 : 0),
-                        sceneExtent.width, sceneExtent.height);
+            createImage(
+                frame.depth, frame.depthMemory, depthFormat,
+                VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
+                    ((visibilityCaps.hiZ || gtaoCaps.supported || postCaps.taa || atmosphere->supported())
+                         ? VK_IMAGE_USAGE_SAMPLED_BIT
+                         : 0),
+                sceneExtent.width, sceneExtent.height);
             frame.depthView = createView(frame.depth, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
             renderingStats.hdrBytes +=
                 createImage(frame.hdr, frame.hdrMemory, hdrFormat,
@@ -1249,67 +1237,62 @@ struct Renderer::Impl {
     enum class DepthMode { Write, Prepass, Equal, Sky };
 
     void createPipelines() {
-        VkDescriptorSetLayout shadowLayouts[] = {
-            streaming ? streaming->descriptorLayout() : terrain->descriptorLayout(), lightingSetLayout,
-            materials->layout(), shadows->layout()};
+        VkDescriptorSetLayout shadowLayouts[] = {streaming ? streaming->descriptorLayout()
+                                                           : terrain->descriptorLayout(),
+                                                 lightingSetLayout, materials->layout(), shadows->layout()};
         VkPipelineLayoutCreateInfo sl{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
         sl.setLayoutCount = 4;
         sl.pSetLayouts = shadowLayouts;
         VkPushConstantRange shadowPush{VK_SHADER_STAGE_VERTEX_BIT, 0, 8};
         sl.pushConstantRangeCount = 1;
         sl.pPushConstantRanges = &shadowPush;
-        check(vkCreatePipelineLayout(device, &sl, nullptr, &shadowTerrainLayout),
-              "Shadow terrain layout");
+        check(vkCreatePipelineLayout(device, &sl, nullptr, &shadowTerrainLayout), "Shadow terrain layout");
         createGraphicsPipeline(shadowTerrainPipeline,
                                streaming ? "shadow_terrain_stream.vert.spv" : "shadow_terrain.vert.spv",
-                               streaming ? "shadow_terrain_stream.frag.spv" : nullptr,
-                               shadowTerrainLayout, false, DepthMode::Prepass);
+                               streaming ? "shadow_terrain_stream.frag.spv" : nullptr, shadowTerrainLayout,
+                               false, DepthMode::Prepass);
 
         createGraphicsPipeline(
             graphicsPipeline, streaming ? "terrain_stream.vert.spv" : "terrain.vert.spv",
-            streaming ? (materialCaps.bindless ? "terrain_stream_bindless.frag.spv"
-                                               : "terrain_stream.frag.spv")
-                      : (materialCaps.bindless ? "terrain_bindless.frag.spv" : "terrain.frag.spv"),
+            streaming
+                ? (materialCaps.bindless ? "terrain_stream_bindless.frag.spv" : "terrain_stream.frag.spv")
+                : (materialCaps.bindless ? "terrain_bindless.frag.spv" : "terrain.frag.spv"),
             streaming ? streaming->graphicsLayout() : terrain->graphicsLayout(), false);
-        createGraphicsPipeline(terrainDepthPipeline,
-                               streaming ? "terrain_stream.vert.spv" : "terrain.vert.spv",
-                               streaming ? "terrain_depth.frag.spv" : nullptr,
-                               streaming ? streaming->graphicsLayout() : terrain->graphicsLayout(),
-                               false, DepthMode::Prepass);
+        createGraphicsPipeline(
+            terrainDepthPipeline, streaming ? "terrain_stream.vert.spv" : "terrain.vert.spv",
+            streaming ? "terrain_depth.frag.spv" : nullptr,
+            streaming ? streaming->graphicsLayout() : terrain->graphicsLayout(), false, DepthMode::Prepass);
         createGraphicsPipeline(
             terrainEqualPipeline, streaming ? "terrain_stream.vert.spv" : "terrain.vert.spv",
-            streaming ? (materialCaps.bindless ? "terrain_stream_bindless.frag.spv"
-                                               : "terrain_stream.frag.spv")
-                      : (materialCaps.bindless ? "terrain_bindless.frag.spv" : "terrain.frag.spv"),
-            streaming ? streaming->graphicsLayout() : terrain->graphicsLayout(), false,
-            DepthMode::Equal);
+            streaming
+                ? (materialCaps.bindless ? "terrain_stream_bindless.frag.spv" : "terrain_stream.frag.spv")
+                : (materialCaps.bindless ? "terrain_bindless.frag.spv" : "terrain.frag.spv"),
+            streaming ? streaming->graphicsLayout() : terrain->graphicsLayout(), false, DepthMode::Equal);
         if (postCaps.taa) {
-            const char *fragment =
-                streaming ? (materialCaps.bindless ? "terrain_stream_bindless_temporal.frag.spv"
-                                                   : "terrain_stream_temporal.frag.spv")
-                          : (materialCaps.bindless ? "terrain_bindless_temporal.frag.spv"
-                                                   : "terrain_temporal.frag.spv");
+            const char *fragment = streaming
+                                       ? (materialCaps.bindless ? "terrain_stream_bindless_temporal.frag.spv"
+                                                                : "terrain_stream_temporal.frag.spv")
+                                       : (materialCaps.bindless ? "terrain_bindless_temporal.frag.spv"
+                                                                : "terrain_temporal.frag.spv");
             createGraphicsPipeline(temporalTerrainPipeline,
                                    streaming ? "terrain_stream.vert.spv" : "terrain.vert.spv", fragment,
-                                   streaming ? streaming->graphicsLayout() : terrain->graphicsLayout(),
-                                   false, DepthMode::Write, true);
+                                   streaming ? streaming->graphicsLayout() : terrain->graphicsLayout(), false,
+                                   DepthMode::Write, true);
             createGraphicsPipeline(temporalTerrainEqualPipeline,
                                    streaming ? "terrain_stream.vert.spv" : "terrain.vert.spv", fragment,
-                                   streaming ? streaming->graphicsLayout() : terrain->graphicsLayout(),
-                                   false, DepthMode::Equal, true);
+                                   streaming ? streaming->graphicsLayout() : terrain->graphicsLayout(), false,
+                                   DepthMode::Equal, true);
         }
         VkDescriptorSetLayout skySets[] = {emptySetLayout, lightingSetLayout};
         VkPipelineLayoutCreateInfo skyInfo{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
         skyInfo.setLayoutCount = 2;
         skyInfo.pSetLayouts = skySets;
         check(vkCreatePipelineLayout(device, &skyInfo, nullptr, &skyLayout), "Create sky layout");
-        createGraphicsPipeline(skyPipeline, "sky.vert.spv", "sky.frag.spv", skyLayout, false,
-                               DepthMode::Sky);
+        createGraphicsPipeline(skyPipeline, "sky.vert.spv", "sky.frag.spv", skyLayout, false, DepthMode::Sky);
         if (postCaps.taa)
-            createGraphicsPipeline(skyTemporalPipeline, "sky.vert.spv", "sky_temporal.frag.spv",
-                                   skyLayout, false, DepthMode::Sky, true);
-        createGraphicsPipeline(outputPipeline, "fullscreen.vert.spv", "output.frag.spv", outputLayout,
-                               true);
+            createGraphicsPipeline(skyTemporalPipeline, "sky.vert.spv", "sky_temporal.frag.spv", skyLayout,
+                                   false, DepthMode::Sky, true);
+        createGraphicsPipeline(outputPipeline, "fullscreen.vert.spv", "output.frag.spv", outputLayout, true);
     }
     void createGraphicsPipeline(VkPipeline &destination, const char *vs, const char *fs,
                                 VkPipelineLayout pipelineLayout, bool output,
@@ -1333,8 +1316,7 @@ struct Renderer::Impl {
             VkPipelineInputAssemblyStateCreateInfo assembly{
                 VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
             assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-            VkPipelineViewportStateCreateInfo viewport{
-                VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
+            VkPipelineViewportStateCreateInfo viewport{VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
             viewport.viewportCount = 1;
             viewport.scissorCount = 1;
             VkPipelineRasterizationStateCreateInfo raster{
@@ -1350,8 +1332,7 @@ struct Renderer::Impl {
             VkPipelineDepthStencilStateCreateInfo depth{
                 VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
             depth.depthTestEnable = !output;
-            depth.depthWriteEnable =
-                !output && depthMode != DepthMode::Equal && depthMode != DepthMode::Sky;
+            depth.depthWriteEnable = !output && depthMode != DepthMode::Equal && depthMode != DepthMode::Sky;
             depth.depthCompareOp = (depthMode == DepthMode::Equal || depthMode == DepthMode::Sky)
                                        ? VK_COMPARE_OP_EQUAL
                                        : VK_COMPARE_OP_GREATER;
@@ -1365,8 +1346,7 @@ struct Renderer::Impl {
             blend.attachmentCount = depthMode == DepthMode::Prepass ? 0 : temporal ? 3 : 1;
             blend.pAttachments = attachments.data();
             const VkDynamicState states[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
-            VkPipelineDynamicStateCreateInfo dynamic{
-                VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
+            VkPipelineDynamicStateCreateInfo dynamic{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
             dynamic.dynamicStateCount = 2;
             dynamic.pDynamicStates = states;
             VkPipelineRenderingCreateInfo rendering{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
@@ -1419,8 +1399,7 @@ struct Renderer::Impl {
         rendering.pColorAttachmentFormats = &colorFormat;
         rendering.depthAttachmentFormat = VK_FORMAT_UNDEFINED;
         if (uiShaderCode.empty()) {
-            std::ifstream file(options.shaderDirectory / "ui.frag.spv",
-                               std::ios::binary | std::ios::ate);
+            std::ifstream file(options.shaderDirectory / "ui.frag.spv", std::ios::binary | std::ios::ate);
             if (!file || file.tellg() <= 0 || file.tellg() % 4)
                 throw std::runtime_error("Missing UI shader");
             uiShaderCode.resize(size_t(file.tellg()) / 4);
@@ -1508,8 +1487,8 @@ struct Renderer::Impl {
         if (previousFormat != colorFormat) {
             vkDestroyPipeline(device, outputPipeline, nullptr);
             outputPipeline = {};
-            createGraphicsPipeline(outputPipeline, "fullscreen.vert.spv", "output.frag.spv",
-                                   outputLayout, true);
+            createGraphicsPipeline(outputPipeline, "fullscreen.vert.spv", "output.frag.spv", outputLayout,
+                                   true);
         }
         invalidateFrameResults();
         if (options.ui)
@@ -1522,8 +1501,7 @@ struct Renderer::Impl {
     TerrainDraw terrainDraw(const Camera &camera, const SceneSettings &settings,
                             const TerrainPatchDraw &patch) {
         auto *lod = terrain->lod();
-        const bool morph =
-            lod && settings.lod && renderStats.boundsReady && patch.level + 1 < lod->levels();
+        const bool morph = lod && settings.lod && renderStats.boundsReady && patch.level + 1 < lod->levels();
         const float range = renderStats.firstRange * float(patch.step);
         const auto indices =
             lod ? terrain->patchRange(patch.mask) : TerrainIndexRange{0, terrain->indexCount()};
@@ -1566,7 +1544,14 @@ struct Renderer::Impl {
                 append({slot, 0, 0, 1, 0, 15}, {});
     }
 
-    bool render(const Camera &camera, const SceneSettings &settings) {
+    bool render(const Camera &inputCamera, const SceneSettings &settings) {
+        Camera camera = inputCamera;
+        if (options.curvedHorizon) {
+            camera.curvature = {settings.atmosphere.planetRadius,
+                                float(camera.local.y - settings.atmosphere.datum), 1,
+                                float(settings.viewRadius * options.terrainGrid.extent())};
+            camera.renderFar = float(std::max(64000.0, options.streaming.horizonMaximumDistance * 1.5));
+        }
         // Reinitializing ImGui on resize invalidates the current draw data. Skip it
         // and build a fresh UI next iteration.
         if (dirty && surface) {
@@ -1618,32 +1603,30 @@ struct Renderer::Impl {
         aoWrites[1].dstSet = frame.outputSet;
         aoWrites[1].dstBinding = 1;
         vkUpdateDescriptorSets(device, 2, aoWrites, 0, nullptr);
-        shadows->begin(frameIndex, camera, options.terrainGrid,
-                       float(sceneExtent.width) / sceneExtent.height, settings.lighting.sunDirection,
-                       settings.shadows, settings.wireframe || !settings.lighting.sunEnabled,
-                       streaming ? float(std::max(1, streaming->stats().effectiveRadius) *
-                                         options.terrainGrid.extent())
-                                 : 8192.f);
+        shadows->begin(
+            frameIndex, camera, options.terrainGrid, float(sceneExtent.width) / sceneExtent.height,
+            settings.lighting.sunDirection, settings.shadows,
+            settings.wireframe || !settings.lighting.sunEnabled,
+            streaming ? float(std::max(1, streaming->stats().effectiveRadius) * options.terrainGrid.extent())
+                      : 8192.f);
         updateLighting(camera, settings, frame);
-        const bool postDiagnostic = frame.diagnostic ||
-                                    settings.gtao.diagnostic != GtaoDiagnostic::Shaded ||
+        const bool postDiagnostic = frame.diagnostic || settings.gtao.diagnostic != GtaoDiagnostic::Shaded ||
                                     settings.shadows.diagnostic != 0;
         if (atmosphere->historyChanged(settings.atmosphere, postDiagnostic))
             post->reset(TemporalReset::Settings);
-        post->begin(frameIndex, camera, options.terrainGrid, settings.taa, settings.bloom,
-                    frame.preExposure, postDiagnostic);
-        atmosphere->begin(
-            frameIndex, camera, settings.atmosphere, settings.lighting, post->view(),
-            frame.preExposure, postDiagnostic,
-            float((streaming ? streaming->stats().outerEffectiveRadius : settings.viewRadius) *
-                  options.terrainGrid.extent()),
-            frame.lightingSet, frame.hdrView, frame.depthView);
+        post->begin(frameIndex, camera, options.terrainGrid, settings.taa, settings.bloom, frame.preExposure,
+                    postDiagnostic);
+        atmosphere->begin(frameIndex, camera, settings.atmosphere, settings.lighting, post->view(),
+                          frame.preExposure, postDiagnostic,
+                          float((streaming ? streaming->stats().outerEffectiveRadius : settings.viewRadius) *
+                                options.terrainGrid.extent()),
+                          frame.lightingSet, frame.hdrView, frame.depthView);
         post->bindLighting(frame.lightingSet);
         static_cast<LightingUniform *>(frame.lightingMapped)->viewProjection = post->view().raster;
         materials->prepare(frameIndex, camera, options.terrainGrid, materialTerrainSettings,
                            settings.terrainMaterial, settings.terrainVisible);
-        clusters->prepare(frameIndex, camera, options.terrainGrid, frame.lightingSet,
-                          settings.localLights, settings.clusterDiagnostic);
+        clusters->prepare(frameIndex, camera, options.terrainGrid, frame.lightingSet, settings.localLights,
+                          settings.clusterDiagnostic);
         meshes->prepare(frameIndex, camera, options.terrainGrid, post->previousCamera(),
                         post->stats().historyValid, post->stats().taa);
         uint32_t imageIndex = frameIndex;
@@ -1669,8 +1652,7 @@ struct Renderer::Impl {
 
         if (renderQueries) {
             vkCmdResetQueryPool(cmd, renderQueries, frameIndex * 4, 4);
-            vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, renderQueries,
-                                 frameIndex * 4);
+            vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, renderQueries, frameIndex * 4);
         }
         materials->recordUploads(cmd);
         meshes->uploads(cmd, frameIndex);
@@ -1688,17 +1670,16 @@ struct Renderer::Impl {
                      VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                      VK_ACCESS_2_MEMORY_READ_BIT, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                      VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+        imageBarrier(cmd, target.image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
+                     VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                     VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, 0,
+                     VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
         imageBarrier(
-            cmd, target.image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
-            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, 0,
-            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
-        imageBarrier(cmd, frame.depth, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
-                     VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                     VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT,
-                     VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
-                         VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-                     VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
-                         VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
+            cmd, frame.depth, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
+            VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+            VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT,
+            VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+            VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
         VkRenderingAttachmentInfo color{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
         color.imageView = frame.hdrView;
         color.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
@@ -1712,18 +1693,16 @@ struct Renderer::Impl {
             post->stats().taa
                 ? conservativeProjection(post->view().current, {sceneExtent.width, sceneExtent.height})
                 : vp;
-        visibility->begin(frameIndex, settings.visibility, settings.wireframe, settings.frustumCulling,
-                          vp);
+        visibility->begin(frameIndex, settings.visibility, settings.wireframe, settings.frustumCulling, vp);
         if (settings.terrainVisible) {
             if (!settings.freezeLod || !observerInitialized) {
                 lodObserver = camera;
                 observerInitialized = true;
             }
-            const auto observer = camera.terrainOffset(lodObserver.chunk, options.terrainGrid) +
-                                  glm::vec3(lodObserver.local);
+            const auto observer =
+                camera.terrainOffset(lodObserver.chunk, options.terrainGrid) + glm::vec3(lodObserver.local);
             if (streaming) {
-                streaming->prepareDraw(frameIndex, camera, lodObserver, cullVp, settings,
-                                       sceneExtent.height);
+                streaming->prepareDraw(frameIndex, camera, lodObserver, cullVp, settings, sceneExtent.height);
                 renderStats = streaming->renderStats();
                 streaming->prepareVisibility(*visibility, frameIndex, camera, lodObserver, settings,
                                              post.get());
@@ -1781,10 +1760,9 @@ struct Renderer::Impl {
                 if (post->stats().taa) {
                     TemporalTerrainRecord now{};
                     std::memcpy(now.draw.data(), &r.data, sizeof(r.data));
-                    now.observer =
-                        glm::vec4(camera.terrainOffset(lodObserver.chunk, options.terrainGrid) +
-                                      glm::vec3(lodObserver.local),
-                                  0);
+                    now.observer = glm::vec4(camera.terrainOffset(lodObserver.chunk, options.terrainGrid) +
+                                                 glm::vec3(lodObserver.local),
+                                             0);
                     now.valid.x = 1;
                     auto coord = terrain->coordinate(r.patch.slot);
                     TemporalTerrainKey key;
@@ -1800,9 +1778,8 @@ struct Renderer::Impl {
                     post->terrainRecord(temporalIndex, terrainHistory->append(key, now));
                 }
                 ++temporalIndex;
-                r.batch =
-                    visibility->append(r.bounds, r.count, r.first, 0, &r.data, sizeof(r.data),
-                                       r.patch.slot != previousSlot || r.patch.level != previousLevel);
+                r.batch = visibility->append(r.bounds, r.count, r.first, 0, &r.data, sizeof(r.data),
+                                             r.patch.slot != previousSlot || r.patch.level != previousLevel);
                 previousSlot = r.patch.slot;
                 previousLevel = r.patch.level;
             }
@@ -1823,6 +1800,8 @@ struct Renderer::Impl {
             for (uint32_t cascade = 0; cascade < shadows->cascadeCount(); ++cascade) {
                 shadows->beginRaster(cmd, cascade);
                 vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowTerrainPipeline);
+                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowTerrainLayout, 1, 1,
+                                        &frame.lightingSet, 0, nullptr);
                 if (streaming)
                     streaming->drawShadows(cmd, shadowTerrainLayout, *shadows);
                 else {
@@ -1831,12 +1810,11 @@ struct Renderer::Impl {
                     for (size_t i = 0; i < shadowTerrainDraws.size();) {
                         const auto &draw = shadowTerrainDraws[i];
                         size_t end = i + 1;
-                        while (end < shadowTerrainDraws.size() &&
-                               shadowTerrainDraws[end].set == draw.set &&
+                        while (end < shadowTerrainDraws.size() && shadowTerrainDraws[end].set == draw.set &&
                                shadowTerrainDraws[end].caster == draw.caster + end - i)
                             ++end;
-                        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                                shadowTerrainLayout, 0, 1, &draw.set, 0, nullptr);
+                        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowTerrainLayout, 0,
+                                                1, &draw.set, 0, nullptr);
                         shadows->drawRange(cmd, draw.caster, uint32_t(end - i));
                         i = end;
                     }
@@ -1884,15 +1862,14 @@ struct Renderer::Impl {
             if (!settings.terrainVisible)
                 return;
             auto layout = streaming ? streaming->graphicsLayout() : terrain->graphicsLayout();
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 1, 1,
-                                    &frame.lightingSet, 0, nullptr);
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 1, 1, &frame.lightingSet, 0,
+                                    nullptr);
             auto materialSet = materials->set(frameIndex);
             vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 2, 1, &materialSet, 0,
                                     nullptr);
             visibility->bindRecords(cmd, layout);
             if (streaming) {
-                streaming->draw(cmd, frameIndex, camera, lodObserver, settings, finalPass,
-                                visibility.get());
+                streaming->draw(cmd, frameIndex, camera, lodObserver, settings, finalPass, visibility.get());
                 return;
             }
             uint32_t previous = ~0u;
@@ -1921,24 +1898,23 @@ struct Renderer::Impl {
             vkCmdEndRendering(cmd);
             visibility->stamp(cmd, 3);
             if (visibility->hiZ() || gtao->active()) {
-                imageBarrier(
-                    cmd, frame.depth, VK_IMAGE_ASPECT_DEPTH_BIT,
-                    VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL,
-                    VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
-                        VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-                    VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-                    VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+                imageBarrier(cmd, frame.depth, VK_IMAGE_ASPECT_DEPTH_BIT,
+                             VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                             VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL,
+                             VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
+                                 VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                             VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                             VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
                 if (visibility->hiZ()) {
                     visibility->pyramid(cmd, frame.depth, frame.depthView);
                     visibility->cull(cmd, true);
                 }
-                gtao->record(cmd, frame.depthView,
-                             glm::vec2(post->view().pixels.z, post->view().pixels.w),
-                             post->stats().taa ? post->stats().sequence : 0);
+                gtao->record(cmd, frame.depthView, glm::vec2(post->view().pixels.z, post->view().pixels.w),
+                             post->stats().taa ? post->stats().sequence : 0, camera.renderFar);
                 imageBarrier(cmd, frame.depth, VK_IMAGE_ASPECT_DEPTH_BIT,
                              VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL,
-                             VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-                             VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+                             VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                             VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
                              VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
                                  VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
                              VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT);
@@ -1971,12 +1947,11 @@ struct Renderer::Impl {
         if (atmosphere->active()) {
             vkCmdEndRendering(cmd);
             if (atmosphere->physical()) {
-                imageBarrier(
-                    cmd, frame.hdr, VK_IMAGE_ASPECT_COLOR_BIT,
-                    VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
-                    VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                    VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                    VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+                imageBarrier(cmd, frame.hdr, VK_IMAGE_ASPECT_COLOR_BIT,
+                             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
+                             VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                             VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                             VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
                 imageBarrier(cmd, frame.depth, VK_IMAGE_ASPECT_DEPTH_BIT,
                              VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
                              VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL,
@@ -1984,28 +1959,23 @@ struct Renderer::Impl {
                                  VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
                              VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
                                  VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT,
-                             VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                             VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+                             VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
                 atmosphere->composite(cmd, sceneExtent.width, sceneExtent.height);
-                imageBarrier(
-                    cmd, frame.hdr, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_GENERAL,
-                    VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                    VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                    VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT,
-                    VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                    VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+                imageBarrier(cmd, frame.hdr, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_GENERAL,
+                             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                             VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT,
+                             VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                             VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
                 imageBarrier(cmd, frame.depth, VK_IMAGE_ASPECT_DEPTH_BIT,
                              VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL,
-                             VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-                             VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                             VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                              VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
                              VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
                                  VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
                              VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT);
             } else {
                 render_detail::barrier(cmd, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT,
-                                       VK_ACCESS_2_MEMORY_WRITE_BIT,
-                                       VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT,
+                                       VK_ACCESS_2_MEMORY_WRITE_BIT, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT,
                                        VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT);
             }
             for (auto &a : sceneColours)
@@ -2016,8 +1986,8 @@ struct Renderer::Impl {
             vkCmdBeginRendering(cmd, &rendering);
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                               post->stats().taa ? skyTemporalPipeline : skyPipeline);
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, skyLayout, 1, 1,
-                                    &frame.lightingSet, 0, nullptr);
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, skyLayout, 1, 1, &frame.lightingSet,
+                                    0, nullptr);
             vkCmdDraw(cmd, 64 * 32 * 6, 1, 0, 0);
         }
         clusters->timestamp(cmd, frameIndex, 4);
@@ -2026,14 +1996,12 @@ struct Renderer::Impl {
         vkCmdEndRendering(cmd);
         imageBarrier(cmd, frame.hdr, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                     VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                     VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                     VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
                      VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                      VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
         if (post->stats().taa)
             imageBarrier(cmd, frame.depth, VK_IMAGE_ASPECT_DEPTH_BIT,
-                         VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-                         VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL,
+                         VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL,
                          VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
                              VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
                          VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
@@ -2071,8 +2039,8 @@ struct Renderer::Impl {
         vkCmdSetScissor(cmd, 0, 1, &scissor);
         vkCmdBeginRendering(cmd, &rendering);
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, outputPipeline);
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, outputLayout, 0, 1,
-                                &frame.outputSet, 0, nullptr);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, outputLayout, 0, 1, &frame.outputSet, 0,
+                                nullptr);
         uint32_t outputConstants[] = {frame.diagnostic ? 1u : 0u,
                                       uint32_t(settings.output.toneMapper),
                                       gtao->active() ? uint32_t(settings.gtao.diagnostic) : 0u,
@@ -2267,9 +2235,7 @@ struct Renderer::Impl {
     }
 };
 
-Renderer::Renderer(const RendererOptions &options) : impl_(std::make_unique<Impl>()) {
-    impl_->init(options);
-}
+Renderer::Renderer(const RendererOptions &options) : impl_(std::make_unique<Impl>()) { impl_->init(options); }
 Renderer::~Renderer() = default;
 LightHandle Renderer::createLight(const LocalLight &l) {
     validate(l);
@@ -2291,13 +2257,9 @@ bool Renderer::updateInstance(InstanceHandle h, const MeshInstance &i) {
     return impl_->meshes->instances.update(h, i);
 }
 bool Renderer::removeInstance(InstanceHandle h) { return impl_->meshes->instances.remove(h); }
-TextureHandle Renderer::uploadTexture(const TextureData &t) {
-    return impl_->materials->uploadTexture(t);
-}
+TextureHandle Renderer::uploadTexture(const TextureData &t) { return impl_->materials->uploadTexture(t); }
 bool Renderer::releaseTexture(TextureHandle h) { return impl_->materials->releaseTexture(h); }
-MaterialHandle Renderer::createMaterial(const MeshMaterial &m) {
-    return impl_->materials->createMaterial(m);
-}
+MaterialHandle Renderer::createMaterial(const MeshMaterial &m) { return impl_->materials->createMaterial(m); }
 bool Renderer::releaseMaterial(MaterialHandle h) { return impl_->materials->releaseMaterial(h); }
 const SceneStats &Renderer::sceneStats() const {
     auto &s = impl_->sceneStatistics;
@@ -2335,6 +2297,27 @@ bool Renderer::render(const Camera &camera, const SceneSettings &settings) {
 void Renderer::setTerrainLodObserver(const Camera &camera) {
     impl_->lodObserver = camera;
     impl_->observerInitialized = true;
+}
+TerrainLodReviewState Renderer::terrainLodReviewState() const {
+    TerrainLodReviewState state{impl_->lodObserver, 1, 0, impl_->observerInitialized};
+    if (impl_->streaming)
+        { impl_->streaming->reviewQuality(state.qualityScale, state.focalPixels);
+          state.patches=impl_->streaming->reviewPatches(); }
+    return state;
+}
+void Renderer::setTerrainLodReviewState(const TerrainLodReviewState &state) {
+    if (!std::isfinite(state.qualityScale) || state.qualityScale < 1 ||
+        state.qualityScale > terrainLodMaximumScale || !std::isfinite(state.focalPixels) ||
+        state.focalPixels < 0)
+        throw std::invalid_argument("Invalid review LOD range");
+    if (impl_->streaming) {
+        // Partition validation can fail; leave the observer/range unchanged until it succeeds.
+        impl_->streaming->restoreReviewPatches(state.patches);
+        impl_->streaming->restoreReviewQuality(state.qualityScale, state.focalPixels);
+    }
+    impl_->lodObserver = state.observer;
+    impl_->observerInitialized = state.initialized;
+    resetTemporalHistory();
 }
 void Renderer::setTerrainGrid(TerrainGrid grid) {
     impl_->post->reset(TemporalReset::Settings);
@@ -2387,9 +2370,8 @@ Renderer::sampleTerrainGeography(TerrainGrid grid, const TerrainRequest &r, bool
         throw std::invalid_argument("Geography diagnostics require a non-streamed renderer");
     return impl_->terrain->sampleTerrainGeography(grid, r, canonical);
 }
-std::vector<glm::vec2> Renderer::sampleTerrainHeightLevel(TerrainGrid grid,
-                                                          const TerrainRequest &request, uint32_t level,
-                                                          bool fixture) {
+std::vector<glm::vec2> Renderer::sampleTerrainHeightLevel(TerrainGrid grid, const TerrainRequest &request,
+                                                          uint32_t level, bool fixture) {
     if (impl_->streaming)
         throw std::invalid_argument("Height probes require non-streamed renderer");
     return impl_->terrain->sampleTerrainHeightLevel(grid, request, level, fixture);
@@ -2402,6 +2384,12 @@ std::vector<TerrainSample> Renderer::sampleTerrainNormalFixture(TerrainGrid grid
 }
 std::vector<TerrainSample> Renderer::normalsForFixture(const std::vector<glm::vec2> &h) {
     return impl_->terrain->normalsForFixture(h);
+}
+std::vector<TerrainSample> Renderer::sampleCurvatureFixture(const std::vector<TerrainSample> &p,
+                                                          glm::vec4 c, bool reduced) {
+    if (impl_->streaming)
+        throw std::invalid_argument("Curvature fixture is non-streamed only");
+    return impl_->terrain->sampleCurvatureFixture(p, c, reduced);
 }
 void Renderer::setTerrainSettings(const TerrainSettings &settings) {
     impl_->post->reset(TemporalReset::Settings);
@@ -2459,9 +2447,7 @@ uint32_t Renderer::renderHeight() const { return impl_->sceneExtent.height; }
 
 namespace ow {
 void Renderer::resetTemporalHistory() { impl_->post->reset(); }
-bool Renderer::invalidateInstanceHistory(InstanceHandle h) {
-    return impl_->meshes->invalidateHistory(h);
-}
+bool Renderer::invalidateInstanceHistory(InstanceHandle h) { return impl_->meshes->invalidateHistory(h); }
 const PostStats &Renderer::postStats() const { return impl_->post->stats(); }
 PostSnapshot Renderer::readPostSnapshot() { return impl_->readPostSnapshot(); }
 const AtmosphereStats &Renderer::atmosphereStats() const { return impl_->atmosphere->stats(); }

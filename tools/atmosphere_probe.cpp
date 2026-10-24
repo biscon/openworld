@@ -60,9 +60,12 @@ int main(int argc, char **argv) {
         if (argc < 2)
             throw std::invalid_argument(
                 "Usage: atmosphere_probe OUTPUT [--quick] [--streaming] "
-                "[--require-validation] [--width N --height N --frames N --radius N]");
+                "[--require-validation] [--flat-horizon] [--width N --height N --frames N --radius "
+                "N] [--horizon-distance M --altitude M --fill-seconds N]");
         std::filesystem::path output = argv[1];
-        uint32_t width = 1920, height = 1080, count = 120, requestedRadius = 0;
+        uint32_t width = 1920, height = 1080, count = 120, requestedRadius = 0, horizonDistance = 0,
+                 fillSeconds = 60, altitude = 0;
+        bool flatHorizon = false;
         bool quick = false, streaming = false, validation = false;
         for (int i = 2; i < argc; ++i) {
             std::string a = argv[i];
@@ -73,14 +76,25 @@ int main(int argc, char **argv) {
                 count = 16;
             } else if (a == "--streaming")
                 streaming = true;
+            else if (a == "--flat-horizon")
+                flatHorizon = true;
             else if (a == "--require-validation")
                 validation = true;
-            else if ((a == "--width" || a == "--height" || a == "--frames" || a == "--radius") &&
+            else if ((a == "--width" || a == "--height" || a == "--frames" || a == "--radius" ||
+                      a == "--horizon-distance" || a == "--fill-seconds" || a == "--altitude") &&
                      i + 1 < argc) {
                 auto v = std::stoul(argv[++i]);
-                if (!v || v > 16384)
+                if (!v || v > (a == "--horizon-distance" ? 1048576u
+                               : a == "--fill-seconds"   ? 3600u
+                                                         : 16384u))
                     throw std::invalid_argument("Invalid probe size");
-                if (a == "--width")
+                if (a == "--horizon-distance")
+                    horizonDistance = v;
+                else if (a == "--fill-seconds")
+                    fillSeconds = v;
+                else if (a == "--altitude")
+                    altitude = v;
+                else if (a == "--width")
                     width = v;
                 else if (a == "--height")
                     height = v;
@@ -104,7 +118,11 @@ int main(int argc, char **argv) {
         o.streaming.enabled = o.streaming.hierarchical = streaming;
         o.streaming.diskCache = false;
         o.streaming.maximumDistance = quick ? 128 : 16384;
-        o.streaming.horizonBytes = 64 * terrainMiB;
+        o.streaming.horizonBytes = 128 * terrainMiB;
+        o.streaming.horizonMaximumDistance = horizonDistance ? horizonDistance
+                                             : quick         ? 256
+                                                             : 1048576;
+        o.curvedHorizon = !flatHorizon;
         o.streaming.diagnosticFrameSeconds = 1. / 60;
         o.shadowCapacity.resolution = quick ? 128 : 2048;
         Renderer r(o);
@@ -126,10 +144,14 @@ int main(int argc, char **argv) {
             c.local.y = quick ? 50 : 1000;
             c.pitch = -.1f;
         }
+        if (altitude)
+            c.local.y = altitude;
         std::ofstream meta(output / "metadata.txt");
         meta << "device=" << r.deviceName() << "\nvalidation=" << validation << "\nextent=" << width
              << 'x' << height << "\nframes=" << count << "\nwarmup=16\nstreaming=" << streaming
              << "\nsmall_workload=" << quick << "\ndetailed_radius_chunks=" << s.viewRadius
+             << "\ncurved_horizon=" << !flatHorizon
+             << "\nhorizon_cap=" << o.streaming.horizonMaximumDistance
              << "\nallocation_counter=C++ new/new[] in render, excludes malloc\n";
 #ifdef NDEBUG
         meta << "build=Release\n";
@@ -145,11 +167,15 @@ int main(int argc, char **argv) {
                 stable = (!t.pending && !t.detailPending && !t.ioJobs) ? stable + 1 : 0;
                 if (stable > 32)
                     break;
-            } while (std::chrono::steady_clock::now() - start < std::chrono::seconds(60));
+            } while (std::chrono::steady_clock::now() - start < std::chrono::seconds(fillSeconds));
             meta << "settled=" << (stable > 32) << "\nfill_seconds="
                  << std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count()
                  << '\n';
         }
+        meta << "horizon_bytes=" << r.terrainStreamingStats().horizonBytes
+             << "\nhorizon_levels=" << r.terrainStreamingStats().horizonLevels
+             << "\nhorizon_effective=" << r.terrainStreamingStats().horizonEffectiveDistance
+             << "\nhorizon_limited=" << r.terrainStreamingStats().horizonLimited << '\n';
         std::ofstream csv(output / "timings.csv"), raw(output / "frames.csv");
         csv << "mode,effective,fallback,cpu_median_ms,cpu_p95_ms,gpu_median_ms,gpu_p95_ms,lut_"
                "median_ms,lut_p95_ms,"

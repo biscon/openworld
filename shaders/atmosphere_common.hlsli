@@ -94,7 +94,9 @@ float3 atmSkyRadiance(float3 d) {
 }
 float3 atmSurfaceSun(float3 relativePosition) {
     if(atmosphere.options.x!=2)return 1;
-    return atmSunT(float3(0,atmosphere.planet.x+max(.001,atmosphere.view.x+relativePosition.y*.001),0),atmosphere.sun.xyz);
+    float3 p=atmOrigin()+relativePosition*.001;
+    if(atmosphere.view.w==0)p=float3(0,atmosphere.planet.x+max(.001,atmosphere.view.x+relativePosition.y*.001),0);
+    return atmSunT(p,atmosphere.sun.xyz);
 }
 float3 atmDiffuse(float3 n) {
     float b[9]={.2820947918,.4886025119*n.y,.4886025119*n.z,.4886025119*n.x,
@@ -103,15 +105,27 @@ float3 atmDiffuse(float3 n) {
     float3 c=0;[unroll]for(uint i=0;i<9;++i)c+=atmosphereIrradiance[i].rgb*b[i];
     return max(c,0)*atmosphere.illumination.rgb*atmosphere.options.w;
 }
+float atmSliceDistance(float index) {
+    float nearCount=atmosphere.view.w,n=atmosphere.extent.w;
+    if(nearCount==0)return pow(index/(n-1),2)*atmosphere.view.y;
+    if(index<=nearCount-1)return pow(index/(nearCount-1),2)*64000;
+    return 64000*pow(max(1,atmosphere.view.y/64000),(index-nearCount+1)/(n-nearCount));
+}
+float atmDistanceSlice(float depth) {
+    float nearCount=atmosphere.view.w,n=atmosphere.extent.w;
+    if(nearCount==0)return sqrt(saturate(depth/atmosphere.view.y))*(n-1);
+    if(depth<=64000)return sqrt(saturate(depth/64000))*(nearCount-1);
+    return nearCount-1+(n-nearCount)*saturate(log(depth/64000)/max(1e-6,log(atmosphere.view.y/64000)));
+}
 float3 atmApply(float3 colour,float3 position) {
     if(atmosphere.options.x!=2 || atmosphere.options.y==0)return colour;
     float4 clip=mul(atmosphere.current,float4(position,1));
     float2 uv=clip.xy/clip.w*.5+.5;
     // The volume is generated from jittered rays, so use the matching raster UV.
     uv+=atmosphere.haze.zw;
-    float z=sqrt(saturate(clip.w/atmosphere.view.y));
+    float z=atmDistanceSlice(clip.w);
     float n=atmosphere.extent.w;
-    float3 coord=float3(uv,(z*(n-1)+.5)/n);
+    float3 coord=float3(uv,(z+.5)/n);
     float3 t=atmosphereAerialT.SampleLevel(atmosphereSampler,coord,0).rgb;
     float3 s=atmosphereAerialS.SampleLevel(atmosphereSampler,coord,0).rgb*atmosphere.illumination.rgb*atmosphere.illumination.w;
     if(atmosphere.options.z==1)return t;

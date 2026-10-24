@@ -82,6 +82,10 @@ of 2 cm and 1% of expected previous view depth, including FP16 motion-depth prec
 History weight is bounded by 0.9 and reduced by motion, reactive coverage and
 luminance disagreement. Calculations use FP32; finite RGBA16F output uses the existing
 65504 representable limit. Signed R32F history depth doubles as rejection diagnostics.
+The [continuous-horizon renderer](rendering_horizon.md) stores motion depth in
+kilometres internally and converts it back to metres for history validation and
+public snapshots. It uses interpolated rendered positions for motion, with separate
+flat geographic positions for materials, and retains each frame’s curvature mapping.
 
 Algorithm reference: [Intel TAA](https://github.com/GameTechDev/TAA). The implementation
 is engine-owned HLSL; no upstream application or copied shader source is included.

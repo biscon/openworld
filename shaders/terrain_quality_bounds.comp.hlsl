@@ -6,6 +6,7 @@
 struct Tile { uint width,halo,unused,level; uint4 offset; };
 [[vk::push_constant]] ConstantBuffer<Tile> tile;
 groupshared float4 reduction[64];
+groupshared float4 transition[64];
 float2 triangleHeight(float2 p,uint level) {
     uint cells=params.dimensions.x>>level,width=cells+1,offset=heightLevelOffset(params.dimensions.x,level);
     uint2 a=min(uint2(p),cells-1);float2 f=p-a;
@@ -19,29 +20,34 @@ void main(uint3 group:SV_GroupID,uint thread:SV_GroupIndex) {
     group.xy+=tile.offset.xy;
     uint patch=params.sampling.y,n=patch*2+1;
     float4 value=float4(3.402823e38,-3.402823e38,0,0);
+    float4 replacement=0;
     for(uint i=thread;i<n*n;i+=64) {
         float2 p=float2(group.xy*patch)+float2(i%n,i/n)*.5;
-        float2 reference=evaluateTerrain(p*(params.shape.x*float(1u<<tile.level)));
+        float2 reference=((params.sampling.w&4)!=0 && tile.level==0)?triangleHeight(p*.5,1):evaluateTerrain(p*(params.shape.x*float(1u<<tile.level)));
         float2 h=triangleHeight(p,tile.level), parent=triangleHeight(p*.5,tile.level+1);
         value.xy=float2(min(value.x,min(min(h.x,h.y),min(parent.x,parent.y))),
                        max(value.y,max(max(h.x,h.y),max(parent.x,parent.y))));
         value.zw=max(value.zw,abs(h-reference));
+        replacement=max(replacement,float4(abs(parent-reference),abs(parent-h)));
     }
-    reduction[thread]=value;
+    reduction[thread]=value;transition[thread]=replacement;
     GroupMemoryBarrierWithGroupSync();
     for(uint stride=32;stride>0;stride>>=1) {
         if(thread<stride) {
             float4 b=reduction[thread+stride],a=reduction[thread];
             reduction[thread]=float4(min(a.x,b.x),max(a.y,b.y),max(a.zw,b.zw));
+            transition[thread]=max(transition[thread],transition[thread+stride]);
         }
         GroupMemoryBarrierWithGroupSync();
     }
     if(thread==0) {
         uint leaves=params.dimensions.x/patch,offset=leaves*leaves;
-        for(uint l=0;l<tile.level;++l){uint w=leaves>>l;offset+=2*w*w;}
+        for(uint l=0;l<tile.level;++l){uint w=leaves>>l;offset+=4*w*w;}
         uint idx=group.y*tile.width+group.x;
-        metadata[offset+idx*2]=reduction[0].xy+float2(-.01,.01);
-        metadata[offset+idx*2+1]=reduction[0].zw;
+        metadata[offset+idx*4]=reduction[0].xy+float2(-.01,.01);
+        metadata[offset+idx*4+1]=reduction[0].zw;
+        metadata[offset+idx*4+2]=transition[0].xy;
+        metadata[offset+idx*4+3]=transition[0].zw;
         if(tile.level==0) metadata[idx]=reduction[0].xy+float2(-.01,.01);
     }
 }

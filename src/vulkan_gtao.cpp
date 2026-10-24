@@ -384,7 +384,7 @@ void VulkanGtao::initialize(VkCommandBuffer cmd) {
                VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
 }
 void VulkanGtao::record(VkCommandBuffer cmd, VkImageView source, glm::vec2 jitter,
-                        uint32_t temporalPhase) {
+                        uint32_t temporalPhase, float farDistance) {
     auto &s = *impl_;
     if (!active())
         return;
@@ -399,12 +399,13 @@ void VulkanGtao::record(VkCommandBuffer cmd, VkImageView source, glm::vec2 jitte
                    VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                    VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT, i->levels);
     const float ty = std::tan(glm::radians(Camera::verticalFovDegrees) * .5f);
-    Push push{{s.width, s.height, s.workWidth, s.workHeight},
-              {s.configured == GtaoMode::Half ? 2u : 1u, 0, s.levels, uint32_t(s.settings.diagnostic)},
-              {ty * float(s.width) / s.height, ty,
-               Camera::nearPlane * Camera::farPlane / (Camera::farPlane - Camera::nearPlane),
-               Camera::nearPlane / (Camera::farPlane - Camera::nearPlane)},
-              {s.settings.radius, jitter.x, jitter.y, float(temporalPhase)}};
+    Push push{
+        {s.width, s.height, s.workWidth, s.workHeight},
+        {s.configured == GtaoMode::Half ? 2u : 1u, 0, s.levels, uint32_t(s.settings.diagnostic)},
+        {ty * float(s.width) / s.height, ty,
+         Camera::nearPlane * farDistance / (farDistance - Camera::nearPlane),
+         Camera::nearPlane / (farDistance - Camera::nearPlane)},
+        {s.settings.radius, jitter.x, jitter.y, float(temporalPhase)}};
     auto stamp = [&](uint32_t index) {
         if (s.queries)
             vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, s.queries,

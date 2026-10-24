@@ -54,9 +54,13 @@ silently truncates casters. Unsupported sampled depth selects Off with diagnosti
 Default buffers add approximately 29 MiB to the depth array; driver allocation
 requirements determine the actual total. Extra terrain residency has its own budget.
 
-Sampling blends adjacent cascades, uses fractional deterministic PCF (four bilinear
-comparison samples, equivalent manual fallback), geometric-normal offset and bounded
-receiver-plane correction. Default depth/normal biases are 0.75/0.25 world texels.
+Sampling blends adjacent cascades and uses the fractional footprint of four bilinear
+PCF samples. Nine unique texels are compared explicitly, each with its own finite
+receiver-plane correction; this avoids the incorrect common reference and old
+four-texel correction clamp on steep receivers. Cleared depth is always unoccluded.
+The manual-filter override is retained for source compatibility; both paths now use
+the same texel comparisons. Geometric-normal offset remains separate. See the
+[surface correction](rendering_surface_review.md) for the regression and tradeoffs. Default depth/normal biases are 0.75/0.25 world texels.
 Actual rendered receiver positions are used, including transparent surfaces.
 
 The existing graphics queue serializes shared depth-array reads/writes. Barriers

@@ -161,7 +161,8 @@ gates remain pending.
 mesh/terrain motion, temporal GTAO sampling and bounded HDR bloom. The demo enables
 TAA and subtle bloom. Auto-exposure and target-GPU/live acceptance remain deferred.
 [Slice 5H](rendering_atmosphere.md) adds physical sky, shared atmosphere/environment
-lighting, RGB aerial transport and optional reserved coarse coverage to about 32 km.
+lighting and RGB aerial transport. Its [continuous-horizon extension](rendering_horizon.md)
+adds compact distant terrain, visual curvature and long-range aerial sampling.
 Clear-air boundaries and the ground-to-2-km flight envelope remain explicit
 production-scale/target-GPU review gates.
 

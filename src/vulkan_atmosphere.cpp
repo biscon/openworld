@@ -179,6 +179,7 @@ struct VulkanAtmosphere::Impl {
         std::array<Image *, 6> images() { return {&trans, &multi, &sky, &t, &s, &env}; }
     };
     std::array<Frame, 2> frames;
+    bool extended = false;
     Impl(VkPhysicalDevice p, VkDevice d, uint64_t b) : physical(p), device(d), budget(b) {}
     ~Impl() {
         if (queries)
@@ -315,8 +316,8 @@ struct VulkanAtmosphere::Impl {
             f.trans.create(device, full ? 256 : 1, full ? 64 : 1, 1, false, storage);
             f.multi.create(device, full ? 32 : 1, full ? 32 : 1, 1, false, storage);
             f.sky.create(device, w, h, 1, false, storage);
-            f.t.create(device, n, n, n, false, storage, true);
-            f.s.create(device, n, n, n, false, storage, true);
+            f.t.create(device, n, n, n + (full && extended ? 32 : 0), false, storage, true);
+            f.s.create(device, n, n, n + (full && extended ? 32 : 0), false, storage, true);
             f.env.create(device, full ? 64 : 1, full ? 64 : 1, 1, true, storage);
             f.initialized = false;
             f.descriptorsValid = false;
@@ -366,8 +367,9 @@ struct VulkanAtmosphere::Impl {
     }
 };
 VulkanAtmosphere::VulkanAtmosphere(VkPhysicalDevice p, VkDevice d, uint32_t family, uint64_t budget,
-                                   bool force, const std::filesystem::path &shaders)
+                                   bool force, const std::filesystem::path &shaders, bool extended)
     : impl_(std::make_unique<Impl>(p, d, budget)) {
+    impl_->extended = extended;
     impl_->init(family, force, shaders);
     impl_->resize({});
 }
@@ -437,7 +439,7 @@ void VulkanAtmosphere::begin(uint32_t frame, const Camera &camera, const Atmosph
         std::max({std::min(1.f, glm::length(sun - i.lastSun) * 20),
                   std::min(1.f, std::abs(altitude - i.lastAltitude)),
                   std::min(1.f, std::abs(intensity - i.lastIntensity) / std::max(1.f, intensity))});
-    u.view = {altitude, Camera::farPlane, reactive, 0};
+    u.view = {altitude, camera.renderFar, reactive, i.extended ? float(f.t.width) : 0.f};
     u.options = {float(i.stats.effective), s.aerialPerspective ? 1.f : 0.f, float(s.diagnostic),
                  l.environmentEnabled ? s.environmentMultiplier : 0};
     u.extent = {intensity, float(f.sky.width), float(f.sky.height), float(f.t.depth)};
@@ -615,7 +617,8 @@ AtmosphereSnapshot VulkanAtmosphere::decodeSnapshot(const void *data) const {
     auto &f = impl_->frames[impl_->last];
     AtmosphereSnapshot out;
     out.skyExtent = {f.sky.width, f.sky.height};
-    out.volumeSize = f.t.depth;
+    out.volumeSize = f.t.width;
+    out.volumeDepth = f.t.depth;
     auto bytes = static_cast<const uint8_t *>(data);
     uint64_t offset = 0;
     std::vector<glm::vec4> *arrays[] = {&out.transmittance, &out.multipleScattering, &out.sky,

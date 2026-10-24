@@ -1,9 +1,11 @@
 #include "mesh_primitives.hpp"
 #include "renderer.hpp"
+#include "review_view.hpp"
 #include <algorithm>
 #include <chrono>
 #include <fstream>
 #include <iostream>
+#include <optional>
 using namespace ow;
 int main(int argc, char **argv) {
     try {
@@ -13,12 +15,20 @@ int main(int argc, char **argv) {
         double viewDistance = 8192;
         std::string scene = "plain";
         std::filesystem::path shaders = OPENWORLD_SHADER_DIR;
-        float yaw = 0;
+        float yaw = 0, flightSpeed = 100;
+        std::optional<ReviewView> review;
         uint32_t frames = 120, width = 1920, height = 1080;
         uint32_t extraCasters = 0;
         for (int i = 2; i < argc; ++i) {
             std::string a = argv[i];
-            if (a == "--quick") {
+            if (a == "--review-view" && i + 1 < argc)
+                review = loadReviewView(argv[++i]);
+            else if (a == "--flight-speed" && i + 1 < argc) {
+                flightSpeed = std::stof(argv[++i]);
+                flight = true;
+                if (!std::isfinite(flightSpeed) || flightSpeed < 0 || flightSpeed > 10000)
+                    throw std::invalid_argument("Invalid flight speed");
+            } else if (a == "--quick") {
                 quick = true;
                 width = 320;
                 height = 180;
@@ -56,7 +66,8 @@ int main(int argc, char **argv) {
         }
         if (scene != "plain" && scene != "valley" && scene != "streaming" && scene != "mountains")
             throw std::invalid_argument("Scene must be plain, valley, streaming or mountains");
-        const bool terrainScene = scene == "streaming" || scene == "mountains";
+        const bool terrainScene =
+            review ? review->scene.terrainVisible : scene == "streaming" || scene == "mountains";
         if (!std::isfinite(viewDistance) || viewDistance < 128 || viewDistance > 16384)
             throw std::invalid_argument("View distance must be 128..16384 metres");
         if (!frames)
@@ -67,8 +78,10 @@ int main(int argc, char **argv) {
             return v[std::min(v.size() - 1, size_t(p * (v.size() - 1)))];
         };
         std::ofstream csv(out / "timings.csv");
-        csv << "mode,scene,moving,flight,low_sun,width,height,cpu_median_ms,cpu_p95_ms,prepare_p95_ms,raster_"
-               "p95_ms,gpu_median_ms,gpu_p95_ms,shadow_bytes,terrain_shadow_bytes,casters,triangles,overflow,"
+        csv << "mode,scene,moving,flight,low_sun,width,height,cpu_median_ms,cpu_"
+               "p95_ms,prepare_p95_ms,raster_"
+               "p95_ms,gpu_median_ms,gpu_p95_ms,shadow_bytes,terrain_shadow_bytes,"
+               "casters,triangles,overflow,"
                "incomplete\n";
         std::vector<double> offGpu;
         for (uint32_t mode = 0; mode < 2; ++mode) {
@@ -102,6 +115,11 @@ int main(int argc, char **argv) {
                 o.streaming.gpuBytes = (quick ? 256 : 512) * terrainMiB;
                 o.streaming.hostBytes = 256 * terrainMiB;
                 o.shadowCapacity.casters = 65536;
+            }
+            if (review) {
+                applyReviewStartup(o, *review);
+                width = o.width;
+                height = o.height;
             }
             Renderer r(o);
             SceneSettings s;
@@ -151,13 +169,20 @@ int main(int argc, char **argv) {
                     c.pitch = -.4f;
                 }
             }
-            for (int i = 0; i < (quick ? 32 : 256); ++i) {
+            for (int i = 0; i < (review ? 0 : quick ? 32 : 256); ++i) {
                 MeshInstance instance;
                 instance.mesh = sphere;
                 instance.material = m;
                 instance.position.local = {(i % 16 - 8) * 3.0, 0, -double(i / 16) * 4};
                 if (r.createInstance(instance).slot == ~0u)
                     throw std::runtime_error("Probe instance capacity exhausted");
+            }
+            if (review) {
+                s = review->scene;
+                c = review->camera;
+                r.requestTerrainBatch(
+                    terrainNeighbourhood({review->terrainOrigin, review->terrain}, !o.streaming.enabled));
+                r.setTerrainLodReviewState(review->lod);
             }
             // Large command spans without overlapping all casters on every cascade.
             // Keep this scaling workload out of the routine correctness tests.
@@ -168,13 +193,13 @@ int main(int argc, char **argv) {
                 if (r.createInstance(instance).slot == ~0u)
                     throw std::runtime_error("Probe instance capacity exhausted");
             }
-            std::ofstream(out / "device.txt")
-                << r.deviceName() << "\nValidation: " << validation
-                << "\nSoftware Vulkan timings do not establish RTX 3060 performance.\n";
+            std::ofstream(out / "device.txt") << r.deviceName() << "\nValidation: " << validation
+                                              << "\nSoftware Vulkan timings do not establish RTX 3060 "
+                                                 "performance.\n";
             // Settle owned streaming coverage before timed runs, without changing
             // its normal generation/transfer budgets.
-            bool settled = !terrainScene;
-            if (terrainScene)
+            bool settled = !o.streaming.enabled;
+            if (o.streaming.enabled)
                 for (uint32_t i = 0; i < 2000; ++i) {
                     r.render(c, s);
                     auto stats = r.terrainStreamingStats();
@@ -195,6 +220,7 @@ int main(int argc, char **argv) {
                     << "\nshadow_resolution=" << o.shadowCapacity.resolution
                     << "\nnear_distance=" << s.shadows.nearDistance
                     << "\nfar_distance_setting=" << s.shadows.farDistance << "\nframes=" << frames
+                    << "\nflight_speed=" << flightSpeed << "\nreview_view=" << bool(review)
                     << "\nflight=" << flight << "\nmoving_sun=" << moving << "\nlow_sun=" << lowSun
                     << "\nvalidation=" << validation
                     << "\ndiagnostic_frame_seconds=" << o.streaming.diagnosticFrameSeconds << '\n';
@@ -206,7 +232,8 @@ int main(int argc, char **argv) {
             raster.reserve(frames);
             gpu.reserve(frames);
             std::ofstream trace(out / (name + "_frames.csv"));
-            trace << "frame,cpu_ms,gpu_ms,prepare_ms,raster_ms,generation_ms,casters,triangles,incomplete";
+            trace << "frame,cpu_ms,gpu_ms,prepare_ms,raster_ms,generation_ms,casters,"
+                     "triangles,incomplete";
             for (uint32_t j = 0; j < shadowCascades; ++j)
                 trace << ",cascade" << j << "_ms";
             trace << '\n';
@@ -214,8 +241,8 @@ int main(int argc, char **argv) {
                 const double t = double(i >= 24 ? i - 24 : 0) / 60;
                 c = base;
                 if (flight) {
-                    c.local.x += t * 100;
-                    c.local.z -= t * 40;
+                    c.local.x += t * flightSpeed;
+                    c.local.z -= t * flightSpeed * .4;
                     c.yaw += float(.2 * std::sin(t * .3));
                     c.update({}, 0, o.terrainGrid);
                 }
@@ -273,7 +300,8 @@ int main(int argc, char **argv) {
                 std::ofstream(out / "incremental.txt")
                     << "Paired full-frame GPU delta (including generation): median " << percentile(gpu, .5)
                     << " ms; p95 " << percentile(gpu, .95)
-                    << " ms. GPU metrics describe completed submissions, with the same frame delay in each "
+                    << " ms. GPU metrics describe completed submissions, with the same "
+                       "frame delay in each "
                        "run.\n";
             }
             if (r.validationErrors())

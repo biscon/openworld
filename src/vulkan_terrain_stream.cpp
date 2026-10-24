@@ -37,9 +37,8 @@ void imageGeneral(VkCommandBuffer cmd, VkImage image, uint32_t layers) {
     d.pImageMemoryBarriers = &b;
     vkCmdPipelineBarrier2(cmd, &d);
 }
-constexpr VkBufferUsageFlags heightUsage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                                           VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-                                           VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+constexpr VkBufferUsageFlags heightUsage =
+    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
 VkImageCreateInfo normalImageInfo(uint32_t width, uint32_t layers) {
     VkImageCreateInfo info{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
     info.imageType = VK_IMAGE_TYPE_2D;
@@ -91,8 +90,7 @@ VulkanTerrainStream::VulkanTerrainStream(VulkanTerrain &g, TerrainStreamingConfi
         throw std::runtime_error("Terrain GPU cache requires a little-endian host");
     if (config_.transferBytesPerFrame < 32768 || config_.transferBytesPerFrame > 8 * terrainMiB ||
         config_.transferBytesPerFrame % 16)
-        throw std::invalid_argument(
-            "Terrain transfer allowance must be a multiple of 16 in 32 KiB..8 MiB");
+        throw std::invalid_argument("Terrain transfer allowance must be a multiple of 16 in 32 KiB..8 MiB");
     VkPhysicalDeviceProperties props;
     vkGetPhysicalDeviceProperties(g_.context_.physical, &props);
     deviceHash_ = terrainChecksum(props.pipelineCacheUUID, VK_UUID_SIZE);
@@ -129,40 +127,75 @@ VulkanTerrainStream::VulkanTerrainStream(VulkanTerrain &g, TerrainStreamingConfi
         return bytes;
     };
     const uint32_t slotLimit = props.limits.maxImageArrayLayers / 2;
-    const auto pools = config_.hierarchical
-                           ? terrainHierarchyPoolCapacity(
-                                 available, slotLimit,
-                                 std::clamp(int(config_.maximumDistance / layout_.grid.extent()), 0,
-                                            terrainMaximumRadius(layout_.grid)),
-                                 layout_.detailBytes != 0, coverageCost, detailCost)
-                           : terrainPoolCapacity(available, slotLimit, layout_.detailBytes != 0,
-                                                 coverageCost, detailCost);
+    const auto pools =
+        config_.hierarchical
+            ? terrainHierarchyPoolCapacity(available, slotLimit,
+                                           std::clamp(int(config_.maximumDistance / layout_.grid.extent()), 0,
+                                                      terrainMaximumRadius(layout_.grid)),
+                                           layout_.detailBytes != 0, coverageCost, detailCost)
+            : terrainPoolCapacity(available, slotLimit, layout_.detailBytes != 0, coverageCost, detailCost);
     uint32_t extra = 0;
     if (config_.hierarchical)
         for (uint32_t n = 1; n <= 64 && pools.coverage + n <= slotLimit; ++n) {
-            if (coverageCost(pools.coverage + n) - coverageCost(pools.coverage) >
-                config_.shadowCasterBytes)
+            if (coverageCost(pools.coverage + n) - coverageCost(pools.coverage) > config_.shadowCasterBytes)
                 break;
             extra = n;
         }
     uint32_t horizon = 0;
-    if (config_.hierarchical && pools.coverage + extra + 48 <= slotLimit &&
-        coverageCost(pools.coverage + extra + 48) - coverageCost(pools.coverage + extra) <=
-            config_.horizonBytes)
-        horizon = 48;
+    nearSlots_ = pools.coverage;
+    compactStride_ = alignTo(layout_.heightsBytes - layout_.heightOffsets[1],
+                             props.limits.minStorageBufferOffsetAlignment);
+    if (!std::isfinite(config_.horizonMaximumDistance) || config_.horizonMaximumDistance < 0 ||
+        config_.horizonMaximumDistance > 1048576)
+        throw std::invalid_argument("Invalid horizon distance cap");
+    const double required = horizonCoverage(6360000, -4000, 4000);
+    int horizonRadius = 0;
+    const uint32_t detailedLevel = terrainHierarchyLevel(pools.maximumRadius);
+    auto distantCost = [&](uint32_t slots) {
+        return heightBufferBytes(g_.context_.device,
+                                 heightStride_ * (pools.coverage + extra) + compactStride_ * slots) -
+               heightBufferBytes(g_.context_.device, heightStride_ * (pools.coverage + extra)) +
+               normalImageBytes(g_.context_.device, layout_.widths[layout_.levels - 1],
+                                (pools.coverage + extra + slots) * 2) -
+               normalImageBytes(g_.context_.device, layout_.widths[layout_.levels - 1],
+                                (pools.coverage + extra) * 2);
+    };
+    if (config_.hierarchical && config_.horizonBytes && layout_.levels > 1) {
+        const double target =
+            std::min(config_.horizonMaximumDistance, std::max(required, config_.maximumDistance * 2));
+        for (uint32_t level = detailedLevel + 1; level < 30; ++level) {
+            const double distance = double(uint64_t(1) << level) * layout_.grid.extent();
+            if (distance > config_.horizonMaximumDistance)
+                break;
+            const uint32_t slots = 48 * (level - detailedLevel);
+            if (pools.coverage + extra + slots > slotLimit || distantCost(slots) > config_.horizonBytes)
+                break;
+            horizon = slots;
+            horizonRadius = int(uint32_t(1) << level);
+            if (distance >= target)
+                break;
+        }
+    }
+    distantSlots_ = horizon;
     stats_.horizonSlots = horizon;
-    stats_.horizonBytes =
-        coverageCost(pools.coverage + extra + horizon) - coverageCost(pools.coverage + extra);
+    stats_.horizonLevels = horizon / 48;
+    stats_.horizonBytes = horizon ? distantCost(horizon) : 0;
+    stats_.horizonRequiredDistance = required;
+    stats_.horizonEffectiveDistance = horizonRadius * layout_.grid.extent();
+    stats_.horizonLimited = config_.horizonBytes && stats_.horizonEffectiveDistance < required;
     stats_.shadowSlots = extra;
     stats_.shadowBytes = coverageCost(pools.coverage + extra) - coverageCost(pools.coverage);
     capacity_ = pools.coverage + extra + horizon;
     detailCapacity_ = pools.detail;
     const int maxRadius = pools.maximumRadius;
     cache_ = std::make_unique<TerrainCache>(layout_, config_);
-    stream_ = std::make_unique<TerrainStreamer>(capacity_, maxRadius, layout_.grid,
-                                                config_.hierarchical, extra, horizon);
+    stream_ = std::make_unique<TerrainStreamer>(capacity_, maxRadius, layout_.grid, config_.hierarchical,
+                                                extra, horizon, horizonRadius);
     lod_ = std::make_unique<TerrainLod>(g_.grid_, g_.capacity_,
                                         TerrainLodConfig{true, layout_.patchCells, 64}, capacity_);
+    if (config_.hierarchical)
+        ground_ = std::make_unique<TerrainGroundLod>(layout_.grid, layout_.patchCells, capacity_,
+                                                     temporalCapacity, g_.lod_->triangleBudget());
     meta_.resize(capacity_);
     boundsScratch_.resize(size_t(layout_.boundsBytes / sizeof(glm::vec2)));
     details_.resize(detailCapacity_);
@@ -180,24 +213,23 @@ VulkanTerrainStream::VulkanTerrainStream(VulkanTerrain &g, TerrainStreamingConfi
             qualityBoundsPipeline_ = g_.pipeline(shaders / "terrain_quality_bounds.comp.spv");
         }
         initialize();
-        preparedDraws_.reserve(lod_->drawCapacity());
-        casterRecords_.reserve(lod_->drawCapacity() * 2);
+        preparedDraws_.reserve(ground_ ? ground_->capacity() : lod_->drawCapacity());
+        casterRecords_.reserve((ground_ ? ground_->capacity() : lod_->drawCapacity()) + lod_->drawCapacity());
         shadowDraws_.reserve(65536);
         if (config_.vertexDiagnostics) {
-            vertexProbePipeline_ =
-                g_.pipeline(shaders / "terrain_vertex_probe.comp.spv", graphicsLayout_);
+            vertexProbePipeline_ = g_.pipeline(shaders / "terrain_vertex_probe.comp.spv", graphicsLayout_);
             const size_t leaves =
                 size_t(g_.capacity_ / layout_.patchCells) * (g_.capacity_ / layout_.patchCells);
-            diagnosticDraws_.reserve((4 * leaves - 1) / 3 * capacity_);
+            diagnosticDraws_.reserve(ground_ ? ground_->capacity() : (4 * leaves - 1) / 3 * capacity_);
         }
         uint64_t host = 0;
         for (uint32_t f = 0; f < 2; ++f)
-            host += uploads_[f].allocationSize + readbacks_[f].allocationSize +
-                    views_[f].allocationSize + weights_[f].allocationSize;
+            host += uploads_[f].allocationSize + readbacks_[f].allocationSize + views_[f].allocationSize +
+                    weights_[f].allocationSize;
         stats_.gpuBytes = g_.allocatedBytes() + imageBytes_ - host;
-        stats_.hostBytes = host + cache_->allocatedBytes() +
-                           uint64_t(capacity_) *
-                               (sizeof(TerrainStreamer::Slot) + sizeof(Meta) + sizeof(ChunkCoord) + 8);
+        stats_.hostBytes =
+            host + cache_->allocatedBytes() +
+            uint64_t(capacity_) * (sizeof(TerrainStreamer::Slot) + sizeof(Meta) + sizeof(ChunkCoord) + 8);
         // CPU quadtree and worst-case draw storage are also bounded and charged.
         const uint64_t leaves =
             uint64_t(g_.capacity_ / layout_.patchCells) * (g_.capacity_ / layout_.patchCells);
@@ -208,11 +240,14 @@ VulkanTerrainStream::VulkanTerrainStream(VulkanTerrain &g, TerrainStreamingConfi
             lod_->drawCapacity() *
             (sizeof(VisibilityBounds) + 2 * (sizeof(TerrainPatchDraw) + sizeof(VisibilityBounds)));
         stats_.hostBytes += shadowDraws_.capacity() * sizeof(ShadowDraw);
+        if (ground_)
+            stats_.hostBytes += ground_->allocatedBytes();
         stats_.hostBytes += 128 * 1024 + layout_.boundsBytes; // bounded cache maintenance metadata
                                                               // and spatial lookup
         stats_.hostBytes +=
             (4 * leaves - 1) / 3 *
-            (32 + uint64_t(capacity_) * (2 * sizeof(glm::vec2) + sizeof(TerrainPatchDraw)));
+            (32 + uint64_t(capacity_) *
+                      (2 * sizeof(glm::vec2) + sizeof(TerrainPatchMetadata) + sizeof(TerrainPatchDraw)));
         if (stats_.gpuBytes > config_.gpuBytes + config_.shadowCasterBytes + config_.horizonBytes ||
             stats_.hostBytes > config_.hostBytes)
             throw std::runtime_error(
@@ -248,8 +283,7 @@ void VulkanTerrainStream::createImage(Image &image, uint32_t width, uint32_t lay
     VkMemoryAllocateInfo alloc{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
     alloc.allocationSize = req.size;
     alloc.memoryTypeIndex = type;
-    check(vkAllocateMemory(g_.context_.device, &alloc, nullptr, &image.memory),
-          "Allocate streaming normals");
+    check(vkAllocateMemory(g_.context_.device, &alloc, nullptr, &image.memory), "Allocate streaming normals");
     image.bytes = req.size;
     imageBytes_ += req.size;
     check(vkBindImageMemory(g_.context_.device, image.image, image.memory, 0), "Bind streaming normals");
@@ -258,36 +292,34 @@ void VulkanTerrainStream::createImage(Image &image, uint32_t width, uint32_t lay
     view.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
     view.format = info.format;
     view.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, layers};
-    check(vkCreateImageView(g_.context_.device, &view, nullptr, &image.view),
-          "Create streaming normal view");
+    check(vkCreateImageView(g_.context_.device, &view, nullptr, &image.view), "Create streaming normal view");
 }
 void VulkanTerrainStream::initialize() {
     auto d = g_.context_.device;
-    g_.createBuffer(heights_, heightStride_ * capacity_, heightUsage);
+    g_.createBuffer(heights_, heightOffset(capacity_), heightUsage);
     createImage(coarse_, layout_.widths[layout_.levels - 1], capacity_ * 2);
     for (uint32_t l = 0; l + 1 < layout_.levels; ++l)
         createImage(fine_[l], layout_.widths[l], detailCapacity_ * 2);
-    const VkDescriptorType types[] = {
-        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-        VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-        VK_DESCRIPTOR_TYPE_SAMPLER,        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-        VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE};
-    VkDescriptorSetLayoutBinding bindings[11]{};
-    for (uint32_t i = 0; i < 11; ++i)
-        bindings[i] = {i, types[i], 1,
-                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT |
-                           VK_SHADER_STAGE_COMPUTE_BIT,
-                       nullptr};
+    const VkDescriptorType types[] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                      VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                                      VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                                      VK_DESCRIPTOR_TYPE_SAMPLER,        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                      VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                                      VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                                      VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE};
+    VkDescriptorSetLayoutBinding bindings[13]{};
+    for (uint32_t i = 0; i < 13; ++i)
+        bindings[i] = {
+            i, types[i], 1,
+            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT, nullptr};
     VkDescriptorSetLayoutCreateInfo li{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-    li.bindingCount = 11;
+    li.bindingCount = 13;
     li.pBindings = bindings;
     check(vkCreateDescriptorSetLayout(d, &li, nullptr, &descriptorLayout_), "Create streaming layout");
     const auto count = 2 * capacity_ * layout_.levels;
     VkDescriptorPoolSize sizes[] = {{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2 * count},
                                     {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 3 * count},
-                                    {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 5 * count},
+                                    {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 7 * count},
                                     {VK_DESCRIPTOR_TYPE_SAMPLER, count}};
     VkDescriptorPoolCreateInfo pi{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
     pi.maxSets = count;
@@ -296,13 +328,10 @@ void VulkanTerrainStream::initialize() {
     check(vkCreateDescriptorPool(d, &pi, nullptr, &descriptorPool_), "Create streaming descriptors");
     sets_.resize(count);
     for (uint32_t f = 0; f < 2; ++f) {
-        g_.createBuffer(uploads_[f], config_.transferBytesPerFrame, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                        true);
-        g_.createBuffer(readbacks_[f], config_.transferBytesPerFrame, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                        true);
-        g_.createBuffer(views_[f], 128, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true);
-        g_.createBuffer(weights_[f], weightStride_ * capacity_, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-                        true);
+        g_.createBuffer(uploads_[f], config_.transferBytesPerFrame, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true);
+        g_.createBuffer(readbacks_[f], config_.transferBytesPerFrame, VK_BUFFER_USAGE_TRANSFER_DST_BIT, true);
+        g_.createBuffer(views_[f], 160, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true);
+        g_.createBuffer(weights_[f], weightStride_ * capacity_, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true);
         for (uint32_t s = 0; s < capacity_; ++s)
             for (uint32_t l = 0; l < layout_.levels; ++l) {
                 auto &set = sets_[(f * capacity_ + s) * layout_.levels + l];
@@ -314,11 +343,11 @@ void VulkanTerrainStream::initialize() {
                 const auto current = l + 1 < layout_.levels ? fine_[l].view : coarse_.view;
                 const auto next = l + 2 < layout_.levels ? fine_[l + 1].view : coarse_.view;
                 VkDescriptorBufferInfo buffers[] = {
-                    {views_[f].handle, 0, 128},
-                    {heights_.handle, heightStride_ * s, layout_.heightsBytes},
+                    {views_[f].handle, 0, 160},
+                    {heights_.handle, heightOffset(s), layout_.heightsBytes - heightSkip(s)},
                     {weights_[f].handle, weightStride_ * s, 192},
                     {g_.patchIndices_.handle, 0, g_.patchIndices_.size},
-                    {heights_.handle, heightStride_ * s, layout_.heightsBytes}};
+                    {heights_.handle, heightOffset(s), layout_.heightsBytes - heightSkip(s)}};
                 VkDescriptorImageInfo images[] = {
                     {VK_NULL_HANDLE, coarse_.view, VK_IMAGE_LAYOUT_GENERAL},
                     {VK_NULL_HANDLE, current, VK_IMAGE_LAYOUT_GENERAL},
@@ -327,9 +356,14 @@ void VulkanTerrainStream::initialize() {
                     {VK_NULL_HANDLE,
                      l > 0 ? fine_[l - 1].view : (layout_.levels > 1 ? fine_[0].view : coarse_.view),
                      VK_IMAGE_LAYOUT_GENERAL},
-                    {VK_NULL_HANDLE, current, VK_IMAGE_LAYOUT_GENERAL}};
-                VkWriteDescriptorSet writes[11]{};
-                for (uint32_t i = 0; i < 11; ++i) {
+                    {VK_NULL_HANDLE, l > 0 ? current : next, VK_IMAGE_LAYOUT_GENERAL},
+                    {VK_NULL_HANDLE, l + 3 < layout_.levels ? fine_[l + 2].view : coarse_.view,
+                     VK_IMAGE_LAYOUT_GENERAL},
+                    {VK_NULL_HANDLE,
+                     (l > 0 ? l + 1 : 2) + 1 < layout_.levels ? fine_[l > 0 ? l + 1 : 2].view : coarse_.view,
+                     VK_IMAGE_LAYOUT_GENERAL}};
+                VkWriteDescriptorSet writes[13]{};
+                for (uint32_t i = 0; i < 13; ++i) {
                     auto &w = writes[i];
                     w = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
                     w.dstSet = set;
@@ -345,23 +379,19 @@ void VulkanTerrainStream::initialize() {
                     else
                         w.pImageInfo = &images[i - 5];
                 }
-                vkUpdateDescriptorSets(d, 11, writes, 0, nullptr);
+                vkUpdateDescriptorSets(d, 13, writes, 0, nullptr);
             }
     }
     VkPushConstantRange push{
         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT, 0, 128};
     VkPipelineLayoutCreateInfo layout{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
-    const VkDescriptorSetLayout graphicsSets[] = {descriptorLayout_, g_.lightingLayout_,
-                                                  g_.materialLayout_, g_.visibilityLayout_};
-    layout.setLayoutCount = g_.visibilityLayout_ ? 4
-                            : g_.materialLayout_ ? 3
-                            : g_.lightingLayout_ ? 2
-                                                 : 1;
+    const VkDescriptorSetLayout graphicsSets[] = {descriptorLayout_, g_.lightingLayout_, g_.materialLayout_,
+                                                  g_.visibilityLayout_};
+    layout.setLayoutCount = g_.visibilityLayout_ ? 4 : g_.materialLayout_ ? 3 : g_.lightingLayout_ ? 2 : 1;
     layout.pSetLayouts = graphicsSets;
     layout.pushConstantRangeCount = 1;
     layout.pPushConstantRanges = &push;
-    check(vkCreatePipelineLayout(d, &layout, nullptr, &graphicsLayout_),
-          "Create streaming pipeline layout");
+    check(vkCreatePipelineLayout(d, &layout, nullptr, &graphicsLayout_), "Create streaming pipeline layout");
     VkPhysicalDeviceProperties props;
     vkGetPhysicalDeviceProperties(g_.context_.physical, &props);
     if (props.limits.timestampComputeAndGraphics) {
@@ -419,7 +449,10 @@ TerrainCacheKey VulkanTerrainStream::key(TerrainHandle h, TerrainProduct p) cons
             deviceHash_,
             p,
             stream_->slot(h.index).level,
-            config_.hierarchical ? (config_.unfilteredHeightReference ? 8u : 7u) : 3u};
+            config_.hierarchical ? (compact(h.index)                    ? 13u
+                                    : config_.unfilteredHeightReference ? 12u
+                                                                        : 11u)
+                                 : 3u};
 }
 void VulkanTerrainStream::settings(const TerrainSettings &settings) {
     terrainParameters(g_.grid_, {{}, settings});
@@ -428,6 +461,8 @@ void VulkanTerrainStream::settings(const TerrainSettings &settings) {
         ++epoch_;
         range_ = rangeTarget_ = 64;
         qualityScale_ = 1;
+        if (ground_)
+            ground_->invalidate();
     }
 }
 void VulkanTerrainStream::error() {
@@ -449,8 +484,7 @@ int VulkanTerrainStream::allocateDetail(TerrainHandle h) {
     return -1;
 }
 bool VulkanTerrainStream::detailValid(TerrainHandle h, uint64_t revision) const {
-    return stream_->valid(h) && revision == meta_[h.index].revision &&
-           stream_->slot(h.index).detailWanted;
+    return stream_->valid(h) && revision == meta_[h.index].revision && stream_->slot(h.index).detailWanted;
 }
 bool VulkanTerrainStream::detailRunnable(uint32_t i) const {
     const auto &s = stream_->slot(i);
@@ -468,8 +502,7 @@ void VulkanTerrainStream::updateDetailDemand(const Camera &camera, const SceneSe
     const bool lodEnabled = settings.lod;
     const float firstRange =
         config_.hierarchical
-            ? terrainHierarchyRange(terrainDetailRangeScale(
-                  qualityScale_, settings.terrainLodQuality && lodEnabled, settings.freezeLod, dt_))
+            ? terrainHierarchyRange(terrainDetailRangeScale(1, false, settings.freezeLod, dt_))
             : range_;
     stats_.detailFirstRange = firstRange;
     priorities_.clear();
@@ -493,8 +526,7 @@ void VulkanTerrainStream::updateDetailDemand(const Camera &camera, const SceneSe
             layout_.levels > 1) {
             const auto offset = stream_->offset(i, camera);
             const auto lo = offset + glm::vec3(0, m.heights.x, 0);
-            const auto hi =
-                offset + glm::vec3(layout_.grid.extent(), m.heights.y, layout_.grid.extent());
+            const auto hi = offset + glm::vec3(layout_.grid.extent(), m.heights.y, layout_.grid.extent());
             if (glm::length(glm::max(glm::max(lo, -hi), glm::vec3(0))) > maximum)
                 continue;
         }
@@ -509,8 +541,8 @@ void VulkanTerrainStream::updateDetailDemand(const Camera &camera, const SceneSe
             return false;
         return a < b;
     });
-    const auto wanted = std::min<size_t>(priorities_.size(),
-                                         detailCapacity_ > 2 ? detailCapacity_ - 2 : detailCapacity_);
+    const auto wanted =
+        std::min<size_t>(priorities_.size(), detailCapacity_ > 2 ? detailCapacity_ - 2 : detailCapacity_);
     stats_.detailEligible = uint32_t(priorities_.size());
     stats_.detailSelected = uint32_t(wanted);
     for (size_t n = 0; n < wanted; ++n)
@@ -594,8 +626,7 @@ TerrainDetailJobSnapshot VulkanTerrainStream::detailJob() const {
         }
     return out;
 }
-void VulkanTerrainStream::beginFrame(uint32_t frame, const Camera &camera,
-                                     const SceneSettings &settings) {
+void VulkanTerrainStream::beginFrame(uint32_t frame, const Camera &camera, const SceneSettings &settings) {
     const int radius = settings.viewRadius;
     auto &f = frames_[frame];
     completed_ = std::max(completed_, f.serial);
@@ -611,9 +642,9 @@ void VulkanTerrainStream::beginFrame(uint32_t frame, const Camera &camera,
     stats_.completedGenerationGroups = stats_.completedGenerationSegments = 0;
     if (f.terrainTimestamp && queryPool_) {
         uint64_t q[4]{};
-        if (vkGetQueryPoolResults(
-                g_.context_.device, queryPool_, frame * queriesPerFrame, 2, sizeof(q), q, 16,
-                VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT) == VK_SUCCESS &&
+        if (vkGetQueryPoolResults(g_.context_.device, queryPool_, frame * queriesPerFrame, 2, sizeof(q), q,
+                                  16, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT) ==
+                VK_SUCCESS &&
             q[1] && q[3])
             stats_.terrainMilliseconds = double(q[2] - q[0]) * timestampPeriod_ / 1e6;
         f.terrainTimestamp = false;
@@ -667,7 +698,7 @@ void VulkanTerrainStream::beginFrame(uint32_t frame, const Camera &camera,
     shadowMissingBoundsCount_ = 0;
     if (config_.hierarchical && settings.terrainVisible && settings.shadows.mode != ShadowMode::Off &&
         settings.lighting.sunEnabled) {
-        const int64_t span = int64_t(1) << stream_->topLevel();
+        const int64_t span = int64_t(1) << stream_->detailedLevel();
         const auto sun = glm::normalize(settings.lighting.sunDirection);
         const double distance = std::min(8192.0, config_.maximumDistance);
         const double dx = double(sun.x) * distance / layout_.grid.extent(),
@@ -684,14 +715,12 @@ void VulkanTerrainStream::beginFrame(uint32_t frame, const Camera &camera,
         // Keep the bounded rectangle nearest the camera. Preserve omitted
         // rectangles as missing casters so truncation never certifies empty space.
         const int64_t nx = std::min<int64_t>(8, x1 - x0 + 1), nz = std::min<int64_t>(8, z1 - z0 + 1);
-        const int64_t ax =
-            std::clamp(terrainFloorDivide(camera.chunk.x, span) - nx / 2, x0, x1 - nx + 1);
-        const int64_t az =
-            std::clamp(terrainFloorDivide(camera.chunk.z, span) - nz / 2, z0, z1 - nz + 1);
+        const int64_t ax = std::clamp(terrainFloorDivide(camera.chunk.x, span) - nx / 2, x0, x1 - nx + 1);
+        const int64_t az = std::clamp(terrainFloorDivide(camera.chunk.z, span) - nz / 2, z0, z1 - nz + 1);
         const int64_t bx = ax + nx - 1, bz = az + nz - 1;
         for (int64_t z = az; z <= bz; ++z)
             for (int64_t x = ax; x <= bx; ++x)
-                shadowDemand_[shadowDemandCount_++] = {x, z, stream_->topLevel()};
+                shadowDemand_[shadowDemandCount_++] = {x, z, stream_->detailedLevel()};
         auto missing = [&](int64_t a, int64_t b, int64_t c, int64_t d) {
             if (a <= c && b <= d)
                 shadowMissingBounds_[shadowMissingBoundsCount_++] = {a, b, c, d};
@@ -706,9 +735,17 @@ void VulkanTerrainStream::beginFrame(uint32_t frame, const Camera &camera,
     stats_.requestedRadius =
         std::clamp(radius, 0, config_.hierarchical ? terrainMaximumRadius(layout_.grid) : 8);
     stats_.effectiveRadius = stream_->radius();
-    stats_.outerRequestedRadius =
-        config_.horizonBytes ? stats_.effectiveRadius * 2 : stats_.effectiveRadius;
+    stats_.outerRequestedRadius = config_.horizonBytes
+                                      ? int(config_.horizonMaximumDistance / layout_.grid.extent())
+                                      : stats_.effectiveRadius;
     stats_.outerEffectiveRadius = stream_->outerRadius();
+    if (config_.horizonBytes) {
+        const double low = -2.0 * settings_.heightScale - settings.atmosphere.datum;
+        const double high = 2.0 * settings_.heightScale - settings.atmosphere.datum;
+        stats_.horizonRequiredDistance = horizonCoverage(settings.atmosphere.planetRadius, low, high);
+        stats_.horizonLimited = stats_.horizonEffectiveDistance < stats_.horizonRequiredDistance ||
+                                camera.local.y > 2.0 * settings_.heightScale + 2000;
+    }
     // Coverage is independent of detail revisions. Accept it after coverage
     // demand, then resolve parent activation before ranking normal requests.
     // Otherwise a just-published inactive child could start detail for one frame.
@@ -778,8 +815,8 @@ void VulkanTerrainStream::beginFrame(uint32_t frame, const Camera &camera,
         }
     }
     if (upload_.lease >= 0 &&
-        (!stream_->valid(upload_.handle) || (upload_.product == TerrainProduct::Detail &&
-                                             !detailValid(upload_.handle, upload_.revision)))) {
+        (!stream_->valid(upload_.handle) ||
+         (upload_.product == TerrainProduct::Detail && !detailValid(upload_.handle, upload_.revision)))) {
         cache_->release(upload_.lease); // Submitted uploads reference frame
                                         // staging, not this payload.
         if (upload_.detail >= 0) {
@@ -804,8 +841,7 @@ void VulkanTerrainStream::beginFrame(uint32_t frame, const Camera &camera,
                 continue;
             if (TerrainDetailPolicy::cooling(
                     elapsed_, meta_[i].restartAfter,
-                    bestPending >= 0 &&
-                        TerrainDetailPolicy::before(meta_[bestPending].rank, meta_[i].rank)))
+                    bestPending >= 0 && TerrainDetailPolicy::before(meta_[bestPending].rank, meta_[i].rank)))
                 continue;
             // Persistence is optional; urgent missing detail can reclaim scratch.
             if (config_.hierarchical && gen_.published && meta_[i].rank.protectedNear)
@@ -846,8 +882,7 @@ void VulkanTerrainStream::beginFrame(uint32_t frame, const Camera &camera,
                     ++stats_.detailReady;
             } else if (s.detailWanted)
                 ++stats_.detailPending;
-        } else if (s.state != TerrainStreamer::State::Empty &&
-                   s.state != TerrainStreamer::State::Retiring)
+        } else if (s.state != TerrainStreamer::State::Empty && s.state != TerrainStreamer::State::Retiring)
             ++stats_.pending;
     }
     stats_.desired = config_.hierarchical
@@ -859,8 +894,8 @@ void VulkanTerrainStream::beginFrame(uint32_t frame, const Camera &camera,
             rangeTarget_ = std::max(rangeTarget_, meta_[i].range);
     range_ = std::min(rangeTarget_, range_ + std::max(64.f, rangeTarget_) * dt_ * 4);
     stats_.transferBytes = stats_.uploadBytes = stats_.cacheReadbackBytes = stats_.directBytes = 0;
-    stats_.dispatches = stats_.generationGroups = stats_.generationGroupBudget =
-        stats_.generationSegments = 0;
+    stats_.dispatches = stats_.generationGroups = stats_.generationGroupBudget = stats_.generationSegments =
+        0;
     stats_.generationEstimatedMilliseconds = 0;
     stats_.generationStop = TerrainGenerationStop::Idle;
 }
@@ -961,6 +996,7 @@ void VulkanTerrainStream::schedule() {
         gen_.handle = h;
         gen_.request = {stream_->slot(h.index).chunk, settings_};
         gen_.active = true;
+        gen_.level = compact(h.index) ? 1 : 0;
         stream_->slot(h.index).state = TerrainStreamer::State::Working;
     };
     auto h = stream_->next(TerrainStreamer::State::Requested);
@@ -968,7 +1004,7 @@ void VulkanTerrainStream::schedule() {
         requestCoverage(h);
     h = stream_->next(TerrainStreamer::State::Generate);
     if (h.index != invalidTerrainSlot && stream_->slot(h.index).visible &&
-        (!config_.hierarchical || stats_.generations % 3 != 2))
+        (!config_.hierarchical || stream_->extendedHorizon() || stats_.generations % 3 != 2))
         generateCoverage(h);
     // Sorted candidates let a better runnable request bypass cooled work.
     // If every better request is busy, even a cooled request may keep scratch
@@ -988,8 +1024,7 @@ void VulkanTerrainStream::schedule() {
     };
     for (auto i : priorities_) {
         const auto &s = stream_->slot(i);
-        if (bestPending < 0 && s.state == TerrainStreamer::State::Resident && s.detailWanted &&
-            s.detail < 0)
+        if (bestPending < 0 && s.state == TerrainStreamer::State::Resident && s.detailWanted && s.detail < 0)
             bestPending = int(i);
         if (!detailRunnable(i))
             continue;
@@ -1041,6 +1076,7 @@ void VulkanTerrainStream::generate(VkCommandBuffer cmd, uint32_t frame) {
     parameters.dimensions.w = layout_.subdivisions;
     parameters.sampling = {layout_.halos[0], layout_.patchCells, layout_.levels,
                            config_.hierarchical ? 1u | (config_.unfilteredHeightReference ? 2u : 0u) |
+                                                      (compact(gen_.handle.index) ? 4u : 0u) |
                                                       (stream_->slot(gen_.handle.index).level << 8)
                                                 : 0u};
     std::memcpy(g_.parameters_[frame].mapped, &parameters, sizeof(parameters));
@@ -1061,6 +1097,8 @@ void VulkanTerrainStream::generate(VkCommandBuffer cmd, uint32_t frame) {
                      : level + stream_->slot(gen_.handle.index).level == 0
                          ? TerrainComputeKernel::TileHeight
                          : TerrainComputeKernel::TileFilteredHeight;
+            if (compact(gen_.handle.index) && level == 0)
+                kernel = TerrainComputeKernel::CompactExpand;
             break;
         case 1:
             level = config_.hierarchical ? (gen_.detailOnly ? gen_.level : layout_.levels - 1) : 0;
@@ -1082,8 +1120,10 @@ void VulkanTerrainStream::generate(VkCommandBuffer cmd, uint32_t frame) {
             width = (layout_.grid.cells / layout_.patchCells) >> level;
             groupSide = 1;
             pipeline = config_.hierarchical ? qualityBoundsPipeline_ : g_.boundsPipeline_;
-            kernel = config_.hierarchical ? TerrainComputeKernel::QualityBounds
-                                          : TerrainComputeKernel::Bounds;
+            kernel =
+                config_.hierarchical ? TerrainComputeKernel::QualityBounds : TerrainComputeKernel::Bounds;
+            if (compact(gen_.handle.index) && level == 0)
+                kernel = TerrainComputeKernel::CompactBounds;
             break;
         default:
             width = layout_.grid.cells + 1;
@@ -1115,8 +1155,7 @@ void VulkanTerrainStream::generate(VkCommandBuffer cmd, uint32_t frame) {
             const glm::uvec4 push[2] = {{width, layout_.halos[std::min(level, layout_.levels - 1)],
                                          layout_.halos[level ? level - 1 : 0], level},
                                         {batch.x * groupSide, batch.y * groupSide, 0, 0}};
-            vkCmdPushConstants(cmd, g_.computeLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push),
-                               push);
+            vkCmdPushConstants(cmd, g_.computeLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), push);
             vkCmdDispatch(cmd, batch.width, batch.height, 1);
             work.consume(batch.groups(), cost);
             gen_.group += batch.groups();
@@ -1128,9 +1167,11 @@ void VulkanTerrainStream::generate(VkCommandBuffer cmd, uint32_t frame) {
             gen_.group = 0;
             memoryBarrier(cmd);
             if (gen_.stage == 0 && config_.hierarchical) {
-                if (++gen_.level > layout_.levels) {
-                    gen_.level = 0;
+                if (compact(gen_.handle.index) && gen_.level == 0)
                     gen_.stage = 1;
+                else if (++gen_.level > layout_.levels) {
+                    gen_.level = 0;
+                    gen_.stage = compact(gen_.handle.index) ? 0 : 1;
                 }
             } else if (gen_.stage == 3 && config_.hierarchical) {
                 if (++gen_.level >= layout_.levels) {
@@ -1170,8 +1211,8 @@ void VulkanTerrainStream::generate(VkCommandBuffer cmd, uint32_t frame) {
     }
 }
 uint64_t VulkanTerrainStream::copyPayload(VkCommandBuffer cmd, uint32_t frame, TerrainProduct product,
-                                          bool uploading, uint64_t offset, uint64_t budget,
-                                          uint32_t slot, int detail) {
+                                          bool uploading, uint64_t offset, uint64_t budget, uint32_t slot,
+                                          int detail) {
     uint64_t copied = 0;
     const auto total = layout_.size(product);
     auto &staging = uploading ? uploads_[frame] : readbacks_[frame];
@@ -1186,7 +1227,17 @@ uint64_t VulkanTerrainStream::copyPayload(VkCommandBuffer cmd, uint32_t frame, T
             if (offset < layout_.boundsOffset) {
                 size = layout_.heightsBytes;
                 buffer = uploading ? heights_.handle : g_.heights_.handle;
-                bufferBase = uploading ? heightStride_ * slot : 0;
+                bufferBase = uploading ? heightOffset(slot) : 0;
+                if (uploading && heightSkip(slot)) {
+                    if (offset < heightSkip(slot)) {
+                        const auto n = std::min(budget, heightSkip(slot) - offset);
+                        offset += n;
+                        copied += n;
+                        budget -= n;
+                        continue;
+                    }
+                    bufferBase -= heightSkip(slot);
+                }
             } else if (offset < layout_.coarseOffset) {
                 start = layout_.boundsOffset;
                 size = layout_.boundsBytes;
@@ -1240,12 +1291,12 @@ uint64_t VulkanTerrainStream::copyPayload(VkCommandBuffer cmd, uint32_t frame, T
                 break;
             VkBufferCopy c = uploading ? VkBufferCopy{copied, bufferBase + local, n}
                                        : VkBufferCopy{bufferBase + local, copied, n};
-            vkCmdCopyBuffer(cmd, uploading ? staging.handle : buffer,
-                            uploading ? buffer : staging.handle, 1, &c);
+            vkCmdCopyBuffer(cmd, uploading ? staging.handle : buffer, uploading ? buffer : staging.handle, 1,
+                            &c);
         }
         if (uploading)
-            std::memcpy(static_cast<uint8_t *>(staging.mapped) + copied,
-                        cache_->data(upload_.lease) + offset, size_t(n));
+            std::memcpy(static_cast<uint8_t *>(staging.mapped) + copied, cache_->data(upload_.lease) + offset,
+                        size_t(n));
         copied += n;
         offset += n;
         budget -= n;
@@ -1280,8 +1331,12 @@ bool VulkanTerrainStream::directPublication(VkCommandBuffer cmd, uint32_t frame,
     while (gen_.directOffset < total && budget >= 16) {
         const uint64_t offset = gen_.directOffset;
         if (product == TerrainProduct::Coverage && offset < layout_.boundsOffset) {
+            if (offset < heightSkip(h.index)) {
+                gen_.directOffset = heightSkip(h.index);
+                continue;
+            }
             const auto n = std::min(budget & ~uint64_t(7), layout_.heightsBytes - offset);
-            VkBufferCopy c{offset, heightStride_ * h.index + offset, n};
+            VkBufferCopy c{offset, heightOffset(h.index) + offset - heightSkip(h.index), n};
             vkCmdCopyBuffer(cmd, g_.heights_.handle, heights_.handle, 1, &c);
             gen_.directOffset += n;
             budget -= n;
@@ -1310,8 +1365,7 @@ bool VulkanTerrainStream::directPublication(VkCommandBuffer cmd, uint32_t frame,
         c.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, layer, 1};
         c.dstSubresource = {
             VK_IMAGE_ASPECT_COLOR_BIT, 0,
-            (product == TerrainProduct::Coverage ? h.index : uint32_t(gen_.directDetail)) * 2 + layer,
-            1};
+            (product == TerrainProduct::Coverage ? h.index : uint32_t(gen_.directDetail)) * 2 + layer, 1};
         c.srcOffset = c.dstOffset = {0, int32_t(y), 0};
         c.extent = {width, rows, 1};
         vkCmdCopyImage(cmd, g_.normalImages_[level], VK_IMAGE_LAYOUT_GENERAL,
@@ -1425,8 +1479,7 @@ void VulkanTerrainStream::transfer(VkCommandBuffer cmd, uint32_t frame, uint64_t
         return;
     }
     if (gen_.active && !gen_.cancelled && gen_.stage == 5 && stream_->valid(gen_.handle) &&
-        completed_ >= gen_.readyAfter && !gen_.exportPending &&
-        (!config_.hierarchical || gen_.published)) {
+        completed_ >= gen_.readyAfter && !gen_.exportPending && (!config_.hierarchical || gen_.published)) {
         if (gen_.lease < 0)
             gen_.lease = cache_->acquire();
         if (gen_.lease >= 0) {
@@ -1447,8 +1500,7 @@ void VulkanTerrainStream::transfer(VkCommandBuffer cmd, uint32_t frame, uint64_t
 void VulkanTerrainStream::record(VkCommandBuffer cmd, uint32_t frame) {
     if (queryPool_) {
         vkCmdResetQueryPool(cmd, queryPool_, frame * queriesPerFrame, 2);
-        vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, queryPool_,
-                             frame * queriesPerFrame);
+        vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, queryPool_, frame * queriesPerFrame);
         frames_[frame].terrainTimestamp = true;
     }
     if (!imagesInitialized_) {
@@ -1473,24 +1525,35 @@ void VulkanTerrainStream::prepareDraw(uint32_t frame, const Camera &camera, cons
     const auto eye = camera.terrainOffset(observer.chunk, layout_.grid) + glm::vec3(observer.local);
     struct View {
         glm::mat4 matrix;
-        glm::vec4 observer, grid, camera, clip;
+        glm::vec4 observer, grid, camera, clip, curvature, shadowClip;
     };
     const View view{
-        vp, glm::vec4(eye, 0),
-        glm::vec4(layout_.grid.cells, layout_.grid.spacing, layout_.subdivisions,
-                  layout_.patchCells),
+        vp,
+        glm::vec4(eye, 0),
+        glm::vec4(layout_.grid.cells, layout_.grid.spacing, layout_.subdivisions, layout_.patchCells),
         config_.hierarchical ? glm::vec4(glm::vec3(camera.local), 0) : glm::vec4(0),
         glm::vec4(-stream_->outerRadius() * layout_.grid.extent() - camera.local.x,
                   -stream_->outerRadius() * layout_.grid.extent() - camera.local.z,
                   (stream_->outerRadius() + 1) * layout_.grid.extent() - camera.local.x,
-                  (stream_->outerRadius() + 1) * layout_.grid.extent() - camera.local.z)};
+                  (stream_->outerRadius() + 1) * layout_.grid.extent() - camera.local.z),
+        camera.curvature,
+        glm::vec4(-stream_->radius() * layout_.grid.extent() - camera.local.x,
+                  -stream_->radius() * layout_.grid.extent() - camera.local.z,
+                  (stream_->radius() + 1) * layout_.grid.extent() - camera.local.x,
+                  (stream_->radius() + 1) * layout_.grid.extent() - camera.local.z)};
     std::memcpy(views_[frame].mapped, &view, sizeof(view));
     lod_->collectCasters(settings.shadows.mode != ShadowMode::Off && settings.lighting.sunEnabled &&
                          !settings.wireframe);
     activeCoords_.clear();
     activeSlots_.clear();
-    if (config_.hierarchical)
+    if (config_.hierarchical) {
         lod_->beginHierarchy(camera, observer, vp, stream_->outerRadius());
+        if (!settings.freezeLod || qualityFocalPixels_ == 0)
+            qualityFocalPixels_ = float(viewportHeight) * .5f / std::tan(glm::radians(30.f));
+        ground_->begin(camera, observer, vp, qualityFocalPixels_, settings.terrainLodQuality,
+                       settings.terrainLodPixelError, settings.freezeLod, settings.frustumCulling,
+                       settings.eroded, settings.lod);
+    }
     for (uint32_t i = 0; i < capacity_; ++i) {
         auto &s = stream_->slot(i);
         if (s.state != TerrainStreamer::State::Resident || !s.visible || meta_[i].range > range_)
@@ -1506,16 +1569,13 @@ void VulkanTerrainStream::prepareDraw(uint32_t frame, const Camera &camera, cons
         s.lastUse = serial_ + 1;
         if (config_.hierarchical) {
             const auto scale = int64_t(1) << s.level;
-            auto envelope = meta_[i].heights;
             const int parent = stream_->findTile(terrainParent(s.tile()));
             if (parent >= 0 && stream_->slot(parent).state == TerrainStreamer::State::Resident) {
-                envelope.x = std::min(envelope.x, meta_[parent].heights.x);
-                envelope.y = std::max(envelope.y, meta_[parent].heights.y);
                 stream_->slot(parent).lastUse = serial_ + 1;
                 stream_->weights(uint32_t(parent), weights + 32);
             }
-            lod_->selectTile(i, {s.chunk.x * scale, s.chunk.z * scale}, s.level, s.drawMask,
-                             settings.lod, settings.frustumCulling, envelope);
+            ground_->tile(i, {s.chunk.x * scale, s.chunk.z * scale}, s.level, s.drawMask,
+                          stream_->extendedHorizon() && s.level >= stream_->detailedLevel() ? 1 : 0);
         } else {
             activeCoords_.push_back(s.chunk);
             activeSlots_.push_back(i);
@@ -1526,138 +1586,102 @@ void VulkanTerrainStream::prepareDraw(uint32_t frame, const Camera &camera, cons
     if (!config_.hierarchical)
         lod_->select(activeCoords_.data(), activeSlots_.data(), uint32_t(activeSlots_.size()), camera,
                      observer, vp, settings.lod, settings.frustumCulling, true, range_);
-    if (config_.hierarchical) {
-        const auto baseline = lod_->stats().triangles;
-        const float target = std::clamp(settings.terrainLodPixelError, .5f, 8.f);
-        if (!settings.freezeLod || qualityFocalPixels_ == 0)
-            qualityFocalPixels_ = float(viewportHeight) * .5f / std::tan(glm::radians(30.f));
-        const auto error = [&](const TerrainPatchDraw &p) {
-            const auto &tile = stream_->slot(p.slot);
-            const auto scale = int64_t(1) << tile.level;
-            return lod_->projectedError(p, {tile.chunk.x * scale, tile.chunk.z * scale}, tile.level,
-                                        observer, qualityFocalPixels_, settings.eroded);
-        };
-        const auto select = [&](float scale) {
-            lod_->beginHierarchy(camera, observer, vp, stream_->outerRadius(),
-                                 terrainHierarchyRange(scale));
-            for (uint32_t i = 0; i < capacity_; ++i) {
-                const auto &tile = stream_->slot(i);
-                if (tile.state != TerrainStreamer::State::Resident || !tile.visible)
-                    continue;
-                const auto stride = int64_t(1) << tile.level;
-                auto envelope = meta_[i].heights;
-                const int parent = stream_->findTile(terrainParent(tile.tile()));
-                if (parent >= 0 && stream_->slot(parent).state == TerrainStreamer::State::Resident)
-                    envelope = {std::min(envelope.x, meta_[parent].heights.x),
-                                std::max(envelope.y, meta_[parent].heights.y)};
-                lod_->selectTile(i, {tile.chunk.x * stride, tile.chunk.z * stride}, tile.level,
-                                 tile.drawMask, settings.lod, settings.frustumCulling, envelope);
-            }
-        };
-        float maximum = 0;
-        for (const auto &p : lod_->draws())
-            maximum = std::max(maximum, error(p));
-        float desired = maximum < target * .5f ? 1.f : qualityScale_;
-        if (settings.terrainLodQuality && settings.lod && maximum > target)
-            desired = std::clamp(std::sqrt(maximum / target), 1.f, terrainLodMaximumScale);
-        // One shared scale preserves the nesting and coherent anchor proof.
-        // Eight bounded trial selections enforce the geometry allowance.
-        float proposed = qualityScale_ + std::clamp(desired - qualityScale_, -dt_ * terrainLodScaleSlew,
-                                                    dt_ * terrainLodScaleSlew);
-        if (settings.freezeLod)
-            proposed = qualityScale_;
-        if (!settings.terrainLodQuality || !settings.lod)
-            proposed = 1;
-        float lo = 1, hi = proposed;
-        select(proposed);
-        bool limited = lod_->stats().triangles > baseline * 2;
-        if (limited) {
-            for (int iteration = 0; iteration < 8; ++iteration) {
-                const float mid = (lo + hi) * .5f;
-                select(mid);
-                if (lod_->stats().triangles <= baseline * 2)
-                    lo = mid;
-                else
-                    hi = mid;
-            }
-            proposed = lo;
-            select(proposed);
-        }
-        qualityScale_ = proposed;
-        maximum = 0;
-        uint32_t over = 0;
-        for (const auto &p : lod_->draws()) {
-            const float e = error(p);
-            maximum = std::max(maximum, e);
-            over += e > target;
-        }
-        lod_->qualityStats(baseline, maximum, over, limited || (over && proposed >= 1.999f));
+    if (ground_) {
+        ground_->finish(*lod_, g_.patchTopology_);
+        qualityScale_ = 1;
     }
 }
-void VulkanTerrainStream::collectDrawRecords(uint32_t frame, const Camera &camera,
-                                             const Camera &observer, const SceneSettings &settings,
-                                             bool casters, std::vector<DrawRecord> &records) {
+void VulkanTerrainStream::collectDrawRecords(uint32_t frame, const Camera &camera, const Camera &observer,
+                                             const SceneSettings &settings, bool casters,
+                                             std::vector<DrawRecord> &records) {
     records.clear();
-    uint32_t order = 0;
-    for (const auto &patch : (casters ? lod_->casterDraws() : lod_->draws())) {
-        auto &s = stream_->slot(patch.slot);
-        s.lastUse = serial_ + 1;
-        const auto set = sets_[(frame * capacity_ + patch.slot) * layout_.levels + patch.level];
-        const auto indices = g_.patchTopology_.ranges[patch.mask];
-        const float range = lod_->stats().firstRange * patch.step * stream_->scale(patch.slot);
-        struct Draw {
-            glm::vec4 offset;
-            glm::uvec4 options, patch;
-            glm::vec4 morph;
-            glm::uvec4 normals, indices, parent;
-            glm::vec4 tile;
-        };
-        const int parent = config_.hierarchical && !patch.exterior && s.level < stream_->topLevel()
-                               ? stream_->findTile(terrainParent(s.tile()))
-                               : -1;
-        const uint32_t qx = uint32_t(s.chunk.x - terrainFloorDivide(s.chunk.x, 2) * 2);
-        const uint32_t qz = uint32_t(s.chunk.z - terrainFloorDivide(s.chunk.z, 2) * 2);
-        auto offset = stream_->offset(patch.slot, camera);
-        if (config_.hierarchical) {
-            const auto scale = int64_t(1) << s.level;
-            offset = {float(double(s.chunk.x * scale - camera.chunk.x) * layout_.grid.extent()), 0,
-                      float(double(s.chunk.z * scale - camera.chunk.z) * layout_.grid.extent())};
+    for (uint32_t pass = 0; pass < (casters && ground_ ? 2u : 1u); ++pass) {
+        uint32_t order = 0;
+        const auto &patches = ground_ && pass == 0 ? (casters ? ground_->casters() : ground_->draws())
+                                                   : (casters ? lod_->casterDraws() : lod_->draws());
+        for (const auto &patch : patches) {
+            auto &s = stream_->slot(patch.slot);
+            s.lastUse = serial_ + 1;
+            uint32_t normalLevel = patch.level;
+            if (patch.cells) {
+                const auto scale = int64_t(1) << s.level;
+                const auto base = camera.terrainOffset({s.chunk.x * scale, s.chunk.z * scale}, layout_.grid);
+                const auto eye =
+                    camera.terrainOffset(observer.chunk, layout_.grid) + glm::vec3(observer.local);
+                auto lo = base +
+                          glm::vec3(patch.x * layout_.grid.spacing * scale, 0,
+                                    patch.z * layout_.grid.spacing * scale) -
+                          eye;
+                auto hi = lo + glm::vec3(patch.cells * patch.step * layout_.grid.spacing * scale, 0,
+                                         patch.cells * patch.step * layout_.grid.spacing * scale);
+                lo.y = hi.y = 0;
+                const float dist = glm::length(glm::max(glm::max(lo, -hi), glm::vec3(0)));
+                const float relative =
+                    std::max(0.f, std::floor(std::log2(std::max(dist / 64.f, 1e-6f))) + 1 - float(s.level));
+                normalLevel = std::min(uint32_t(relative), layout_.levels - 1);
+            }
+            const auto set = sets_[(frame * capacity_ + patch.slot) * layout_.levels + normalLevel];
+            const auto indices =
+                patch.cells ? g_.patchTopology_.stitched[patch.edges] : g_.patchTopology_.ranges[patch.mask];
+            const float range = lod_->stats().firstRange * patch.step * stream_->scale(patch.slot);
+            struct Draw {
+                glm::vec4 offset;
+                glm::uvec4 options, patch;
+                glm::vec4 morph;
+                glm::uvec4 normals, indices, parent;
+                glm::vec4 tile;
+            };
+            const int parent = config_.hierarchical && !patch.exterior && s.level < stream_->topLevel()
+                                   ? stream_->findTile(terrainParent(s.tile()))
+                                   : -1;
+            const uint32_t qx = uint32_t(s.chunk.x - terrainFloorDivide(s.chunk.x, 2) * 2);
+            const uint32_t qz = uint32_t(s.chunk.z - terrainFloorDivide(s.chunk.z, 2) * 2);
+            auto offset = stream_->offset(patch.slot, camera);
+            if (config_.hierarchical) {
+                const auto scale = int64_t(1) << s.level;
+                offset = {float(double(s.chunk.x * scale - camera.chunk.x) * layout_.grid.extent()), 0,
+                          float(double(s.chunk.z * scale - camera.chunk.z) * layout_.grid.extent())};
+            }
+            const Draw draw{
+                glm::vec4(offset, 0),
+                {settings.eroded, settings.filteredNormals, layout_.grid.cells,
+                 (settings.normalView ? 1u : 0u) | (settings.wireframe ? 2u : 0u) |
+                     (settings.chunkBorders ? 4u : 0u) | (settings.lodColours ? 12u : 0u) |
+                     (patch.exterior ? 16u : 0u) | (compact(patch.slot) ? 32u : 0u) |
+                     (stream_->extendedHorizon() && s.level >= stream_->detailedLevel() ? 64u : 0u) |
+                     (ground_ ? 128u : 0u) | (patch.edges << 8) | (patch.corners << 12)},
+                {patch.x, patch.z, patch.step, patch.cells ? patch.cells : layout_.patchCells},
+                {range * .75f, range, float(patch.level),
+                 settings.lod && (patch.level + 1 < layout_.levels || parent >= 0) ? 1.f : 0.f},
+                {layout_.halos[patch.level], layout_.halos[std::min(patch.level + 1, layout_.levels - 1)],
+                 patch.cells ? normalLevel : layout_.subdivisions, uint32_t(s.detail)},
+                {indices.first, patch.slot,
+                 parent >= 0 ? uint32_t(stream_->slot(parent).detail) : invalidTerrainSlot,
+                 layout_.levels - 1},
+                {parent >= 0 ? uint32_t(parent) : invalidTerrainSlot, qx * layout_.grid.cells / 2,
+                 qz * layout_.grid.cells / 2, uint32_t(heightStride_ / 8)},
+                {layout_.grid.spacing * stream_->scale(patch.slot), config_.hierarchical ? 1.f : 0.f,
+                 float(s.level),
+                 settings.terrainLodErrorView
+                     ? std::min(1.f, lod_->projectedError(patch,
+                                                          {s.chunk.x * (int64_t(1) << s.level),
+                                                           s.chunk.z * (int64_t(1) << s.level)},
+                                                          s.level, observer, qualityFocalPixels_,
+                                                          settings.eroded) /
+                                         std::max(.5f, settings.terrainLodPixelError))
+                     : -1.f}};
+            DrawRecord record{};
+            record.set = set;
+            record.count = indices.count;
+            record.first = indices.first;
+            record.group = patch.slot * layout_.levels + normalLevel;
+            record.order = order;
+            record.bounds =
+                (ground_ && pass == 0 ? (casters ? ground_->casterBounds() : ground_->bounds())
+                                      : (casters ? lod_->casterBounds() : lod_->drawBounds()))[order++];
+            std::memcpy(record.constants.data(), &draw, sizeof(draw));
+            records.push_back(record);
         }
-        const Draw draw{
-            glm::vec4(offset, 0),
-            {settings.eroded, settings.filteredNormals, layout_.grid.cells,
-             (settings.normalView ? 1u : 0u) | (settings.wireframe ? 2u : 0u) |
-                 (settings.chunkBorders ? 4u : 0u) | (settings.lodColours ? 8u : 0u) |
-                 (patch.exterior ? 16u : 0u)},
-            {patch.x, patch.z, patch.step, layout_.patchCells},
-            {range * .75f, range, float(patch.level),
-             settings.lod && (patch.level + 1 < layout_.levels || parent >= 0) ? 1.f : 0.f},
-            {layout_.halos[patch.level], layout_.halos[std::min(patch.level + 1, layout_.levels - 1)],
-             layout_.subdivisions, uint32_t(s.detail)},
-            {indices.first, patch.slot,
-             parent >= 0 ? uint32_t(stream_->slot(parent).detail) : invalidTerrainSlot,
-             layout_.levels - 1},
-            {parent >= 0 ? uint32_t(parent) : invalidTerrainSlot, qx * layout_.grid.cells / 2,
-             qz * layout_.grid.cells / 2, uint32_t(heightStride_ / 8)},
-            {layout_.grid.spacing * stream_->scale(patch.slot), config_.hierarchical ? 1.f : 0.f,
-             float(s.level),
-             settings.terrainLodErrorView
-                 ? std::min(1.f, lod_->projectedError(patch,
-                                                      {s.chunk.x * (int64_t(1) << s.level),
-                                                       s.chunk.z * (int64_t(1) << s.level)},
-                                                      s.level, observer, qualityFocalPixels_,
-                                                      settings.eroded) /
-                                     std::max(.5f, settings.terrainLodPixelError))
-                 : -1.f}};
-        DrawRecord record{};
-        record.set = set;
-        record.count = indices.count;
-        record.first = indices.first;
-        record.group = patch.slot * layout_.levels + patch.level;
-        record.order = order;
-        record.bounds = (casters ? lod_->casterBounds() : lod_->drawBounds())[order++];
-        std::memcpy(record.constants.data(), &draw, sizeof(draw));
-        records.push_back(record);
     }
 }
 void VulkanTerrainStream::prepareVisibility(VulkanVisibility &visibility, uint32_t frame,
@@ -1668,10 +1692,9 @@ void VulkanTerrainStream::prepareVisibility(VulkanVisibility &visibility, uint32
     collectDrawRecords(frame, camera, observer, settings, false, preparedDraws_);
     if (config_.vertexDiagnostics)
         diagnosticDraws_.assign(preparedDraws_.begin(), preparedDraws_.end());
-    std::sort(preparedDraws_.begin(), preparedDraws_.end(),
-              [](const DrawRecord &a, const DrawRecord &b) {
-                  return a.group != b.group ? a.group < b.group : a.order < b.order;
-              });
+    std::sort(preparedDraws_.begin(), preparedDraws_.end(), [](const DrawRecord &a, const DrawRecord &b) {
+        return a.group != b.group ? a.group < b.group : a.order < b.order;
+    });
     if (post)
         std::memcpy(views_[frame].mapped, &post->view().raster, sizeof(glm::mat4));
     history_.begin(post && post->stats().historyValid);
@@ -1684,10 +1707,9 @@ void VulkanTerrainStream::prepareVisibility(VulkanVisibility &visibility, uint32
             TemporalTerrainRecord current{};
             current.draw = record.constants;
             std::memcpy(current.weights.data(),
-                        static_cast<const uint8_t *>(weights_[frame].mapped) + weightStride_ * slot,
-                        192);
-            current.observer = glm::vec4(
-                camera.terrainOffset(observer.chunk, layout_.grid) + glm::vec3(observer.local), 0);
+                        static_cast<const uint8_t *>(weights_[frame].mapped) + weightStride_ * slot, 192);
+            current.observer =
+                glm::vec4(camera.terrainOffset(observer.chunk, layout_.grid) + glm::vec3(observer.local), 0);
             current.camera = config_.hierarchical ? glm::vec4(glm::vec3(camera.local), 0) : glm::vec4(0);
             current.valid.x = 1;
             TemporalTerrainKey key;
@@ -1698,7 +1720,8 @@ void VulkanTerrainStream::prepareVisibility(VulkanVisibility &visibility, uint32
                          (uint64_t(record.constants[2].x) << 32) | record.constants[2].y,
                          (uint64_t(record.constants[2].z) << 32) | record.first,
                          (uint64_t(record.count) << 32) | resident.level,
-                         (uint64_t(settings.eroded) << 63) ^ meta_[slot].revision ^
+                         (uint64_t(settings.eroded) << 63) ^
+                             (uint64_t(record.constants[1].w & 0xff00u) << 32) ^ meta_[slot].revision ^
                              uint64_t(uint32_t(resident.detail))};
             post->terrainRecord(temporalIndex, history_.append(key, current));
         }
@@ -1709,8 +1732,7 @@ void VulkanTerrainStream::prepareVisibility(VulkanVisibility &visibility, uint32
     }
 }
 void VulkanTerrainStream::draw(VkCommandBuffer cmd, uint32_t frame, const Camera &, const Camera &,
-                               const SceneSettings &settings, bool finalPass,
-                               VulkanVisibility *visibility) {
+                               const SceneSettings &settings, bool finalPass, VulkanVisibility *visibility) {
     vkCmdBindIndexBuffer(cmd, g_.patchIndices_.handle, 0, VK_INDEX_TYPE_UINT32);
     if (visibility)
         visibility->bindRecords(cmd, graphicsLayout_);
@@ -1721,8 +1743,8 @@ void VulkanTerrainStream::draw(VkCommandBuffer cmd, uint32_t frame, const Camera
         if (indirect && previous == record.batch)
             continue;
         previous = record.batch;
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsLayout_, 0, 1, &record.set,
-                                0, nullptr);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsLayout_, 0, 1, &record.set, 0,
+                                nullptr);
         auto constants = record.constants;
         if (indirect)
             constants[1].w |= 0x80000000u;
@@ -1741,11 +1763,15 @@ void VulkanTerrainStream::draw(VkCommandBuffer cmd, uint32_t frame, const Camera
         vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, queryPool_,
                              frame * queriesPerFrame + 1);
 }
-void VulkanTerrainStream::prepareShadows(uint32_t frame, const Camera &camera,
-                                         const SceneSettings &settings, VulkanShadows &shadows) {
+void VulkanTerrainStream::prepareShadows(uint32_t frame, const Camera &camera, const SceneSettings &settings,
+                                         VulkanShadows &shadows) {
     shadowDraws_.clear();
     if (!shadows.active() || !settings.terrainVisible)
         return;
+    const auto missing = [&](VisibilityBounds bounds) {
+        curveBounds(bounds.lo, bounds.hi, camera.curvature);
+        shadows.missing(bounds);
+    };
     stats_.shadowRequested = shadowDemandCount_;
     stats_.shadowMissing = 0;
     for (uint32_t i = 0; i < shadowDemandCount_; ++i) {
@@ -1758,51 +1784,46 @@ void VulkanTerrainStream::prepareShadows(uint32_t frame, const Camera &camera,
                 float(double(key.x * scale - camera.chunk.x) * layout_.grid.extent() - camera.local.x),
                 -2 * settings_.heightScale - float(camera.local.y),
                 float(double(key.z * scale - camera.chunk.z) * layout_.grid.extent() - camera.local.z)};
-            shadows.missing(
-                {lo,
-                 lo + glm::vec3(float(scale * layout_.grid.extent()), 4 * settings_.heightScale,
-                                float(scale * layout_.grid.extent())),
-                 true});
+            missing({lo,
+                     lo + glm::vec3(float(scale * layout_.grid.extent()), 4 * settings_.heightScale,
+                                    float(scale * layout_.grid.extent())),
+                     true});
         }
     }
 
     for (uint32_t i = 0; i < shadowMissingBoundsCount_; ++i) {
         const auto &b = shadowMissingBounds_[i];
-        const int64_t scale = int64_t(1) << stream_->topLevel();
-        glm::vec3 lo{
-            float(double(b[0] * scale - camera.chunk.x) * layout_.grid.extent() - camera.local.x),
-            -2 * settings_.heightScale - float(camera.local.y),
-            float(double(b[1] * scale - camera.chunk.z) * layout_.grid.extent() - camera.local.z)};
-        shadows.missing({lo,
-                         lo + glm::vec3(float((b[2] - b[0] + 1) * scale * layout_.grid.extent()),
-                                        4 * settings_.heightScale,
-                                        float((b[3] - b[1] + 1) * scale * layout_.grid.extent())),
-                         true});
+        const int64_t scale = int64_t(1) << stream_->detailedLevel();
+        glm::vec3 lo{float(double(b[0] * scale - camera.chunk.x) * layout_.grid.extent() - camera.local.x),
+                     -2 * settings_.heightScale - float(camera.local.y),
+                     float(double(b[1] * scale - camera.chunk.z) * layout_.grid.extent() - camera.local.z)};
+        missing({lo,
+                 lo + glm::vec3(float((b[2] - b[0] + 1) * scale * layout_.grid.extent()),
+                                4 * settings_.heightScale,
+                                float((b[3] - b[1] + 1) * scale * layout_.grid.extent())),
+                 true});
         ++stats_.shadowMissing;
     }
 
-    // Extra root tiles only cast outside the camera footprint. The shader clips
-    // them against the exact same boundary used by camera terrain.
+    // Shadow coverage retains the detailed footprint even when visible terrain extends farther.
     if (config_.hierarchical)
         for (uint32_t slot = 0; slot < capacity_; ++slot) {
             auto &tile = stream_->slot(slot);
-            if (tile.state != TerrainStreamer::State::Resident || tile.level != stream_->topLevel())
+            if (tile.state != TerrainStreamer::State::Resident || tile.level != stream_->detailedLevel())
                 continue;
             const int64_t scale = int64_t(1) << tile.level;
-            lod_->selectExteriorTile(slot, {tile.chunk.x * scale, tile.chunk.z * scale}, tile.level,
-                                     meta_[slot].heights);
+            lod_->selectExteriorTile(slot, {tile.chunk.x * scale, tile.chunk.z * scale}, tile.level);
             if (!tile.visible) {
                 float weights[48];
                 std::fill_n(weights, 48, 1.f);
-                std::memcpy(static_cast<uint8_t *>(weights_[frame].mapped) + weightStride_ * slot,
-                            weights, sizeof(weights));
+                std::memcpy(static_cast<uint8_t *>(weights_[frame].mapped) + weightStride_ * slot, weights,
+                            sizeof(weights));
             }
         }
     collectDrawRecords(frame, camera, camera, settings, true, casterRecords_);
-    std::sort(casterRecords_.begin(), casterRecords_.end(),
-              [](const DrawRecord &a, const DrawRecord &b) {
-                  return a.group != b.group ? a.group < b.group : a.order < b.order;
-              });
+    std::sort(casterRecords_.begin(), casterRecords_.end(), [](const DrawRecord &a, const DrawRecord &b) {
+        return a.group != b.group ? a.group < b.group : a.order < b.order;
+    });
     for (const auto &record : casterRecords_) {
         auto caster =
             shadows.append(record.bounds, record.count, record.first, 0, record.constants.data(), 128);
@@ -1811,8 +1832,7 @@ void VulkanTerrainStream::prepareShadows(uint32_t frame, const Camera &camera,
     }
 }
 
-void VulkanTerrainStream::drawShadows(VkCommandBuffer cmd, VkPipelineLayout layout,
-                                      VulkanShadows &shadows) {
+void VulkanTerrainStream::drawShadows(VkCommandBuffer cmd, VkPipelineLayout layout, VulkanShadows &shadows) {
     vkCmdBindIndexBuffer(cmd, g_.patchIndices_.handle, 0, VK_INDEX_TYPE_UINT32);
     shadows.bind(cmd, layout);
     for (size_t i = 0; i < shadowDraws_.size();) {
@@ -1821,8 +1841,7 @@ void VulkanTerrainStream::drawShadows(VkCommandBuffer cmd, VkPipelineLayout layo
         while (end < shadowDraws_.size() && shadowDraws_[end].set == draw.set &&
                shadowDraws_[end].caster == draw.caster + end - i)
             ++end;
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &draw.set, 0,
-                                nullptr);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &draw.set, 0, nullptr);
         shadows.drawRange(cmd, draw.caster, uint32_t(end - i));
         i = end;
     }
@@ -1836,12 +1855,13 @@ std::vector<glm::vec2> VulkanTerrainStream::readHeights(ChunkCoord coord, uint32
     const int i = stream_->findTile({coord.x, coord.z, tileLevel});
     if (i < 0 || stream_->slot(uint32_t(i)).state != TerrainStreamer::State::Resident)
         throw std::invalid_argument("Chunk is not resident");
-    if (geometryLevel > (config_.hierarchical ? layout_.levels : 0))
+    if ((compact(uint32_t(i)) && geometryLevel == 0) ||
+        geometryLevel > (config_.hierarchical ? layout_.levels : 0))
         throw std::invalid_argument("Height level outside resident representation");
     const size_t width = (layout_.grid.cells >> geometryLevel) + 1;
     std::vector<glm::vec2> result(width * width);
     g_.readBuffer(heights_, result.data(), result.size() * sizeof(glm::vec2),
-                  heightStride_ * uint32_t(i) + layout_.heightOffsets[geometryLevel]);
+                  heightOffset(uint32_t(i)) + layout_.heightOffsets[geometryLevel] - heightSkip(uint32_t(i)));
     return result;
 }
 std::vector<glm::vec4> VulkanTerrainStream::readNormals(ChunkCoord coord, uint32_t level,
@@ -1881,8 +1901,7 @@ std::vector<glm::vec4> VulkanTerrainStream::readNormals(ChunkCoord coord, uint32
         std::vector<glm::vec4> out(count);
         const auto *packed = static_cast<const uint32_t *>(read.mapped);
         for (size_t i = 0; i < count; ++i)
-            out[i] =
-                glm::vec4(glm::unpackHalf2x16(packed[i * 2]), glm::unpackHalf2x16(packed[i * 2 + 1]));
+            out[i] = glm::vec4(glm::unpackHalf2x16(packed[i * 2]), glm::unpackHalf2x16(packed[i * 2 + 1]));
         g_.destroyBuffer(read);
         return out;
     } catch (...) {
@@ -1912,14 +1931,14 @@ std::vector<glm::vec4> VulkanTerrainStream::readVertexPositions() {
     if (!vertexProbePipeline_)
         throw std::invalid_argument("Vertex diagnostics disabled");
     check(vkDeviceWaitIdle(g_.context_.device), "Wait for vertex diagnostic");
-    const auto vertices = (layout_.patchCells + 1) * (layout_.patchCells + 1);
+    const auto cells = ground_ ? layout_.patchCells / 2 : layout_.patchCells;
+    const auto vertices = (cells + 1) * (cells + 1);
     std::vector<glm::vec4> result(diagnosticDraws_.size() * vertices);
     if (result.empty())
         return result;
     Buffer output;
     try {
-        g_.createBuffer(output, result.size() * sizeof(glm::vec4), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                        true);
+        g_.createBuffer(output, result.size() * sizeof(glm::vec4), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
         for (const auto &draw : diagnosticDraws_) {
             VkDescriptorBufferInfo buffer{output.handle, 0, output.size};
             VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
@@ -1938,8 +1957,8 @@ std::vector<glm::vec4> VulkanTerrainStream::readVertexPositions() {
             float f = float(offset);
             std::memcpy(&draw.constants[7].w, &f, 4);
             draw.constants[1].w &= ~2u; // Linear patch vertices, independent of wireframe index pulling.
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, graphicsLayout_, 0, 1,
-                                    &draw.set, 0, nullptr);
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, graphicsLayout_, 0, 1, &draw.set, 0,
+                                    nullptr);
             vkCmdPushConstants(cmd, graphicsLayout_,
                                VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT |
                                    VK_SHADER_STAGE_COMPUTE_BIT,

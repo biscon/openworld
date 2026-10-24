@@ -47,17 +47,21 @@ int main() {
         lod.select(chunks, 1, c, c, c.viewProjection(1), true, false, false);
         for (auto b : lod.drawBounds())
             require(!b.valid, "Unready terrain bounds render");
+        std::array<ow::TerrainPatchMetadata, 21> endpoints;
+        endpoints.fill({{-6, 10}, {}, {}, {}});
+        lod.setQualityMetadata(0, endpoints.data());
         lod.beginHierarchy(c, c, c.viewProjection(1), 2);
-        lod.selectTile(0, {}, 0, 15, true, false, {-20, 30});
+        lod.selectTile(0, {}, 0, 15, true, false);
         require(lod.draws().size() == lod.drawBounds().size(), "Selection carries bounds");
         for (auto b : lod.drawBounds())
-            require(b.valid && b.lo.y <= -24 && b.hi.y >= 26, "Parent envelope included in selected bounds");
+            require(b.valid && b.lo.y <= -10 && b.hi.y >= 6 && b.lo.y > -11 && b.hi.y < 7,
+                    "Bounds retain patch endpoints without unrelated whole-tile extrema");
         const auto before = allocations;
         for (int i = 0; i < 1000; ++i) {
             c.local.z = 18 + i * .01;
             lod.select(chunks, 1, c, c, c.viewProjection(1), true, false, true);
             lod.beginHierarchy(c, c, c.viewProjection(1), 2);
-            lod.selectTile(0, {}, 0, 15, true, false, {-20, 30});
+            lod.selectTile(0, {}, 0, 15, true, false);
         }
         require(before == allocations, "Repeated terrain candidate/bounds preparation does not allocate");
         std::cout << "Visibility CPU passed\n";

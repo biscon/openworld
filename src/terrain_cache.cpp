@@ -57,7 +57,10 @@ std::array<uint8_t, 128> TerrainCache::header(const TerrainCacheKey &k) const {
     f(k.request.settings.erosionWavelength);
     u(k.shaderFingerprint, 8);
     u(k.deviceFingerprint, 8);
-    u(layout_.size(k.product), 8);
+    u(layout_.size(k.product) - (k.representation == 13 && k.product == TerrainProduct::Coverage
+                                     ? layout_.heightOffsets[1]
+                                     : 0),
+      8);
     u(k.tileLevel);
     f(k.request.settings.ridgeStrength);
     f(k.request.settings.baseDetail);
@@ -208,7 +211,10 @@ TerrainCache::Result TerrainCache::load(const TerrainCacheKey &k, uint8_t *out) 
     const auto length = std::filesystem::file_size(filename, ec);
     if (ec)
         return ec == std::errc::no_such_file_or_directory ? Result::Miss : Result::Error;
-    const auto bytes = layout_.size(k.product);
+    const auto skip = k.representation == 13 && k.product == TerrainProduct::Coverage
+                          ? layout_.heightOffsets[1]
+                          : 0;
+    const auto bytes = layout_.size(k.product) - skip;
     if (length != 144 + bytes)
         return Result::Miss;
     std::ifstream file(filename, std::ios::binary);
@@ -224,12 +230,32 @@ TerrainCache::Result TerrainCache::load(const TerrainCacheKey &k, uint8_t *out) 
         if (stopping_.load())
             return Result::Miss;
         const auto n = std::min<uint64_t>(terrainMiB, bytes - offset);
-        if (!file.read(reinterpret_cast<char *>(out + offset), std::streamsize(n)))
+        if (!file.read(reinterpret_cast<char *>(out + skip + offset), std::streamsize(n)))
             return Result::Miss;
         offset += n;
     }
-    if (get(h.data() + 128, 8) != terrainChecksum(out, size_t(bytes)) ||
-        get(h.data() + 136, 8) != terrainChecksum(h.data(), 136) || !layout_.valid(k.product, out, size_t(bytes)))
+    if (get(h.data() + 128, 8) != terrainChecksum(out + skip, size_t(bytes)) ||
+        get(h.data() + 136, 8) != terrainChecksum(h.data(), 136))
+        return Result::Miss;
+    if (skip) {
+        const uint32_t cells = layout_.grid.cells, w = cells / 2 + 1;
+        auto sample = [&](uint32_t x, uint32_t z) {
+            glm::vec2 v;
+            std::memcpy(&v, out + skip + (z * w + x) * 8, 8);
+            return v;
+        };
+        for (uint32_t z = 0; z <= cells; ++z)
+            for (uint32_t x = 0; x <= cells; ++x) {
+                const uint32_t ax = std::min(x / 2, w - 2), az = std::min(z / 2, w - 2);
+                const float fx = x * .5f - ax, fz = z * .5f - az;
+                const auto h00 = sample(ax, az), h10 = sample(ax + 1, az), h01 = sample(ax, az + 1),
+                           h11 = sample(ax + 1, az + 1);
+                const auto v = fx >= fz ? h00 + (h10 - h00) * fx + (h11 - h10) * fz
+                                        : h00 + (h11 - h01) * fx + (h01 - h00) * fz;
+                std::memcpy(out + (z * (cells + 1) + x) * 8, &v, 8);
+            }
+    }
+    if (!layout_.valid(k.product, out, size_t(layout_.size(k.product))))
         return Result::Miss;
     std::filesystem::last_write_time(filename, std::filesystem::file_time_type::clock::now(), ec);
     return Result::Hit;
@@ -238,7 +264,10 @@ TerrainCache::Result TerrainCache::save(const TerrainCacheKey &k, const uint8_t 
     if (!config_.diskCache)
         return Result::Written;
     const auto filename = path(k);
-    const auto bytes = layout_.size(k.product);
+    const auto skip = k.representation == 13 && k.product == TerrainProduct::Coverage
+                          ? layout_.heightOffsets[1]
+                          : 0;
+    const auto bytes = layout_.size(k.product) - skip;
     if (bytes + 144 > config_.diskBytes)
         return Result::Written;
     std::error_code ec;
@@ -262,14 +291,14 @@ TerrainCache::Result TerrainCache::save(const TerrainCacheKey &k, const uint8_t 
     std::array<uint8_t, 144> h{};
     const auto key = header(k);
     std::copy(key.begin(), key.end(), h.begin());
-    put(h.data() + 128, terrainChecksum(data, size_t(bytes)), 8);
+    put(h.data() + 128, terrainChecksum(data + skip, size_t(bytes)), 8);
     put(h.data() + 136, terrainChecksum(h.data(), 136), 8);
     file.write(reinterpret_cast<const char *>(h.data()), h.size());
     for (uint64_t offset = 0; offset < bytes;) {
         if (stopping_.load())
             return Result::Error;
         const auto n = std::min<uint64_t>(terrainMiB, bytes - offset);
-        file.write(reinterpret_cast<const char *>(data + offset), std::streamsize(n));
+        file.write(reinterpret_cast<const char *>(data + skip + offset), std::streamsize(n));
         offset += n;
     }
     file.flush();

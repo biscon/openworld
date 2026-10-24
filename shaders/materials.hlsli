@@ -44,18 +44,44 @@ float4 terrainWeights(float2 relative){
 float3 weightColour(float4 w) {
     return w.x*float3(.1,.8,.1)+w.y*float3(.6,.25,.05)+w.z*float3(.5,.5,.8)+w.w*float3(.9,.75,.2);
 }
-float3 displayMappedMaterial(MaterialEvaluation e,float3 relative,float visibility){
+float3 displayMappedMaterial(MaterialEvaluation e,float3 relative,float visibility,float3 renderedPosition){
     if(materialInfo.features.w==1)return weightColour(e.weights);
     if(materialInfo.features.w==2)return e.projections;
     if(materialInfo.features.w==3)return e.surface.normal*.5+.5;
     if(materialInfo.features.w==4)return float3(e.reads/24.0,1-e.reads/24.0,0);
-    return shadeSurface(e.surface,relative,visibility);
+    return shadeSurface(e.surface,relative,visibility,renderedPosition);
 }
-float3 shadeTerrain(float3 normal,float3 relative,float visibility){
-    if(materialInfo.options.x==0)return shadeSurface(terrainMaterial(normal),relative,visibility);
+float3 displayMappedMaterial(MaterialEvaluation e,float3 relative,float visibility){
+    return displayMappedMaterial(e,relative,visibility,curvePosition(relative,temporal.curvature));
+}
+SurfaceMaterial distantTerrain(float3 normal,float3 relative,float4 coverage,float3 pdx,float3 pdy) {
+    SurfaceMaterial m=terrainMaterial(normal);m.baseColour=0;m.roughness=.85;m.metallic=0;m.ao=1;
+    float2 uv=(relative*materialInfo.coordinates.macroPhase.w+materialInfo.coordinates.macroPhase.xyz).xz;
+    float2 dx=pdx.xz*materialInfo.coordinates.macroPhase.w,dy=pdy.xz*materialInfo.coordinates.macroPhase.w;
+    [unroll]for(uint layer=0;layer<4;++layer) {
+        MaterialRecord r=materialRecords[layer+1];
+        #ifdef OW_BINDLESS
+        float3 colour=materialArrays[NonUniformResourceIndex(r.maps.x)].SampleLevel(materialSampler,float3(.5,.5,r.maps.w),16).rgb;
+        #else
+        float3 colour=materialColour.SampleLevel(materialSampler,float3(.5,.5,r.maps.w),16).rgb;
+        #endif
+        float3 macro=macroSample(r,uv,dx,dy).rgb;
+        colour*=1+clamp((macro*2-1)*.4,-.2,.2)*materialInfo.blend.z;
+        m.baseColour+=colour*coverage[layer];
+    }
+    m.baseColour*=materialInfo.tint.rgb;return m;
+}
+float3 shadeTerrain(float3 normal,float3 relative,float visibility,float3 renderedPosition){
+    float3 pdx=ddx(relative),pdy=ddy(relative);
+    if(materialInfo.options.x==0)return shadeSurface(terrainMaterial(normal),relative,visibility,renderedPosition);
     float4 w=terrainWeights(relative.xz);
     if(materialInfo.options.y!=0)return weightColour(w);
-    return displayMappedMaterial(evaluateMappedMaterial(normal,relative,w),relative,visibility);
+    float farWeight=temporal.curvature.z!=0?smoothstep(max(1,temporal.curvature.w),max(1,temporal.curvature.w)*1.5,length(relative.xz)):0;
+    if(materialInfo.features.w!=0)farWeight=0;
+    if(farWeight>=1)return shadeSurface(distantTerrain(normal,relative,w,pdx,pdy),relative,visibility,renderedPosition);
+    float3 full=displayMappedMaterial(evaluateMappedMaterial(normal,relative,w,pdx,pdy),relative,visibility,renderedPosition);
+    if(farWeight<=0)return full;
+    return lerp(full,shadeSurface(distantTerrain(normal,relative,w,pdx,pdy),relative,visibility,renderedPosition),farWeight);
 }
 #endif
 #undef params

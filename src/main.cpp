@@ -1,5 +1,7 @@
 #include "lighting_demo.hpp"
 #include "renderer.hpp"
+#include "review_view.hpp"
+#include <optional>
 
 #include <SDL3/SDL.h>
 #include <imgui.h>
@@ -40,6 +42,8 @@ void help() {
                  "follows aspect\n"
                  "  --capture FILE.ppm    Save final offscreen frame (requires "
                  "--headless)\n"
+                 "  --review-view PATH    Replay a saved camera and rendering settings\n"
+                 "  --save-review-view PATH  Save the final view on exit\n"
                  "  --shader-dir PATH     Override compiled shader directory\n"
                  "  --validation          Enable validation when available\n"
                  "  --no-validation       Disable validation\n"
@@ -64,7 +68,7 @@ void help() {
                  "  --vertex-normals      Compare legacy vertex-normal interpolation\n"
                  "  --base                Show uneroded terrain\n"
                  "  --atmosphere MODE     off, analytic or physical (default physical)\n"
-                 "  --no-horizon          Disable extra coarse horizon coverage\n"
+                 "  --no-horizon          Disable distant coverage and visual curvature\n"
                  "  --lighting-demo       Enable generated lights and mesh fixtures\n"
                  "  --material-dir PATH   Override imported terrain palette directory\n"
                  "  --no-material-assets  Use the constant fallback without loading assets\n"
@@ -73,6 +77,8 @@ void help() {
                  "  --constant-material   Disable textured terrain for comparison\n"
                  "  --legacy-lighting     Use the old diagnostic shading\n"
                  "  --agx                 Use AgX neutral instead of ACES fitted\n"
+                 "  --no-depth-prepass    Disable default opaque depth prepass\n"
+                 "  --terrain-triangles N Terrain triangle budget (default 2097152)\n"
                  "  --no-taa              Disable temporal antialiasing\n"
                  "  --no-bloom            Disable HDR bloom\n"
                  "  --bloom-intensity N   Bloom strength, 0..2 (default 0.05)\n"
@@ -90,8 +96,11 @@ int main(int argc, char **argv) {
         uint64_t frameLimit = 0;
         ow::SceneSettings scene;
         scene.taa.enabled = true;
+        scene.opaqueDepthPrepass = true;
         scene.bloom.intensity = .05f;
-        std::filesystem::path capture;
+        std::filesystem::path capture, reviewPath, reviewSavePath;
+        std::optional<ow::ReviewView> review;
+        std::string reviewStatus;
         ow::RendererOptions options;
         options.width = 1920;
         options.height = 1080;
@@ -99,7 +108,8 @@ int main(int argc, char **argv) {
         options.lod.enabled = true;
         options.streaming.enabled = true;
         options.streaming.hierarchical = true;
-        options.streaming.horizonBytes = 64ull << 20;
+        options.streaming.horizonBytes = 128ull << 20;
+        options.curvedHorizon = true;
         scene.atmosphere.mode = ow::AtmosphereMode::Physical;
         bool explicitRadius = false;
         double terrainSize = 128;
@@ -123,7 +133,11 @@ int main(int argc, char **argv) {
                 help();
                 return 0;
             }
-            if (arg == "--lighting-demo")
+            if (arg == "--review-view")
+                reviewPath = value();
+            else if (arg == "--save-review-view")
+                reviewSavePath = value();
+            else if (arg == "--lighting-demo")
                 lightingDemoEnabled = true;
             else if (arg == "--atmosphere") {
                 auto v = value();
@@ -135,9 +149,10 @@ int main(int argc, char **argv) {
                     scene.atmosphere.mode = ow::AtmosphereMode::Physical;
                 else
                     throw std::invalid_argument("--atmosphere expects off, analytic or physical");
-            } else if (arg == "--no-horizon")
+            } else if (arg == "--no-horizon") {
                 options.streaming.horizonBytes = 0;
-            else if (arg == "--material-dir")
+                options.curvedHorizon = false;
+            } else if (arg == "--material-dir")
                 options.materialDirectory = value();
             else if (arg == "--no-material-assets")
                 options.materialDirectory.clear();
@@ -149,7 +164,14 @@ int main(int argc, char **argv) {
                 scene.terrainMaterial.enabled = false;
             else if (arg == "--legacy-lighting")
                 scene.shading = ow::ShadingMode::Legacy;
-            else if (arg == "--no-taa")
+            else if (arg == "--no-depth-prepass")
+                scene.opaqueDepthPrepass = false;
+            else if (arg == "--terrain-triangles") {
+                const auto n = std::stoull(value());
+                if (n < 8192 || n > 33554432)
+                    throw std::invalid_argument("Terrain triangle budget must be 8192..33554432");
+                options.lod.triangleBudget = n;
+            } else if (arg == "--no-taa")
                 scene.taa.enabled = false;
             else if (arg == "--no-bloom")
                 scene.bloom.intensity = 0;
@@ -175,8 +197,8 @@ int main(int argc, char **argv) {
                 options.streaming.cacheDirectory = value();
             else if (arg == "--no-cache")
                 options.streaming.diskCache = false;
-            else if (arg == "--view-radius" || arg == "--terrain-gpu-mib" ||
-                     arg == "--terrain-host-mib" || arg == "--cache-mib") {
+            else if (arg == "--view-radius" || arg == "--terrain-gpu-mib" || arg == "--terrain-host-mib" ||
+                     arg == "--cache-mib") {
                 const auto text = value();
                 if (text.empty() || text.find_first_not_of("0123456789") != std::string::npos)
                     throw std::invalid_argument(arg + " requires an integer");
@@ -268,6 +290,13 @@ int main(int argc, char **argv) {
         options.terrainChunkCapacity = singleChunk ? 1 : 9;
         ow::validateBatch(options.terrainGrid, ow::terrainNeighbourhood(terrain, singleChunk),
                           options.terrainChunkCapacity);
+        if (!reviewPath.empty()) {
+            review = ow::loadReviewView(reviewPath);
+            ow::applyReviewStartup(options, *review);
+            scene = review->scene;
+            terrain = {review->terrainOrigin, review->terrain};
+            singleChunk = !options.streaming.enabled;
+        }
         std::string terrainError;
         if (options.requireValidation)
             options.validation = true;
@@ -281,9 +310,9 @@ int main(int argc, char **argv) {
             if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD))
                 throw std::runtime_error(std::string("SDL_Init: ") + SDL_GetError());
             platform.sdl = true;
-            platform.window = SDL_CreateWindow("OpenWorld | Terrain", 1920, 1080,
-                                               SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE |
-                                                   SDL_WINDOW_HIGH_PIXEL_DENSITY);
+            platform.window =
+                SDL_CreateWindow("OpenWorld | Terrain", 1920, 1080,
+                                 SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
             if (!platform.window)
                 throw std::runtime_error(std::string("SDL_CreateWindow: ") + SDL_GetError());
         }
@@ -325,6 +354,18 @@ int main(int argc, char **argv) {
             }
         };
         resetTerrainCamera();
+        if (review) {
+            camera = review->camera;
+            fitSingleChunkCamera = false;
+            renderer.setTerrainLodReviewState(review->lod);
+        }
+        if (reviewPath.empty()) {
+            if (char *pref = SDL_GetPrefPath("OpenWorld", "OpenWorld")) {
+                reviewPath = std::filesystem::path(pref) / "review-view.json";
+                SDL_free(pref);
+            } else
+                reviewStatus = "Review path unavailable: " + std::string(SDL_GetError());
+        }
         const auto resetCamera = [&] { resetTerrainCamera(); };
         ow::LightingDemo lightingDemo(renderer);
         int demoLightCount = 32, demoLayers = 3;
@@ -368,18 +409,16 @@ int main(int argc, char **argv) {
                     else
                         std::cerr << "Fullscreen request failed: " << SDL_GetError() << '\n';
                 }
-                if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST ||
-                    event.type == SDL_EVENT_WINDOW_MINIMIZED)
+                if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST || event.type == SDL_EVENT_WINDOW_MINIMIZED)
                     captureMouse(false);
-                if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
-                    event.button.button == SDL_BUTTON_RIGHT && !ImGui::GetIO().WantCaptureMouse)
+                if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && event.button.button == SDL_BUTTON_RIGHT &&
+                    !ImGui::GetIO().WantCaptureMouse)
                     captureMouse(true);
                 if (event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button == SDL_BUTTON_RIGHT)
                     captureMouse(false);
                 if (event.type == SDL_EVENT_MOUSE_MOTION && captured)
                     input.look += glm::vec2(event.motion.xrel, event.motion.yrel);
-                if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat &&
-                    event.key.key == SDLK_ESCAPE) {
+                if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && event.key.key == SDLK_ESCAPE) {
                     if (captured)
                         captureMouse(false);
                     else if (!ImGui::GetIO().WantCaptureKeyboard)
@@ -394,9 +433,9 @@ int main(int argc, char **argv) {
                 continue;
             }
             const auto now = std::chrono::steady_clock::now();
-            const float dt = headless ? 1.0f / 60.0f
-                                      : std::clamp(std::chrono::duration<float>(now - previous).count(),
-                                                   0.0001f, 0.1f);
+            const float dt =
+                headless ? 1.0f / 60.0f
+                         : std::clamp(std::chrono::duration<float>(now - previous).count(), 0.0001f, 0.1f);
             previous = now;
             if (captured) {
                 const bool *keys = SDL_GetKeyboardState(nullptr);
@@ -413,8 +452,7 @@ int main(int argc, char **argv) {
                 if (platform.window)
                     ImGui_ImplSDL3_NewFrame();
                 else {
-                    ImGui::GetIO().DisplaySize =
-                        ImVec2(float(renderer.width()), float(renderer.height()));
+                    ImGui::GetIO().DisplaySize = ImVec2(float(renderer.width()), float(renderer.height()));
                     ImGui::GetIO().DeltaTime = dt;
                 }
                 ImGui::NewFrame();
@@ -424,9 +462,8 @@ int main(int argc, char **argv) {
                 const float maxHeight = std::max(100.f, viewport.y - 48);
                 const auto setupWindow = [&](ImVec2 position, float height) {
                     ImGui::SetNextWindowPos(position, ImGuiCond_FirstUseEver);
-                    ImGui::SetNextWindowSize(
-                        ImVec2(std::min(390.f, maxWidth), std::min(height, maxHeight)),
-                        ImGuiCond_FirstUseEver);
+                    ImGui::SetNextWindowSize(ImVec2(std::min(390.f, maxWidth), std::min(height, maxHeight)),
+                                             ImGuiCond_FirstUseEver);
                     ImGui::SetNextWindowSizeConstraints(ImVec2(std::min(280.f, maxWidth), 100),
                                                         ImVec2(maxWidth, maxHeight));
                 };
@@ -466,8 +503,8 @@ int main(int argc, char **argv) {
                                        8192, "%.0f",
                                        ImGuiSliderFlags_AlwaysClamp | ImGuiSliderFlags_Logarithmic);
                     regenerate |= ImGui::IsItemDeactivatedAfterEdit();
-                    ImGui::SliderFloat("Erosion strength", &terrain.settings.erosionStrength, 0, 1,
-                                       "%.3f", ImGuiSliderFlags_AlwaysClamp);
+                    ImGui::SliderFloat("Erosion strength", &terrain.settings.erosionStrength, 0, 1, "%.3f",
+                                       ImGuiSliderFlags_AlwaysClamp);
                     regenerate |= ImGui::IsItemDeactivatedAfterEdit();
                     ImGui::SliderFloat("Crease rounding", &terrain.settings.creaseRounding, 0, 1, "%.3f",
                                        ImGuiSliderFlags_AlwaysClamp);
@@ -487,17 +524,20 @@ int main(int argc, char **argv) {
                     ImGui::SliderFloat("Shadow bias (texels)", &scene.shadows.biasTexels, 0, 4);
                     ImGui::SliderFloat("Normal bias (texels)", &scene.shadows.normalBiasTexels, 0, 2);
                     int shadowView = int(scene.shadows.diagnostic);
-                    if (ImGui::Combo("Shadow view", &shadowView,
-                                     "Shaded\0Visibility\0Cascades\0Coverage\0"))
+                    if (ImGui::Combo("Shadow view", &shadowView, "Shaded\0Visibility\0Cascades\0Coverage\0"))
                         scene.shadows.diagnostic = uint32_t(shadowView);
                     const auto &shadowStats = renderer.shadowStats();
                     ImGui::Text("Shadow casters: %u | overflow %u | incomplete %u", shadowStats.casters,
                                 shadowStats.overflow, shadowStats.incomplete);
+                    uint64_t shadowTriangles = 0;
+                    for (auto triangles : shadowStats.triangles)
+                        shadowTriangles += triangles;
+                    ImGui::Text("Shadow raster triangles: %llu", (unsigned long long)shadowTriangles);
                     ImGui::Text("Shadow storage: %.2f MiB | range %.0f / %.0f m",
-                                double(shadowStats.allocatedBytes) / (1024 * 1024),
-                                shadowStats.nearDistance, shadowStats.farDistance);
-                    const char *shadowFallbacks[] = {"none", "sampled depth unavailable",
-                                                     "caster capacity", "disabled/wireframe"};
+                                double(shadowStats.allocatedBytes) / (1024 * 1024), shadowStats.nearDistance,
+                                shadowStats.farDistance);
+                    const char *shadowFallbacks[] = {"none", "sampled depth unavailable", "caster capacity",
+                                                     "disabled/wireframe"};
                     ImGui::Text("Effective shadows: %s | %s",
                                 shadowStats.effective == ow::ShadowMode::CSM ? "CSM" : "Off",
                                 shadowFallbacks[unsigned(shadowStats.fallback)]);
@@ -517,8 +557,7 @@ int main(int argc, char **argv) {
                     ImGui::SliderFloat("AO radius (m)", &scene.gtao.radius, .1f, 5.f, "%.2f",
                                        ImGuiSliderFlags_AlwaysClamp);
                     int aoDiagnostic = int(scene.gtao.diagnostic);
-                    if (ImGui::Combo("AO view", &aoDiagnostic,
-                                     "Shaded\0Visibility\0Raw\0Normals\0Edges\0"))
+                    if (ImGui::Combo("AO view", &aoDiagnostic, "Shaded\0Visibility\0Raw\0Normals\0Edges\0"))
                         scene.gtao.diagnostic = ow::GtaoDiagnostic(aoDiagnostic);
                     ImGui::Checkbox("Opaque depth prepass", &scene.opaqueDepthPrepass);
                     if (scene.visibility == ow::VisibilityMode::HiZ ||
@@ -533,7 +572,7 @@ int main(int argc, char **argv) {
                         ImGui::SameLine();
                         ImGui::Checkbox("LOD colours", &scene.lodColours);
                         ImGui::Checkbox("Freeze LOD camera", &scene.freezeLod);
-                        ImGui::Checkbox("Error-driven LOD", &scene.terrainLodQuality);
+                        ImGui::Checkbox("Additional error refinement", &scene.terrainLodQuality);
                         ImGui::SliderFloat("LOD error (pixels)", &scene.terrainLodPixelError, .5f, 8.f,
                                            "%.1f");
                         ImGui::Checkbox("LOD error colours", &scene.terrainLodErrorView);
@@ -542,14 +581,56 @@ int main(int argc, char **argv) {
                                        ImGuiSliderFlags_AlwaysClamp | ImGuiSliderFlags_Logarithmic);
                     if (ImGui::Button("Reset camera"))
                         resetCamera();
+                    if (ImGui::Button("Save review view")) {
+                        try {
+                            if (reviewPath.empty())
+                                throw std::runtime_error("Review path unavailable");
+                            ow::ReviewView saved;
+                            saved.camera = camera;
+                            saved.terrain = terrain.settings;
+                            saved.terrainOrigin = terrain.chunk;
+                            saved.scene = scene;
+                            saved.lod = renderer.terrainLodReviewState();
+                            saved.startup = options;
+                            saved.startup.width = renderer.width();
+                            saved.startup.height = renderer.height();
+                            ow::saveReviewView(reviewPath, saved);
+                            reviewStatus = "Saved " + reviewPath.string();
+                        } catch (const std::exception &e) {
+                            reviewStatus = e.what();
+                        }
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button("Load review view")) {
+                        try {
+                            const auto saved = ow::loadReviewView(reviewPath);
+                            if (!ow::compatibleReviewStartup(options, saved))
+                                throw std::runtime_error("Startup differs. Restart with --review-view \"" +
+                                                         reviewPath.string() + "\"");
+                            renderer.requestTerrainBatch(
+                                ow::terrainNeighbourhood({saved.terrainOrigin, saved.terrain}, singleChunk));
+                            camera = saved.camera;
+                            terrain = {saved.terrainOrigin, saved.terrain};
+                            scene = saved.scene;
+                            fitSingleChunkCamera = false;
+                            renderer.setTerrainLodReviewState(saved.lod);
+                            options.renderHeight = saved.startup.renderHeight;
+                            renderer.setRenderHeight(options.renderHeight);
+                            reviewStatus = "Loaded " + reviewPath.string();
+                        } catch (const std::exception &e) {
+                            reviewStatus = e.what();
+                        }
+                    }
+                    if (!reviewStatus.empty())
+                        ImGui::TextWrapped("%s", reviewStatus.c_str());
                     ImGui::ColorEdit3("Background", scene.background);
                     ImGui::PopItemWidth();
                     ImGui::Checkbox("ImGui demo", &demo);
                     ImGui::Separator();
                     if (!options.streaming.enabled)
-                        ImGui::Text(
-                            "Centre: (%lld, %lld) | %u chunks", static_cast<long long>(terrain.chunk.x),
-                            static_cast<long long>(terrain.chunk.z), renderer.terrainChunkCount());
+                        ImGui::Text("Centre: (%lld, %lld) | %u chunks",
+                                    static_cast<long long>(terrain.chunk.x),
+                                    static_cast<long long>(terrain.chunk.z), renderer.terrainChunkCount());
                     if (options.streaming.enabled) {
                         const auto &s = renderer.terrainStreamingStats();
                         ImGui::Text("Radius: %d requested / %d effective (max %d)", scene.viewRadius,
@@ -562,22 +643,21 @@ int main(int argc, char **argv) {
                                     "missing | %.2f MiB",
                                     s.shadowSlots, s.shadowRequested, s.shadowMissing,
                                     double(s.shadowBytes) / ow::terrainMiB);
-                        ImGui::Text("Detail demand: %u eligible / %u selected / %u ready",
-                                    s.detailEligible, s.detailSelected, s.detailReady);
-                        for (uint32_t l = 0; l < ow::maxTerrainLodLevels; ++l)
+                        ImGui::Text("Detail demand: %u eligible / %u selected / %u ready", s.detailEligible,
+                                    s.detailSelected, s.detailReady);
+                        for (uint32_t l = 0; l < s.residentLevels.size(); ++l)
                             if (s.residentLevels[l])
                                 ImGui::Text("Tile L%u: %u resident", l, s.residentLevels[l]);
                         ImGui::Text("Pool deferrals: %llu", (unsigned long long)s.pressureEvents);
-                        ImGui::Text("Pending: %u coverage / %u detail / %u I/O", s.pending,
-                                    s.detailPending, s.ioJobs);
+                        ImGui::Text("Pending: %u coverage / %u detail / %u I/O", s.pending, s.detailPending,
+                                    s.ioJobs);
                         ImGui::Text("View footprint: %.0f m square",
                                     options.terrainGrid.extent() *
                                         (2 * std::min(scene.viewRadius, s.maximumRadius) + 1));
                         ImGui::Text("Cache: %llu hits / %llu misses / %llu errors",
                                     (unsigned long long)s.hits, (unsigned long long)s.misses,
                                     (unsigned long long)s.errors);
-                        ImGui::Text("Host working storage: %.1f MiB",
-                                    s.hostBytes / double(ow::terrainMiB));
+                        ImGui::Text("Host working storage: %.1f MiB", s.hostBytes / double(ow::terrainMiB));
                         ImGui::Text("Generation recorded: %u batches / %u stages", s.dispatches,
                                     s.generationSegments);
                         ImGui::Text("Estimated: %.2f / %.2f ms; %s", s.generationEstimatedMilliseconds,
@@ -592,9 +672,9 @@ int main(int argc, char **argv) {
                                     (unsigned long long)s.detailPreemptions,
                                     (unsigned long long)s.discardedReads);
                         if (s.activeDetail || s.detailRetiring)
-                            ImGui::Text("Detail (%lld,%lld L%u): %.0f%% %s",
-                                        (long long)s.activeDetailTile.x, (long long)s.activeDetailTile.z,
-                                        s.activeDetailTile.level, s.activeDetailProgress * 100,
+                            ImGui::Text("Detail (%lld,%lld L%u): %.0f%% %s", (long long)s.activeDetailTile.x,
+                                        (long long)s.activeDetailTile.z, s.activeDetailTile.level,
+                                        s.activeDetailProgress * 100,
                                         s.detailRetiring ? "retiring" : "working");
                         ImGui::Text("Recorded groups: %u / %u hard limit", s.generationGroups,
                                     s.generationGroupBudget);
@@ -604,24 +684,31 @@ int main(int argc, char **argv) {
                                 static_cast<long long>(camera.chunk.z));
                     ImGui::Text("Mesh: %.2f m | Normals: %.2f m", options.terrainGrid.spacing,
                                 options.terrainGrid.spacing / options.normalSubdivisions);
-                    ImGui::Text("%u x %u cells/chunk", options.terrainGrid.cells,
-                                options.terrainGrid.cells);
+                    ImGui::Text("%u x %u cells/chunk", options.terrainGrid.cells, options.terrainGrid.cells);
                     const auto &stats = renderer.terrainRenderStats();
-                    ImGui::Text("Drawn: %llu triangles | %u patches",
+                    ImGui::Text("CPU selected: %llu triangles | %u patches",
                                 static_cast<unsigned long long>(stats.triangles), stats.selected);
                     ImGui::Text("Culled: %u | Bounds: %s", stats.culled,
                                 stats.boundsReady ? "ready" : "pending");
                     ImGui::Text("LOD first range: %.1f m", stats.firstRange);
                     ImGui::Text("LOD error: %.1f px | %u over target", stats.maximumErrorPixels,
                                 stats.overTargetPatches);
-                    ImGui::Text("Quality scale: %.2fx%s", stats.qualityScale,
-                                stats.qualityLimited ? " (budget limited)" : "");
+                    if (options.streaming.hierarchical) {
+                        ImGui::Text("Replacement: %.2f px | refined %u", stats.maximumTransitionPixels,
+                                    stats.refined);
+                        ImGui::Text("Ground: %u patches | %u limited", stats.protectedPatches,
+                                    stats.protectedMissing);
+                        ImGui::Text("Budget: %llu tris | %u deferred",
+                                    (unsigned long long)stats.triangleBudget, stats.budgetLimited);
+                        ImGui::Text("Residency limited: %u", stats.residencyLimited);
+                    }
                     for (uint32_t level = 0; level < stats.perLevel.size(); ++level)
                         if (stats.perLevel[level])
-                            ImGui::Text("LOD %u: %u patches (%.1f m)", level, stats.perLevel[level],
+                            ImGui::Text("LOD %u: %u patches | %llu triangles (%.1f m)", level,
+                                        stats.perLevel[level],
+                                        (unsigned long long)stats.trianglesPerLevel[level],
                                         stats.firstRange * float(1u << level));
-                    ImGui::Text("Terrain allocation: %.2f MiB",
-                                renderer.terrainAllocatedBytes() / 1048576.0);
+                    ImGui::Text("Terrain allocation: %.2f MiB", renderer.terrainAllocatedBytes() / 1048576.0);
                     ImGui::Text("Chunk generations: %llu",
                                 static_cast<unsigned long long>(renderer.terrainGenerationCount()));
                     ImGui::TextWrapped("Terrain edits apply on release. Base/eroded "
@@ -630,24 +717,22 @@ int main(int argc, char **argv) {
                                        "Escape: release / quit.");
                 }
                 ImGui::End();
-                setupWindow(ImVec2(viewport.x >= 828 ? 438.f : 24.f, viewport.x >= 828 ? 24.f : 64.f),
-                            270);
+                setupWindow(ImVec2(viewport.x >= 828 ? 438.f : 24.f, viewport.x >= 828 ? 24.f : 64.f), 270);
                 if (ImGui::Begin("Base Terrain Generation")) {
                     if (!terrainError.empty())
                         ImGui::TextWrapped("%s (terrain unchanged)", terrainError.c_str());
                     ImGui::PushItemWidth(150);
                     ImGui::InputScalar("Seed", ImGuiDataType_U32, &terrain.settings.seed);
                     regenerate |= ImGui::IsItemDeactivatedAfterEdit();
-                    ImGui::SliderFloat("Regional wavelength (m)", &terrain.settings.regionWavelength,
-                                       4096, 65536, "%.0f",
+                    ImGui::SliderFloat("Regional wavelength (m)", &terrain.settings.regionWavelength, 4096,
+                                       65536, "%.0f",
                                        ImGuiSliderFlags_AlwaysClamp | ImGuiSliderFlags_Logarithmic);
                     regenerate |= ImGui::IsItemDeactivatedAfterEdit();
                     ImGui::SliderFloat("Mountain wavelength (m)", &terrain.settings.wavelength, 64, 8192,
-                                       "%.0f",
-                                       ImGuiSliderFlags_AlwaysClamp | ImGuiSliderFlags_Logarithmic);
+                                       "%.0f", ImGuiSliderFlags_AlwaysClamp | ImGuiSliderFlags_Logarithmic);
                     regenerate |= ImGui::IsItemDeactivatedAfterEdit();
-                    ImGui::SliderFloat("Height scale (m)", &terrain.settings.heightScale, 0, 2000,
-                                       "%.0f", ImGuiSliderFlags_AlwaysClamp);
+                    ImGui::SliderFloat("Height scale (m)", &terrain.settings.heightScale, 0, 2000, "%.0f",
+                                       ImGuiSliderFlags_AlwaysClamp);
                     regenerate |= ImGui::IsItemDeactivatedAfterEdit();
                     ImGui::SliderFloat("Ridge strength", &terrain.settings.ridgeStrength, 0, 1, "%.2f",
                                        ImGuiSliderFlags_AlwaysClamp);
@@ -686,8 +771,7 @@ int main(int argc, char **argv) {
                         }
                     }
                     int localMode = int(scene.localLights), diagnostic = int(scene.clusterDiagnostic);
-                    if (ImGui::Combo("Local-light path", &localMode,
-                                     "Disabled\0Brute force\0Clustered\0"))
+                    if (ImGui::Combo("Local-light path", &localMode, "Disabled\0Brute force\0Clustered\0"))
                         scene.localLights = ow::LocalLightMode(localMode);
                     if (ImGui::Combo("Clusters", &diagnostic, "Shaded\0Occupancy\0Overflow\0"))
                         scene.clusterDiagnostic = uint32_t(diagnostic);
@@ -699,16 +783,14 @@ int main(int argc, char **argv) {
                     ImGui::Text("Clusters %.2f MiB | geometry %.2f MiB", cs.clusterBytes / 1048576.,
                                 cs.geometryBytes / 1048576.);
                     if (cs.timingsAvailable)
-                        ImGui::Text("Assign %.2f | opaque %.2f | blend %.2f ms",
-                                    cs.assignmentMilliseconds, cs.opaqueMilliseconds,
-                                    cs.transparentMilliseconds);
+                        ImGui::Text("Assign %.2f | opaque %.2f | blend %.2f ms", cs.assignmentMilliseconds,
+                                    cs.opaqueMilliseconds, cs.transparentMilliseconds);
                     int shading = int(scene.shading);
                     if (ImGui::Combo("Shading", &shading, "PBR\0Legacy diagnostic\0"))
                         scene.shading = ow::ShadingMode(shading);
                     if (scene.shading == ow::ShadingMode::Legacy ||
-                        (scene.terrainVisible &&
-                         (scene.normalView || scene.wireframe || scene.chunkBorders ||
-                          scene.lodColours || scene.terrainLodErrorView)))
+                        (scene.terrainVisible && (scene.normalView || scene.wireframe || scene.chunkBorders ||
+                                                  scene.lodColours || scene.terrainLodErrorView)))
                         ImGui::TextWrapped("Diagnostic shading: exposure and tone mapping bypassed.");
                     if (ImGui::CollapsingHeader("Output", ImGuiTreeNodeFlags_DefaultOpen)) {
                         ImGui::Checkbox("Temporal antialiasing", &scene.taa.enabled);
@@ -720,9 +802,8 @@ int main(int argc, char **argv) {
                         ImGui::Text("TAA %s | bloom %s | %.1f / %.1f MiB", post.taa ? "on" : "off",
                                     post.bloom ? "on" : "off", post.taaBytes / 1048576.,
                                     post.bloomBytes / 1048576.);
-                        ImGui::Text("Post GPU %.3f / %.3f ms | history %s | reset %s",
-                                    post.taaMilliseconds, post.bloomMilliseconds,
-                                    post.historyValid ? "valid" : "reset",
+                        ImGui::Text("Post GPU %.3f / %.3f ms | history %s | reset %s", post.taaMilliseconds,
+                                    post.bloomMilliseconds, post.historyValid ? "valid" : "reset",
                                     ow::temporalResetName(post.reset));
                         ImGui::Text("Post availability: %s / %s | rejected %u | overflow %u",
                                     ow::postFallbackName(post.taaFallback),
@@ -735,8 +816,7 @@ int main(int argc, char **argv) {
                             scene.output.toneMapper = ow::ToneMapper(mapper);
                     }
                     if (ImGui::CollapsingHeader("Atmosphere", ImGuiTreeNodeFlags_DefaultOpen)) {
-                        int mode = int(scene.atmosphere.mode),
-                            quality = int(scene.atmosphere.quality);
+                        int mode = int(scene.atmosphere.mode), quality = int(scene.atmosphere.quality);
                         if (ImGui::Combo("Sky", &mode, "Off\0Analytic\0Physical\0"))
                             scene.atmosphere.mode = ow::AtmosphereMode(mode);
                         if (ImGui::Combo("Atmosphere quality", &quality, "Normal\0High\0"))
@@ -747,26 +827,25 @@ int main(int argc, char **argv) {
                         ImGui::SameLine();
                         if (ImGui::Button("Hazy air"))
                             scene.atmosphere.aerosolDensity = 4;
-                        ImGui::SliderFloat("Aerosol density", &scene.atmosphere.aerosolDensity, 0,
-                                           10);
-                        ImGui::SliderFloat("Boundary haze (artistic)",
-                                           &scene.atmosphere.boundaryHaze, 0, 3);
+                        ImGui::SliderFloat("Aerosol density", &scene.atmosphere.aerosolDensity, 0, 10);
+                        ImGui::SliderFloat("Boundary haze (artistic)", &scene.atmosphere.boundaryHaze, 0, 3);
                         const auto &a = renderer.atmosphereStats();
                         ImGui::Text("Atmosphere %.2f MiB | %s", a.bytes / 1048576.,
                                     ow::atmosphereFallbackName(a.fallback));
                         if (a.timingsAvailable)
-                            ImGui::Text("LUT %.3f | IBL %.3f | transport %.3f ms",
-                                        a.lutMilliseconds, a.environmentMilliseconds,
-                                        a.compositeMilliseconds);
+                            ImGui::Text("LUT %.3f | IBL %.3f | transport %.3f ms", a.lutMilliseconds,
+                                        a.environmentMilliseconds, a.compositeMilliseconds);
                         const auto &t = renderer.terrainStreamingStats();
                         ImGui::Text("Outer coverage %.1f km | horizon %u / %u",
                                     t.outerEffectiveRadius * options.terrainGrid.extent() / 1000,
                                     t.horizonReady, t.horizonRequested);
+                        ImGui::Text("Distant levels %u | %.1f MiB%s", t.horizonLevels,
+                                    double(t.horizonBytes) / (1024 * 1024),
+                                    t.horizonLimited ? " | range limited" : "");
                     }
                     if (ImGui::CollapsingHeader("Sun & environment", ImGuiTreeNodeFlags_DefaultOpen)) {
                         ImGui::Checkbox("Sun", &scene.lighting.sunEnabled);
-                        ImGui::SliderFloat("Illuminance (lux)", &scene.lighting.sunLux, 0, 200000,
-                                           "%.0f");
+                        ImGui::SliderFloat("Illuminance (lux)", &scene.lighting.sunLux, 0, 200000, "%.0f");
                         ImGui::ColorEdit3("Sun colour", &scene.lighting.sunColour.x);
                         ImGui::SliderFloat3("Direction to sun", &scene.lighting.sunDirection.x, -1, 1);
                         ImGui::Checkbox("Environment", &scene.lighting.environmentEnabled);
@@ -774,10 +853,10 @@ int main(int argc, char **argv) {
                             ImGui::SliderFloat("Sky lighting multiplier",
                                                &scene.atmosphere.environmentMultiplier, 0, 3);
                         else {
-                            ImGui::SliderFloat("Brightness (nits)", &scene.lighting.environmentNits,
-                                               0, 20000, "%.0f");
-                            ImGui::SliderAngle("Environment rotation",
-                                               &scene.lighting.environmentRotation, -180, 180);
+                            ImGui::SliderFloat("Brightness (nits)", &scene.lighting.environmentNits, 0, 20000,
+                                               "%.0f");
+                            ImGui::SliderAngle("Environment rotation", &scene.lighting.environmentRotation,
+                                               -180, 180);
                         }
                     }
                     if (ImGui::CollapsingHeader("Material", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -786,8 +865,7 @@ int main(int argc, char **argv) {
                         ImGui::SliderFloat("Roughness", &material.roughness, .045f, 1);
                         ImGui::SliderFloat("Metallic", &material.metallic, 0, 1);
                         ImGui::SliderFloat("Ambient occlusion", &material.ao, 0, 1);
-                        ImGui::DragFloat3("Emissive (nits)", &material.emissive.x, 100, 0, 1000000,
-                                          "%.0f");
+                        ImGui::DragFloat3("Emissive (nits)", &material.emissive.x, 100, 0, 1000000, "%.0f");
                     }
                     const auto &visibility = renderer.visibilityStats();
                     const char *modes[] = {"Direct", "Indirect", "Hi-Z"};
@@ -797,10 +875,18 @@ int main(int argc, char **argv) {
                                 fallbacks[uint32_t(visibility.fallback)]);
                     ImGui::Text("Candidates: %u | Batches: %u | %.2f MiB", visibility.candidates,
                                 visibility.batches, visibility.allocatedBytes / 1048576.0);
-                    if (visibility.countsAvailable)
-                        ImGui::Text("Completed: %u drawn | %u frustum | %u occluded",
-                                    visibility.submitted, visibility.frustumRejected,
-                                    visibility.occlusionRejected);
+                    if (visibility.countsAvailable) {
+                        ImGui::Text("Completed frame %llu (%s): %u drawn | %u frustum | %u occluded",
+                                    (unsigned long long)visibility.completedFrame,
+                                    modes[uint32_t(visibility.completedMode)], visibility.submitted,
+                                    visibility.frustumRejected, visibility.occlusionRejected);
+                        ImGui::Text("Depth triangles: %llu terrain / %llu mesh",
+                                    (unsigned long long)visibility.depthTriangles.terrain,
+                                    (unsigned long long)visibility.depthTriangles.meshes);
+                        ImGui::Text("Opaque colour triangles: %llu terrain / %llu mesh",
+                                    (unsigned long long)visibility.colourTriangles.terrain,
+                                    (unsigned long long)visibility.colourTriangles.meshes);
+                    }
                     if (visibility.timingsAvailable)
                         ImGui::Text("Depth %.2f | Pyramid %.2f | Cull %.2f | Colour %.2f ms",
                                     visibility.depthMilliseconds, visibility.pyramidMilliseconds,
@@ -838,9 +924,8 @@ int main(int argc, char **argv) {
                     if (ImGui::Button("High"))
                         ow::applyMaterialPreset(m, ow::TerrainMaterialPreset::High);
                     ImGui::Checkbox("Textured terrain", &m.enabled);
-                    if (scene.shading == ow::ShadingMode::Legacy || scene.normalView ||
-                        scene.lodColours || scene.terrainLodErrorView || scene.wireframe ||
-                        scene.chunkBorders)
+                    if (scene.shading == ow::ShadingMode::Legacy || scene.normalView || scene.lodColours ||
+                        scene.terrainLodErrorView || scene.wireframe || scene.chunkBorders)
                         ImGui::TextWrapped("Terrain diagnostics currently override material shading.");
                     ImGui::Checkbox("Coverage weights", &m.weights);
                     ImGui::Combo("Material diagnostic", &m.diagnostic,
@@ -869,8 +954,8 @@ int main(int argc, char **argv) {
                     if (ImGui::Button("Reload palette"))
                         renderer.reloadMaterials(options.materialDirectory);
                     const auto &ms = renderer.materialStats();
-                    ImGui::Text("Macro: %s | Max logical reads: %u",
-                                ms.macroLoaded ? "loaded" : "neutral", ms.maximumTextureReads);
+                    ImGui::Text("Macro: %s | Max logical reads: %u", ms.macroLoaded ? "loaded" : "neutral",
+                                ms.maximumTextureReads);
                     ImGui::Text("%s | Effective AF: %.0fx", ms.bindless ? "Bindless" : "Fixed palette",
                                 ms.effectiveAnisotropy);
                     ImGui::Text("Images: %.2f MiB / %.0f MiB", ms.imageBytes / 1048576.,
@@ -895,8 +980,8 @@ int main(int argc, char **argv) {
                 if (frames == 0)
                     demoAnchor = ow::translated(ow::worldPosition(camera, options.terrainGrid),
                                                 glm::dvec3(camera.forward()) * 14.);
-                lightingDemo.configure(lightingDemoEnabled, demoAnchor, uint32_t(demoLightCount),
-                                       demoOverlap, uint32_t(demoLayers));
+                lightingDemo.configure(lightingDemoEnabled, demoAnchor, uint32_t(demoLightCount), demoOverlap,
+                                       uint32_t(demoLayers));
                 demoDirty = false;
             }
             if (lightingDemoEnabled && demoAnimation) {
@@ -924,6 +1009,19 @@ int main(int argc, char **argv) {
                 SDL_Delay(16);
         }
         renderer.waitIdle();
+        if (!reviewSavePath.empty()) {
+            ow::ReviewView saved;
+            saved.camera = camera;
+            saved.terrain = terrain.settings;
+            saved.terrainOrigin = terrain.chunk;
+            saved.scene = scene;
+            saved.lod = renderer.terrainLodReviewState();
+            saved.startup = options;
+            saved.startup.width = renderer.width();
+            saved.startup.height = renderer.height();
+            ow::saveReviewView(reviewSavePath, saved);
+        }
+
         if (!capture.empty() && frames)
             renderer.capture(capture);
         std::cout << "Terrain: " << options.terrainGrid.extent() << " m square, "
@@ -931,8 +1029,7 @@ int main(int argc, char **argv) {
                   << " cells/side\n";
         std::cout << "Chunks: " << renderer.terrainChunkCount()
                   << "; triangles: " << renderer.terrainRenderStats().triangles
-                  << "; terrain allocation: " << renderer.terrainAllocatedBytes() / 1048576.0
-                  << " MiB\n";
+                  << "; terrain allocation: " << renderer.terrainAllocatedBytes() / 1048576.0 << " MiB\n";
         std::cout << "Selected patches: " << renderer.terrainRenderStats().selected
                   << "; culled: " << renderer.terrainRenderStats().culled
                   << "; first LOD range: " << renderer.terrainRenderStats().firstRange << " m\n";
@@ -949,8 +1046,8 @@ int main(int argc, char **argv) {
                   << " ms; output + UI: " << renderStats.outputMilliseconds
                   << " ms; lighting startup: " << renderStats.lightingStartupMilliseconds << " ms\n";
         std::cout << "Terrain generations: " << renderer.terrainGenerationCount() << '\n';
-        std::cout << "Rendered " << frames
-                  << " frames; validation errors: " << renderer.validationErrors() << '\n';
+        std::cout << "Rendered " << frames << " frames; validation errors: " << renderer.validationErrors()
+                  << '\n';
         return renderer.validationErrors() ? EXIT_FAILURE : EXIT_SUCCESS;
     } catch (const std::exception &error) {
         std::cerr << "OpenWorld: " << error.what() << '\n';

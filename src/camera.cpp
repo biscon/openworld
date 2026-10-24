@@ -55,7 +55,7 @@ glm::vec3 Camera::terrainOffset(ChunkCoord terrain, const TerrainGrid &g) const 
             float((double(terrain.z) - double(chunk.z)) * g.extent() - local.z)};
 }
 glm::mat4 Camera::viewProjection(float aspect) const {
-    auto p = glm::perspective(glm::radians(verticalFovDegrees), aspect, farPlane, nearPlane);
+    auto p = glm::perspective(glm::radians(verticalFovDegrees), aspect, renderFar, nearPlane);
     p[1][1] *= -1;
     return p * glm::lookAt(glm::vec3(0), forward(), glm::vec3(0, 1, 0));
 }

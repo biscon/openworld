@@ -16,8 +16,10 @@ int main() {
         o.terrainCapacity = 32;
         o.lod = {true, 8, 64};
         o.streaming.enabled = o.streaming.hierarchical = true;
+        o.curvedHorizon = true;
         o.streaming.diskCache = false;
         o.streaming.maximumDistance = 128;
+        o.streaming.horizonMaximumDistance = 256;
         o.streaming.horizonBytes = 4 * terrainMiB;
         o.streaming.gpuBytes = 40 * terrainMiB;
         o.streaming.hostBytes = 64 * terrainMiB;
@@ -26,7 +28,8 @@ int main() {
         o.streaming.diagnosticFrameSeconds = 1. / 60;
         Renderer r(o);
         TerrainSettings flat;
-        flat.heightScale = flat.erosionStrength = 0;
+        flat.heightScale = 10;
+        flat.erosionStrength = .22f;
         r.setTerrainSettings(flat);
         SceneSettings s;
         s.viewRadius = 8;
@@ -70,12 +73,8 @@ int main() {
                         "No sky leak at old detailed boundary or coarse seams");
         }
         for (auto tile : r.readTerrainResidency())
-            if (tile.key.level == 3 && tile.active) {
-                // Far top-level products must not request fine normals.
-                auto dx = tile.key.x * 8 - c.chunk.x, dz = tile.key.z * 8 - c.chunk.z;
-                if (dx > 9 || dz > 9 || dx + 8 < -8 || dz + 8 < -8)
-                    require(!tile.detailWanted, "No fine-normal horizon demand");
-            }
+            if (tile.key.level > 3 && tile.active)
+                require(!tile.detailWanted, "No fine-normal horizon demand");
         c.chunk.x += 9;
         settle();
         s.viewRadius = 4;
@@ -91,6 +90,17 @@ int main() {
             r.render(c, s);
         require(r.validationErrors() == 0, "Combined horizon atmosphere AO CSM TAA validation");
         r.waitIdle();
+        auto limitedOptions = o;
+        limitedOptions.streaming.horizonBytes = 1;
+        Renderer limited(limitedOptions);
+        limited.render(c, s);
+        require(limited.terrainStreamingStats().horizonSlots == 0 &&
+                    limited.terrainStreamingStats().horizonLimited,
+                "Insufficient distant budget reports fallback without consuming near slots");
+        require(limited.terrainStreamingStats().maximumRadius ==
+                    r.terrainStreamingStats().maximumRadius,
+                "Distant budget fallback preserves detailed capacity");
+        require(limited.validationErrors() == 0, "Distant budget fallback validation");
         std::cout << "Horizon GPU checks passed\n";
         return 0;
     } catch (const std::exception &e) {

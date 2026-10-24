@@ -1,11 +1,13 @@
 #include "mesh_primitives.hpp"
 #include "renderer.hpp"
+#include "review_view.hpp"
 #include <algorithm>
 #include <chrono>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <numeric>
+#include <optional>
 using namespace ow;
 namespace {
 using Clock = std::chrono::steady_clock;
@@ -16,7 +18,8 @@ double percentile(std::vector<double> v, double p) {
     return v[size_t(p * (v.size() - 1))];
 }
 // Small owned terrain-shaped mesh. Each strip is an independent draw, so hills
-// can occlude other strips; a single valley-sized bound would never be rejected.
+// can occlude other strips; a single valley-sized bound would never be
+// rejected.
 MeshData strip(bool valley, float x0, float x1, float z0, float z1) {
     auto height = [&](float x, float z) {
         return valley ? 26.f * std::exp(-std::pow((x - 28.f - 12.f * std::sin(z * .035f)) / 12.f, 2.f)) +
@@ -49,10 +52,21 @@ int main(int argc, char **argv) {
                                         "N --height N] [--require-validation] [--fixed] [--streaming]");
         std::filesystem::path output = argv[1];
         bool quick = false, validation = false, fixed = false, streaming = false;
+        std::optional<ReviewView> review;
+        double flightSpeed = 30;
+        std::filesystem::path shaders = OPENWORLD_SHADER_DIR;
         uint32_t frames = 120, width = 1920, height = 1080;
         for (int i = 2; i < argc; ++i) {
             std::string arg = argv[i];
-            if (arg == "--quick")
+            if (arg == "--review-view" && i + 1 < argc)
+                review = loadReviewView(argv[++i]);
+            else if (arg == "--flight-speed" && i + 1 < argc) {
+                flightSpeed = std::stod(argv[++i]);
+                if (!std::isfinite(flightSpeed) || flightSpeed < 0 || flightSpeed > 10000)
+                    throw std::invalid_argument("Invalid flight speed");
+            } else if (arg == "--shader-directory" && i + 1 < argc)
+                shaders = argv[++i];
+            else if (arg == "--quick")
                 quick = true;
             else if (arg == "--require-validation")
                 validation = true;
@@ -79,28 +93,40 @@ int main(int argc, char **argv) {
             if (frames == 120)
                 frames = 8;
         }
+        if (review) {
+            streaming = review->startup.streaming.enabled;
+            width = review->startup.width;
+            height = review->startup.height;
+        }
         std::filesystem::create_directories(output);
         std::ofstream metadata(output / "metadata.txt");
         metadata << "width=" << width << "\nheight=" << height << "\nsamples=" << frames
                  << "\nquick=" << quick << "\nstreaming=" << streaming << "\nworkload="
                  << (streaming ? "procedural terrain flight" : "owned analytic valley/plain mesh flight")
-                 << "\n";
+                 << "\nreview_view=" << bool(review) << "\nflight_speed=" << flightSpeed << "\n";
 #ifdef NDEBUG
         metadata << "build=Release\n";
 #else
         metadata << "build=Debug\n";
 #endif
         std::ofstream csv(output / "timings.csv");
-        csv << "landscape,mode,prepass,cpu_median_ms,cpu_p95_ms,scene_median_ms,scene_p95_ms,depth_median_ms,"
-               "depth_p95_ms,pyramid_median_ms,pyramid_p95_ms,cull_median_ms,cull_p95_ms,colour_median_ms,"
-               "colour_p95_ms,candidates,submitted,frustum,occluded,visibility_bytes,timestamps\n";
+        csv << "landscape,mode,prepass,cpu_median_ms,cpu_p95_ms,scene_median_ms,"
+               "scene_p95_ms,depth_median_ms,"
+               "depth_p95_ms,pyramid_median_ms,pyramid_p95_ms,cull_median_ms,cull_"
+               "p95_ms,colour_median_ms,"
+               "colour_p95_ms,candidates,submitted,frustum,occluded,visibility_"
+               "bytes,timestamps,completed_frame,completed_mode,depth_terrain_"
+               "triangles,depth_mesh_triangles,colour_terrain_triangles,colour_"
+               "mesh_triangles\n";
         csv << std::setprecision(8);
         for (bool valley : {false, true}) {
+            if (review && valley)
+                break;
             RendererOptions o;
             o.ui = false;
             o.validation = validation;
             o.requireValidation = validation;
-            o.shaderDirectory = OPENWORLD_SHADER_DIR;
+            o.shaderDirectory = shaders;
             o.width = width;
             o.height = height;
             o.forceFixedIndirect = fixed;
@@ -111,10 +137,12 @@ int main(int argc, char **argv) {
             o.streaming.maximumDistance = quick ? 128 : 8192;
             o.streaming.cacheDirectory = output / (valley ? "valley-cache" : "plain-cache");
             o.streaming.diagnosticFrameSeconds = 1. / 120.;
+            if (review)
+                applyReviewStartup(o, *review);
             Renderer r(o);
             metadata << "device=" << r.deviceName() << "\nvalidation=" << r.validationEnabled() << "\n";
             SceneSettings scene;
-    scene.shadows.mode = ow::ShadowMode::Off;
+            scene.shadows.mode = ow::ShadowMode::Off;
             scene.gtao.mode = ow::GtaoMode::Off;
             scene.terrainVisible = streaming;
             scene.viewRadius = quick ? 2 : 64;
@@ -127,7 +155,7 @@ int main(int argc, char **argv) {
             material.baseColour = {.3f, .45f, .2f, 1};
             material.doubleSided = true;
             auto mat = r.createMaterial(material);
-            if (!streaming) {
+            if (!streaming && !review) {
                 for (int z = 0; z < 12; ++z)
                     for (int x = 0; x < 8; ++x) {
                         auto mesh = r.uploadMesh(strip(valley, float(x * 16 - 64), float(x * 16 - 48),
@@ -155,6 +183,13 @@ int main(int argc, char **argv) {
                                ? glm::dvec3(o.terrainGrid.extent() * .5, 120, o.terrainGrid.extent() * .5)
                                : glm::dvec3(0, 8, 16);
             camera.pitch = streaming ? -.3f : -.1f;
+            if (review) {
+                camera = review->camera;
+                scene = review->scene;
+                terrain = review->terrain;
+                r.requestTerrainBatch(terrainNeighbourhood({review->terrainOrigin, terrain}, !streaming));
+                r.setTerrainLodReviewState(review->lod);
+            }
             std::vector<glm::vec2> flightHeights;
             if (streaming) {
                 uint32_t quiet = 0;
@@ -169,10 +204,10 @@ int main(int argc, char **argv) {
             }
             // Read once outside measurement; keep this flight above the surface
             // rather than accidentally benchmarking a sky-only high-altitude view.
-            if (streaming)
+            if (streaming && !review)
                 flightHeights = r.readStreamedTileHeights({0, 0, 0});
             const auto followSurface = [&](Camera &c) {
-                if (!streaming)
+                if (!streaming || review)
                     return;
                 const auto n = o.terrainGrid.cells;
                 const double x = c.local.x / o.terrainGrid.spacing, z = c.local.z / o.terrainGrid.spacing;
@@ -193,6 +228,8 @@ int main(int argc, char **argv) {
                                                : VisibilityMode::Indirect;
                 scene.opaqueDepthPrepass = mode >= 2;
                 camera = initial;
+                if (review)
+                    r.setTerrainLodReviewState(review->lod);
                 for (int i = 0; i < 16; ++i)
                     r.render(camera, scene);
                 std::array<std::vector<double>, 6> values;
@@ -201,10 +238,14 @@ int main(int argc, char **argv) {
                 for (uint32_t i = 0; i < frames; ++i) {
                     // Same deterministic path for every mode, including warm GPU history.
                     camera = initial;
+                    const double travel = double(i) * flightSpeed / 120;
                     camera.local.z -=
-                        streaming ? std::min(double(i) * .25, o.terrainGrid.extent() * .4) : double(i) * .25;
-                    camera.local.x += 4 * std::sin(double(i) * .02);
-                    camera.yaw = .15f * std::sin(float(i) * .01f);
+                        streaming && !review ? std::min(travel, o.terrainGrid.extent() * .4) : travel;
+                    if (!review) {
+                        camera.local.x += 4 * std::sin(double(i) * .02);
+                        camera.yaw = .15f * std::sin(float(i) * .01f);
+                    } else
+                        camera.update({}, 0, o.terrainGrid);
                     followSurface(camera);
                     auto start = Clock::now();
                     r.render(camera, scene);
@@ -224,7 +265,10 @@ int main(int argc, char **argv) {
                 for (const auto &sample : values)
                     csv << ',' << percentile(sample, .5) << ',' << percentile(sample, .95);
                 csv << ',' << v.candidates << ',' << v.submitted << ',' << v.frustumRejected << ','
-                    << v.occlusionRejected << ',' << v.allocatedBytes << ',' << v.timingsAvailable << '\n';
+                    << v.occlusionRejected << ',' << v.allocatedBytes << ',' << v.timingsAvailable << ','
+                    << v.completedFrame << ',' << uint32_t(v.completedMode) << ',' << v.depthTriangles.terrain
+                    << ',' << v.depthTriangles.meshes << ',' << v.colourTriangles.terrain << ','
+                    << v.colourTriangles.meshes << '\n';
                 csv.flush();
                 r.capture(output / ((valley ? std::string("valley-") : std::string("plain-")) +
                                     std::to_string(mode) + ".ppm"));

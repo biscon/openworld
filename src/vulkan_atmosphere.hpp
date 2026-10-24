@@ -10,7 +10,7 @@ namespace ow {
 class VulkanAtmosphere {
   public:
     VulkanAtmosphere(VkPhysicalDevice, VkDevice, uint32_t queueFamily, uint64_t budget,
-                     bool forceUnavailable, const std::filesystem::path &);
+                     bool forceUnavailable, const std::filesystem::path &, bool extended = false);
     ~VulkanAtmosphere();
     bool supported() const;
     void invalidateSceneViews(); // Caller recreated scene HDR/depth at an idle boundary.

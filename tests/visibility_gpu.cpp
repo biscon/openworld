@@ -101,7 +101,20 @@ void run(uint32_t fallback) {
         require(r.visibilityStats().submitted >= 1, "Visible occluder retained");
         pyramidReference(r);
     }
-    // Remove most instances: stale compacted command tails must disappear immediately.
+    const auto &counts = r.visibilityStats();
+    require(counts.countsAvailable && counts.completedFrame > 0 && counts.completedMode == counts.effective,
+            "Completed counters retain originating frame and visibility mode");
+    require(counts.selectedTriangles.meshes == 604 && counts.selectedTriangles.terrain == 0 &&
+                counts.depthTriangles.meshes == 604 && counts.depthTriangles.terrain == 0,
+            "Depth includes every selected opaque quad before occlusion");
+    require(counts.colourTriangles.meshes == uint64_t(counts.submitted) * 2 &&
+                counts.colourTriangles.terrain == 0,
+            "Completed mesh triangle counts match actual submitted quads");
+    if (counts.effective == VisibilityMode::HiZ)
+        require(counts.colourTriangles.total() < counts.depthTriangles.total(),
+                "HiZ reduces colour work while retaining depth work");
+    // Remove most instances: stale compacted command tails must disappear
+    // immediately.
     for (auto h : extras)
         r.removeInstance(h);
     extras.clear();
@@ -235,6 +248,28 @@ void terrain() {
         compare(render(r, c, s, VisibilityMode::Direct), render(r, c, s, VisibilityMode::HiZ),
                 "Terrain morph depth equality");
     }
+    // An owned foreground wall fully hides real terrain patches. Their depth
+    // submissions remain, while the colour triangle counter must drop to zero.
+    c.local = {8, 7, 20};
+    c.pitch = -.3f;
+    s.frustumCulling = false;
+    s.lod = false;
+    MeshMaterial wallMaterial;
+    wallMaterial.doubleSided = true;
+    MeshInstance wall;
+    wall.mesh = r.uploadMesh(makeQuad());
+    wall.material = r.createMaterial(wallMaterial);
+    wall.position.local = glm::dvec3(c.local) + glm::dvec3(c.forward()) * 2.;
+    wall.scale = {10, 10, 1};
+    auto wallHandle = r.createInstance(wall);
+    const auto covered = render(r, c, s, VisibilityMode::Direct);
+    for (int i = 0; i < 4; ++i)
+        compare(covered, render(r, c, s, VisibilityMode::HiZ), "Hidden terrain preserves foreground image");
+    const auto counts = r.visibilityStats();
+    require(counts.depthTriangles.terrain == 2048 && counts.colourTriangles.terrain == 0 &&
+                counts.colourTriangles.meshes == 2,
+            "HiZ rejects terrain colour triangles behind a foreground occluder");
+    r.removeInstance(wallHandle);
     s.wireframe = true;
     s.visibility = VisibilityMode::HiZ;
     r.render(c, s);
@@ -288,7 +323,8 @@ void streaming() {
             "Streamed terrain records and clipping");
     auto positions = r.readTerrainVertexPositions();
     require(!positions.empty(), "Vertex diagnostic still reads original patch ordering");
-    // Same observer, abrupt view change, then a move requiring new coverage/refinement.
+    // Same observer, abrupt view change, then a move requiring new
+    // coverage/refinement.
     c.yaw = 1.8f;
     compare(render(r, c, s, VisibilityMode::Direct), render(r, c, s, VisibilityMode::HiZ),
             "Streamed cut without delayed reveal");

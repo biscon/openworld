@@ -1,6 +1,7 @@
 #include "renderer.hpp"
 #include "terrain_generation_budget.hpp"
 #include "test_support.hpp"
+#include <algorithm>
 #include <chrono>
 #include <cstring>
 #include <fstream>
@@ -28,6 +29,7 @@ ow::RendererOptions options(const Temp &temp) {
     o.lod = {true, 8, 64};
     o.streaming.shadowCasterBytes = 0;
     o.streaming.enabled = true;
+    o.streaming.vertexDiagnostics = true;
     o.streaming.transferBytesPerFrame = 64 * 1024;
     o.streaming.cacheDirectory = temp.path;
     o.streaming.gpuBytes = 40 * ow::terrainMiB;
@@ -205,6 +207,40 @@ void test() {
         }
         require(different < 32 && double(totalDifference) / a.size() < .01,
                 "streaming preserves established near-ground shading");
+        // Flat streaming has one raw height grid, not a filtered height pyramid.
+        // Force coarse geometry from a separate observer while inspecting it close up.
+        auto observer = camera;
+        observer.local.z += r.terrainRenderStats().firstRange * 1.6;
+        scene.freezeLod = true;
+        r.setTerrainLodObserver(observer);
+        r.render(camera, scene);
+        const auto patches = r.readTerrainPatches();
+        const auto positions = r.readTerrainVertexPositions();
+        const auto tiles = r.readTerrainResidency();
+        const auto inverse = glm::inverse(camera.viewProjection(float(r.renderWidth()) / r.renderHeight()));
+        float minimum = INFINITY, maximum = -INFINITY;
+        for (auto h : cold) {
+            minimum = std::min(minimum, h.y);
+            maximum = std::max(maximum, h.y);
+        }
+        uint32_t coarseVertices = 0;
+        for (size_t i = 0; i < patches.size(); ++i) {
+            const auto &patch = patches[i];
+            auto tile = std::find_if(tiles.begin(), tiles.end(),
+                                     [&](const auto &v) { return v.handle.index == patch.slot; });
+            if (tile == tiles.end() || tile->key.x != origin.x || tile->key.z != origin.z || patch.level == 0)
+                continue;
+            for (size_t v = 0; v < 81; ++v) {
+                auto position = inverse * positions[i * 81 + v];
+                const float height = position.y / position.w + float(camera.local.y);
+                require(std::isfinite(height) && height >= minimum - .02f && height <= maximum + .02f,
+                        "Flat-stream parent interpolation stays within its raw height endpoints");
+                ++coarseVertices;
+            }
+        }
+        require(coarseVertices > 0, "Flat-stream regression exercises coarse geometry");
+        scene.freezeLod = false;
+        r.render(camera, scene);
         // The shared PBR path also works for streamed terrain at a large world
         // origin.
         scene.shading = ow::ShadingMode::Pbr;

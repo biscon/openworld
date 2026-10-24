@@ -32,11 +32,12 @@ struct PostSnapshot {
 };
 struct TemporalView {
     glm::mat4 current{1}, previous{1}, raster{1};
+    glm::vec4 curvature{0}, previousCurvature{0};
     glm::vec4 originDelta{0}; // Current origin relative to previous origin.
     glm::vec4 pixels{0};      // width, height, jitter x/y in pixels
     glm::vec4 state{0};       // active, history valid, exposure ratio, terrain record capacity
 };
-static_assert(sizeof(TemporalView) == 240);
+static_assert(sizeof(TemporalView) == 272);
 // Separate from the 128-byte draw ABI. Shader only accesses unchanged resident
 // heights.
 struct TemporalTerrainRecord {

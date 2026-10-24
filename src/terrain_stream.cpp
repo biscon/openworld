@@ -73,7 +73,7 @@ TerrainPayloadLayout::TerrainPayloadLayout(TerrainGrid g, uint32_t r, uint32_t p
         for (uint32_t l = 0; l < levels; ++l) {
             errorOffsets[l] = boundsBytes;
             const uint64_t width = (g.cells / p) >> l;
-            boundsBytes += width * width * 16;
+            boundsBytes += width * width * sizeof(TerrainPatchMetadata);
         }
     coarseOffset = boundsOffset + boundsBytes;
     for (uint32_t l = 0; l < levels; ++l) {
@@ -104,10 +104,10 @@ bool TerrainPayloadLayout::valid(TerrainProduct product, const uint8_t *data, si
                 return false;
         }
         if (filteredHeights) {
-            for (uint64_t i = boundsOffset + errorOffset; i < coarseOffset; i += 16) {
-                float v[4];
-                std::memcpy(v, data + i, 16);
-                if (v[0] > v[1] || v[2] < 0 || v[3] < 0)
+            for (uint64_t i = boundsOffset + errorOffset; i < coarseOffset; i += sizeof(TerrainPatchMetadata)) {
+                float v[8];
+                std::memcpy(v, data + i, sizeof(v));
+                if (v[0] > v[1] || std::any_of(v + 2, v + 8, [](float x) { return x < 0; }))
                     return false;
             }
         }
@@ -144,12 +144,14 @@ int64_t distance(ChunkCoord a, ChunkCoord b) {
 }
 } // namespace
 TerrainStreamer::TerrainStreamer(uint32_t capacity, int maximumRadius, TerrainGrid grid,
-                                 bool hierarchical, uint32_t shadowSlots, uint32_t horizonSlots)
+                                 bool hierarchical, uint32_t shadowSlots, uint32_t horizonSlots,
+                                 int horizonRadius)
     : slots_(capacity), cameraCapacity_(capacity - shadowSlots),
       baseCapacity_(capacity - shadowSlots - horizonSlots), horizonSlots_(horizonSlots),
       maximumRadius_(maximumRadius), grid_(grid), hierarchical_(hierarchical) {
     if (horizonSlots > capacity || shadowSlots > capacity - horizonSlots ||
-        (horizonSlots && (!hierarchical || horizonSlots != 48)))
+        (horizonSlots &&
+         (!hierarchical || (horizonRadius == 0 ? horizonSlots != 48 : horizonSlots % 48 != 0))))
         throw std::invalid_argument("Invalid horizon residency reservation");
     if (shadowSlots > capacity || shadowSlots > 64 || (!hierarchical && shadowSlots))
         throw std::invalid_argument("Invalid shadow residency reservation");
@@ -158,7 +160,14 @@ TerrainStreamer::TerrainStreamer(uint32_t capacity, int maximumRadius, TerrainGr
         if (maximumRadius < 0 || maximumRadius > terrainMaximumRadius(grid) ||
             baseCapacity_ < terrainHierarchyCapacity(maximumRadius))
             throw std::invalid_argument("Invalid hierarchy capacity");
-        topLevel_ = terrainHierarchyLevel(maximumRadius);
+        detailedLevel_ = topLevel_ = terrainHierarchyLevel(maximumRadius);
+        if (horizonRadius > maximumRadius && horizonSlots) {
+            const auto level = terrainHierarchyLevel(horizonRadius);
+            if (level >= 30 || horizonSlots < 48 * (level - topLevel_))
+                throw std::invalid_argument("Insufficient distant hierarchy slots");
+            topLevel_ = level;
+            horizonRadius_ = horizonRadius;
+        }
         wanted_.reserve(capacity);
         size_t size = 1;
         while (size < capacity * 4)
@@ -186,8 +195,8 @@ void TerrainStreamer::shadowDemand(const TerrainTileKey *keys, uint32_t count) {
     if (count > shadowWanted_.size() || (count && (!keys || !hierarchical_)))
         throw std::invalid_argument("Shadow terrain demand capacity");
     for (uint32_t i = 0; i < count; ++i)
-        if (keys[i].level != topLevel_)
-            throw std::invalid_argument("Shadow residency requires top-level tiles");
+        if (keys[i].level != detailedLevel_)
+            throw std::invalid_argument("Shadow residency requires the detailed coverage level");
     shadowCount_ = count;
     if (count)
         std::copy_n(keys, count, shadowWanted_.begin());
@@ -203,7 +212,7 @@ void TerrainStreamer::demand(const Camera &camera, int radius, uint64_t complete
     }
     centre_ = camera.chunk;
     radius_ = std::clamp(radius, 0, maximumRadius_);
-    outerRadius_ = horizonSlots_ ? radius_ * 2 : radius_;
+    outerRadius_ = horizonRadius_ ? horizonRadius_ : horizonSlots_ ? radius_ * 2 : radius_;
     for (auto &s : slots_) {
         if (s.state == State::Retiring && s.retireAfter <= completed) {
             const auto g = s.generation;
@@ -261,9 +270,9 @@ TerrainHandle TerrainStreamer::next(State state) const {
             const auto &s = slots_[i];
             // Coarse ancestors first; within a level prefer nearby visible data.
             const auto value = hierarchical_
-                                   ? int64_t((s.shadowOnly    ? 100000000
-                                              : s.horizonOnly ? 50000000
-                                                              : 0) +
+                                   ? int64_t((s.shadowOnly                       ? 100000000
+                                              : s.horizonOnly && !horizonRadius_ ? 50000000
+                                                                                 : 0) +
                                              (topLevel_ - s.level) * 1000000 +
                                              (s.refine ? 0 : 500000) + tileDistance(s.tile()) * 100)
                                    : distance(s.chunk, centre_);
@@ -384,7 +393,9 @@ void TerrainStreamer::requestTree(TerrainTileKey t) {
     const int64_t x = t.x * scale - centre_.x, z = t.z * scale - centre_.z;
     // Clip to the requested square plus one base chunk. Descendant rings are
     // bounded to six tiles per axis, independent of the number of base chunks.
-    const int clip = t.level == topLevel_ ? outerRadius_ : radius_;
+    const int clip = (t.level == topLevel_ || (horizonRadius_ && t.level > detailedLevel_))
+                         ? outerRadius_
+                         : radius_;
     if (x > clip + 1 || z > clip + 1 || x + scale < -clip || z + scale < -clip)
         return;
     const double d = tileDistance(t);
@@ -403,7 +414,7 @@ void TerrainStreamer::demandHierarchy(const Camera &camera, int radius, uint64_t
                                       uint64_t submitted, uint64_t epoch) {
     centre_ = camera.chunk;
     radius_ = std::clamp(radius, 0, maximumRadius_);
-    outerRadius_ = horizonSlots_ ? radius_ * 2 : radius_;
+    outerRadius_ = horizonRadius_ ? horizonRadius_ : horizonSlots_ ? radius_ * 2 : radius_;
     wanted_.clear();
     const int64_t scale = int64_t(1) << topLevel_;
     const auto loX = terrainFloorDivide(centre_.x - outerRadius_ - 1, scale);
@@ -460,7 +471,9 @@ void TerrainStreamer::demandHierarchy(const Camera &camera, int radius, uint64_t
                 continue;
             const int64_t span = int64_t(1) << w.key.level;
             const int64_t x = w.key.x * span - centre_.x, z = w.key.z * span - centre_.z;
-            const bool horizon = horizonSlots_ && (x > radius_ + 1 || z > radius_ + 1 ||
+            const bool horizon =
+                horizonRadius_ ? w.key.level > detailedLevel_
+                               : horizonSlots_ && (x > radius_ + 1 || z > radius_ + 1 ||
                                                    x + span < -radius_ || z + span < -radius_);
             int at = findTile(w.key);
             if (at < 0) {
@@ -584,7 +597,9 @@ void TerrainStreamer::advance(float dt) {
             s.heightFade = std::clamp(s.heightFade + (target ? dt : -dt) * 4.f, 0.f, 1.f);
             if (s.level == topLevel_ && s.wanted)
                 s.heightFade = 1;
-            s.active = s.heightFade > 0;
+            // Readiness is a latch: cancellation before readiness cannot make a
+            // child visible, and re-entering demand must not hide an active child.
+            s.active = s.heightFade == 1 || (s.active && s.heightFade > 0);
             s.drawMask = 15;
             s.visible = s.active;
         }

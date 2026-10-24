@@ -1,4 +1,5 @@
 #include "terrain_lod.hpp"
+#include "terrain_ground_lod.hpp"
 #include "test_support.hpp"
 #include <algorithm>
 #include <cstdlib>
@@ -54,11 +55,6 @@ float height(float x, float z, int fixture) {
     if (fixture == 1)
         return .7f * x + .3f * z;
     return 6 * std::sin(x * .15f) * std::cos(z * .13f);
-}
-float sampledHeight(float x, float z, int fixture) {
-    const float a = std::floor(x * 2) * .5f, b = std::floor(z * 2) * .5f, fx = (x - a) * 2, fz = (z - b) * 2;
-    return glm::mix(glm::mix(height(a, b, fixture), height(a + .5f, b, fixture), fx),
-                    glm::mix(height(a, b + .5f, fixture), height(a + .5f, b + .5f, fixture), fx), fz);
 }
 using Point = std::tuple<int64_t, int64_t, int64_t>;
 Point key(glm::vec3 p) {
@@ -120,22 +116,37 @@ void selectionAndSeams() {
                             glm::vec2 g = glm::vec2(patch.x, patch.z) + glm::vec2(local) * float(patch.step);
                             glm::vec3 original(ox + g.x * .5f, 0, oz + g.y * .5f);
                             original.y = height(original.x, original.z, fixture);
+                            const float distance = glm::length(original - glm::vec3(camera.local));
+                            const float m = patch.level + 1 < lod.levels()
+                                                ? terrainMorph(distance, lod.stats().firstRange * patch.step)
+                                                : 0;
                             glm::vec3 anchor = original;
                             anchor.x -= float(local.x & 1) * patch.step * .5f;
                             anchor.z -= float(local.y & 1) * patch.step * .5f;
                             anchor.y = height(anchor.x, anchor.z, fixture);
-                            const float distance = glm::length(anchor - glm::vec3(camera.local));
-                            const float m = patch.level + 1 < lod.levels()
-                                                ? terrainMorph(distance, lod.stats().firstRange * patch.step)
-                                                : 0;
-                            g = glm::vec2(patch.x, patch.z) + terrainMorphPosition(local, patch.step, m);
+                            const bool endpoint = m == 1 && glm::length(anchor - glm::vec3(camera.local)) >=
+                                                                lod.stats().firstRange * patch.step;
+                            g = glm::vec2(patch.x, patch.z) +
+                                (glm::vec2(local) -
+                                 glm::vec2(local & glm::uvec2(1)) * (endpoint ? 1.f : 0.f)) *
+                                    float(patch.step);
                             p[j] = {ox + g.x * .5f, 0, oz + g.y * .5f};
-                            p[j].y = sampledHeight(p[j].x, p[j].z, fixture);
-                            levels[j] =
-                                patch.level + (patch.level + 1 < lod.levels()
-                                                   ? terrainMorph(glm::length(p[j] - glm::vec3(camera.local)),
-                                                                  lod.stats().firstRange * patch.step)
-                                                   : 0);
+                            if (m < 1)
+                                require(g == glm::vec2(patch.x, patch.z) +
+                                                 glm::vec2(local) * float(patch.step),
+                                        "Intermediate morph never stretches horizontal topology");
+                            const float step = float(patch.step);
+                            const float ax = std::floor((original.x - ox) / step) * step + ox;
+                            const float az = std::floor((original.z - oz) / step) * step + oz;
+                            const float fx = (original.x - ax) / step, fz = (original.z - az) / step;
+                            const float a = height(ax, az, fixture),
+                                        d = height(ax + step, az + step, fixture);
+                            const float target =
+                                fx >= fz ? a * (1 - fx) + height(ax + step, az, fixture) * (fx - fz) + d * fz
+                                         : a * (1 - fz) + d * fx + height(ax, az + step, fixture) * (fz - fx);
+                            p[j].y =
+                                endpoint ? height(p[j].x, p[j].z, fixture) : glm::mix(original.y, target, m);
+                            levels[j] = patch.level + m;
                         }
                         const float area = glm::cross(p[1] - p[0], p[2] - p[0]).y;
                         require(area >= -1e-5, "Morph cannot invert terrain triangles");
@@ -210,9 +221,11 @@ void sampledErrorProjection() {
     const std::array<glm::vec2, 4> bounds = {glm::vec2(-1, 1), glm::vec2(-1, 1), glm::vec2(-1, 1),
                                              glm::vec2(-1, 1)};
     lod.setBounds(0, bounds.data());
-    const std::array<glm::vec4, 5> metadata = {glm::vec4(-1, 1, 1, 2), glm::vec4(-1, 1, 1, 2),
-                                               glm::vec4(-1, 1, 1, 2), glm::vec4(-1, 1, 1, 2),
-                                               glm::vec4(-2, 2, 3, 4)};
+    const std::array<TerrainPatchMetadata, 5> metadata = {{{{-1, 1}, {1, 2}, {}, {}},
+                                                           {{-1, 1}, {1, 2}, {}, {}},
+                                                           {{-1, 1}, {1, 2}, {}, {}},
+                                                           {{-1, 1}, {1, 2}, {}, {}},
+                                                           {{-2, 2}, {3, 4}, {}, {}}}};
     lod.setQualityMetadata(0, metadata.data());
     Camera c;
     c.local = {4, 3, 100};
@@ -232,27 +245,185 @@ void sampledErrorProjection() {
         Camera view;
         view.local = {64, 100, 64};
         broad.beginHierarchy(view, view, view.viewProjection(1), 8, 64);
-        broad.selectTile(0, {}, 0, 15, true, false, {-1, 1});
+        broad.selectTile(0, {}, 0, 15, true, false);
         const auto baseline = broad.stats().triangles;
         broad.beginHierarchy(view, view, view.viewProjection(1), 8, 128);
-        broad.selectTile(0, {}, 0, 15, true, false, {-1, 1});
-        require(broad.stats().triangles > baseline, "larger shared error ranges retain finer resident geometry");
+        broad.selectTile(0, {}, 0, 15, true, false);
+        require(broad.stats().triangles > baseline,
+                "larger shared error ranges retain finer resident geometry");
     }
     const auto before = allocations;
     tracking = true;
     for (int i = 0; i < 1000; ++i) {
         lod.beginHierarchy(c, c, c.viewProjection(1), 32, 80);
-        lod.selectTile(0, {}, 0, 15, true, false, {-2, 2});
+        lod.selectTile(0, {}, 0, 15, true, false);
         for (const auto &p : lod.draws())
             (void)lod.projectedError(p, {}, 0, c, 1000, true);
     }
     tracking = false;
     require(before == allocations, "quality metadata selection is allocation free");
 }
+
+void stationaryTopology() {
+    const auto topology = terrainPatchTopology(32);
+    constexpr int cells = 16, width = 17;
+    for (uint32_t mask = 0; mask < 16; ++mask) {
+        std::map<std::pair<uint32_t, uint32_t>, int> edges;
+        double area = 0;
+        const auto range = topology.stitched[mask];
+        for (uint32_t i = range.first; i < range.first + range.count; i += 3) {
+            glm::dvec3 p[3];
+            uint32_t ids[3];
+            for (int j = 0; j < 3; ++j) {
+                const auto id = ids[j] = topology.indices[i + j];
+                const auto x = id % width, z = id / width;
+                require(x <= cells && z <= cells, "Stitched index inside patch");
+                require(!(((x == 0 && (mask & 1)) || (x == cells && (mask & 2))) && (z & 1)),
+                        "Coarse X edge omits odd vertices");
+                require(!(((z == 0 && (mask & 4)) || (z == cells && (mask & 8))) && (x & 1)),
+                        "Coarse Z edge omits odd vertices");
+                p[j] = {double(x), 0, double(z)};
+            }
+            const auto a = glm::cross(p[1] - p[0], p[2] - p[0]).y * .5;
+            require(a > 0, "Every stitched triangle has positive area");
+            area += a;
+            for (int j = 0; j < 3; ++j)
+                ++edges[std::minmax(ids[j], ids[(j + 1) % 3])];
+        }
+        near(area, cells * cells, 0, "Stitched triangles cover full rectangle");
+        for (const auto &e : edges)
+            if (e.second != 2) {
+                const auto a = e.first.first, b = e.first.second;
+                require(e.second == 1 &&
+                            ((a % width == b % width && (a % width == 0 || a % width == cells)) ||
+                             (a / width == b / width && (a / width == 0 || a / width == cells))),
+                        "Only outer stitched edges are unmatched");
+            }
+    }
+}
+void stationarySelection() {
+    const TerrainGrid grid{64, 2};
+    const auto topology = terrainPatchTopology(8);
+    TerrainLod metadata(grid, 64, {true, 8, 64}, 9);
+    std::array<glm::vec2, 64> bounds;
+    bounds.fill({-4, 4});
+    std::vector<TerrainPatchMetadata> samples;
+    for (uint32_t l = 0; l < 4; ++l)
+        for (uint32_t i = 0; i < (8u >> l) * (8u >> l); ++i)
+            samples.push_back({{-4, 4},
+                               glm::vec2(.005f * (1u << l)),
+                               glm::vec2(.02f * (1u << l)),
+                               glm::vec2(.01f * (1u << l))});
+    for (uint32_t i = 0; i < 9; ++i) {
+        metadata.setBounds(i, bounds.data());
+        metadata.setQualityMetadata(i, samples.data());
+    }
+    TerrainGroundLod selector(grid, 8, 9, 8192, 131072);
+    Camera c;
+    c.local = {64, 6, 64};
+    auto select = [&](bool quality, bool freeze) {
+        selector.begin(c, c, c.viewProjection(1), 300, quality, 2, freeze, false, true, true);
+        for (int z = -1; z <= 1; ++z)
+            for (int x = -1; x <= 1; ++x)
+                selector.tile((z + 1) * 3 + x + 1, {x, z}, 0, 15, 0);
+        selector.finish(metadata, topology);
+    };
+    for (bool quality : {false, true}) {
+        selector.invalidate();
+        select(quality, false);
+        auto old = selector.snapshot();
+        std::array<int, 48 * 48> cover;
+        cover.fill(-1);
+        const auto &patches = selector.casters();
+        for (uint32_t i = 0; i < patches.size(); ++i) {
+            const auto &p = patches[i];
+            int tx = int(p.slot % 3) - 1, tz = int(p.slot / 3) - 1;
+            int x = (tx * 64 + int(p.x) + 64) / 4, z = (tz * 64 + int(p.z) + 64) / 4;
+            for (uint32_t v = 0; v < p.step; ++v)
+                for (uint32_t u = 0; u < p.step; ++u) {
+                    auto &value = cover[(z + v) * 48 + x + u];
+                    require(value == -1, "Stationary selection never overlaps");
+                    value = int(i);
+                }
+        }
+        for (int z = 0; z < 48; ++z)
+            for (int x = 0; x < 48; ++x) {
+                int i = cover[z * 48 + x];
+                require(i >= 0, "Stationary selection covers every cell");
+                for (int dz = -1; dz <= 1; ++dz)
+                    for (int dx = -1; dx <= 1; ++dx)
+                        if (x + dx >= 0 && x + dx < 48 && z + dz >= 0 && z + dz < 48)
+                            require(std::abs(int(patches[i].level) -
+                                             int(patches[cover[(z + dz) * 48 + x + dx]].level)) <= 1,
+                                    "Edges and corners stay 2:1 balanced");
+            }
+        require(!selector.stats().protectedMissing, "Protected ground retains finest available geometry");
+        require(selector.stats().triangles <= selector.stats().triangleBudget,
+                "Selection obeys fixed triangle allowance");
+        const auto before = allocations;
+        tracking = true;
+        for (int i = 0; i < 40; ++i) {
+            c.yaw += .1f;
+            select(quality, true);
+        }
+        tracking = false;
+        require(before == allocations, "Stationary partition frame work allocates nothing");
+        require(selector.snapshot() == old, "Frozen selection survives turns");
+        selector.invalidate();
+        selector.restore(old);
+        // An empty startup frame must not discard a restored partition before tiles arrive.
+        selector.begin(c, c, c.viewProjection(1), 300, quality, 2, true, false, true, true);
+        selector.finish(metadata, topology);
+        require(selector.snapshot() == old, "Cold replay retains selection while waiting for residency");
+        select(quality, true);
+        require(selector.snapshot() == old, "Cold replay restores the geographic partition");
+        for (auto bad : {std::vector<TerrainPatchKey>{{0, 0, 32}},
+                         {{1, 0, 0}},
+                         {{0, 0, 0}, {0, 0, 1}},
+                         {{0, 0, 0}, {0, 0, 0}}}) {
+            rejects([&] { selector.restore(bad); }, "Invalid replay selection rejected");
+            require(selector.snapshot() == old, "Invalid replay preserves selection");
+        }
+    }
+    TerrainGroundLod constrained(grid, 8, 9, 1024, 2048);
+    constrained.begin(c, c, c.viewProjection(1), 300, true, 2, false, false, true, true);
+    for (int z = -1; z <= 1; ++z)
+        for (int x = -1; x <= 1; ++x)
+            constrained.tile((z + 1) * 3 + x + 1, {x, z}, 0, 15, 0);
+    constrained.finish(metadata, topology);
+    require(constrained.stats().budgetLimited > 0 && constrained.stats().protectedMissing > 0,
+            "Impossible budget reports degraded ground explicitly");
+    // Under pressure, a high approximation error with zero replacement motion
+    // must not starve another tile's mandatory transition refinement.
+    auto qualityOnly = samples, movingSurface = samples;
+    for (auto &m : qualityOnly) {
+        m.error = m.parentError = glm::vec2(10000);
+        m.displacement = {};
+    }
+    for (auto &m : movingSurface) {
+        m.error = m.parentError = glm::vec2(1);
+        m.displacement = glm::vec2(10);
+    }
+    metadata.setQualityMetadata(0, qualityOnly.data());
+    metadata.setQualityMetadata(1, movingSurface.data());
+    c.local.y = 2000;
+    TerrainGroundLod priority(grid, 8, 2, 1024, 1024);
+    priority.begin(c, c, c.viewProjection(1), 300, true, 2, false, false, true, true);
+    priority.tile(0, {5, 0}, 0, 15, 0);
+    priority.tile(1, {-5, 0}, 0, 15, 0);
+    priority.finish(metadata, topology);
+    require(std::count_if(priority.casters().begin(), priority.casters().end(),
+                          [](const auto &p) { return p.slot == 0; }) == 4,
+            "Optional quality cannot consume transition-safety budget");
+    require(priority.stats().refined > 0 && priority.stats().budgetLimited > 0,
+            "Priority fixture exercises refinement under pressure");
+}
 } // namespace
 int main() {
     try {
         topology();
+        stationaryTopology();
+        stationarySelection();
         sampledErrorProjection();
         selectionAndSeams();
         cullingAndAllocation();

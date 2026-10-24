@@ -2,6 +2,7 @@
 #include "terrain_cache.hpp"
 #include "terrain_detail_policy.hpp"
 #include "terrain_generation_budget.hpp"
+#include "terrain_ground_lod.hpp"
 #include "vulkan_post.hpp"
 #include "vulkan_shadows.hpp"
 #include "vulkan_terrain.hpp"
@@ -21,16 +22,33 @@ class VulkanTerrainStream {
                      const SceneSettings &, uint32_t viewportHeight);
     void prepareVisibility(VulkanVisibility &, uint32_t frame, const Camera &, const Camera &,
                            const SceneSettings &, VulkanPost *post = nullptr);
-    void draw(VkCommandBuffer, uint32_t frame, const Camera &, const Camera &observer,
-              const SceneSettings &, bool finalPass = true, VulkanVisibility *visibility = nullptr);
+    void draw(VkCommandBuffer, uint32_t frame, const Camera &, const Camera &observer, const SceneSettings &,
+              bool finalPass = true, VulkanVisibility *visibility = nullptr);
     void prepareShadows(uint32_t frame, const Camera &, const SceneSettings &, VulkanShadows &);
     void drawShadows(VkCommandBuffer, VkPipelineLayout, VulkanShadows &);
     VkDescriptorSetLayout descriptorLayout() const { return descriptorLayout_; }
     void submitted(uint32_t frame);
     VkPipelineLayout graphicsLayout() const { return graphicsLayout_; }
     const TerrainStreamStats &stats() const { return stats_; }
-    const TerrainRenderStats &renderStats() const { return lod_->stats(); }
-    const std::vector<TerrainPatchDraw> &patches() const { return lod_->draws(); }
+    void reviewQuality(float &scale, float &focal) const {
+        scale = qualityScale_;
+        focal = qualityFocalPixels_;
+    }
+    void restoreReviewQuality(float scale, float focal) {
+        qualityScale_ = scale;
+        qualityFocalPixels_ = focal;
+    }
+    std::vector<TerrainPatchKey> reviewPatches() const {
+        return ground_ ? ground_->snapshot() : std::vector<TerrainPatchKey>{};
+    }
+    void restoreReviewPatches(const std::vector<TerrainPatchKey> &keys) {
+        if (ground_)
+            ground_->restore(keys);
+    }
+    const TerrainRenderStats &renderStats() const { return ground_ ? ground_->stats() : lod_->stats(); }
+    const std::vector<TerrainPatchDraw> &patches() const {
+        return ground_ ? ground_->draws() : lod_->draws();
+    }
     // Diagnostic owned copies, never used by frame processing.
     std::vector<glm::vec2> readHeights(ChunkCoord, uint32_t tileLevel = 0, uint32_t geometryLevel = 0);
     std::vector<TerrainTileSnapshot> residency() const;
@@ -54,6 +72,7 @@ class VulkanTerrainStream {
     std::unique_ptr<TerrainCache> cache_;
     std::unique_ptr<TerrainStreamer> stream_;
     std::unique_ptr<TerrainLod> lod_;
+    std::unique_ptr<TerrainGroundLod> ground_;
     TerrainSettings settings_{};
     uint64_t epoch_ = 1, serial_ = 0, completed_ = 0, shaderHash_ = 0, deviceHash_ = 0;
     uint32_t capacity_ = 0, detailCapacity_ = 0;
@@ -61,6 +80,15 @@ class VulkanTerrainStream {
     uint32_t shadowDemandCount_ = 0, shadowMissingBoundsCount_ = 0;
     std::array<std::array<int64_t, 4>, 4> shadowMissingBounds_{};
     VkDeviceSize heightStride_ = 0, weightStride_ = 0;
+    uint32_t nearSlots_ = 0, distantSlots_ = 0;
+    VkDeviceSize compactStride_ = 0;
+    bool compact(uint32_t slot) const { return slot >= nearSlots_ && slot < nearSlots_ + distantSlots_; }
+    VkDeviceSize heightSkip(uint32_t slot) const { return compact(slot) ? layout_.heightOffsets[1] : 0; }
+    VkDeviceSize heightOffset(uint32_t slot) const {
+        return slot < nearSlots_ ? heightStride_ * slot
+               : compact(slot)   ? heightStride_ * nearSlots_ + compactStride_ * (slot - nearSlots_)
+                                 : heightStride_ * (slot - distantSlots_) + compactStride_ * distantSlots_;
+    }
     Buffer heights_;
     std::array<Buffer, 2> uploads_{}, readbacks_{}, views_{}, weights_{};
     Image coarse_;

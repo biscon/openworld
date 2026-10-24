@@ -27,6 +27,10 @@ RendererOptions options(const Temp &t) {
     o.ui = false;
     o.requireValidation = true;
     o.shaderDirectory = OPENWORLD_SHADER_DIR;
+    // This checks generation/transfer cancellation and fence lifetimes, not
+    // image quality. Keep the real terrain payload but avoid a 1280x800 render per frame.
+    o.width = 65;
+    o.height = 49;
     o.terrainGrid = {32, .5f};
     o.terrainCapacity = 32;
     o.lod = {true, 8, 64};
@@ -97,7 +101,10 @@ void cancelDetail(TerrainDetailPhase phase, bool pendingPublication = false) {
     const auto original = c;
     // Dependency/fade retention keeps coarse coverage valid while detail demand
     // leaves.
-    c.chunk.x += int64_t(8) << tile.key.level;
+    // Leave the full normal-demand range even if the sampled job belongs to a
+    // tile ahead of the camera. Eight tiles can still leave that tile eligible;
+    // which tile reaches Upload first depends on driver/worker timing.
+    c.chunk.x += int64_t(16) << tile.key.level;
     r.render(c, scene);
     auto tiles = r.readTerrainResidency();
     auto at = std::find_if(tiles.begin(), tiles.end(), [&](auto t) { return t.handle == job.handle; });
