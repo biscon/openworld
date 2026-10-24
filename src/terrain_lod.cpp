@@ -45,10 +45,30 @@ TerrainPatchTopology terrainPatchTopology(uint32_t cells) {
                 if (!(mask & (1u << q)))
                     continue;
                 const uint32_t a = z * (cells + 1) + x;
-                // The diagonal follows the collapse direction. The opposite diagonal
-                // can invert tiny triangles near the end of a nonuniform morph.
+                // Parent-triangle morphing and endpoint coalescing use this diagonal.
                 for (auto i : {a, a + cells + 1, a + cells + 2, a, a + cells + 2, a + 1})
                     t.indices.push_back(i);
+            }
+        r.count = uint32_t(t.indices.size()) - r.first;
+    }
+    const uint32_t half = cells / 2;
+    for (uint32_t mask = 0; mask < 16; ++mask) {
+        auto &r = t.stitched[mask];
+        r.first = uint32_t(t.indices.size());
+        const auto vertex = [&](uint32_t x, uint32_t z) {
+            if ((x == 0 && (mask & 1)) || (x == half && (mask & 2)))
+                z &= ~1u;
+            if ((z == 0 && (mask & 4)) || (z == half && (mask & 8)))
+                x &= ~1u;
+            return z * (half + 1) + x;
+        };
+        for (uint32_t z = 0; z < half; ++z)
+            for (uint32_t x = 0; x < half; ++x) {
+                const uint32_t a = vertex(x, z), b = vertex(x + 1, z), c = vertex(x, z + 1),
+                               d = vertex(x + 1, z + 1);
+                for (auto tri : {std::array<uint32_t, 3>{a, c, d}, std::array<uint32_t, 3>{a, d, b}})
+                    if (tri[0] != tri[1] && tri[1] != tri[2] && tri[0] != tri[2])
+                        t.indices.insert(t.indices.end(), tri.begin(), tri.end());
             }
         r.count = uint32_t(t.indices.size()) - r.first;
     }
@@ -56,9 +76,6 @@ TerrainPatchTopology terrainPatchTopology(uint32_t cells) {
 }
 float terrainMorph(float distance, float range) {
     return std::clamp((distance / range - 0.75f) * 4.0f, 0.0f, 1.0f);
-}
-glm::vec2 terrainMorphPosition(glm::uvec2 v, uint32_t step, float morph) {
-    return (glm::vec2(v) - glm::vec2(v & glm::uvec2(1)) * morph) * float(step);
 }
 TerrainLod::TerrainLod(TerrainGrid grid, uint32_t capacity, TerrainLodConfig config, uint32_t chunkCapacity)
     : grid_(grid), config_(config), capacity_(capacity), chunkCapacity_(chunkCapacity),
@@ -71,6 +88,7 @@ TerrainLod::TerrainLod(TerrainGrid grid, uint32_t capacity, TerrainLodConfig con
     nodes_.reserve((leaves * 4 - 1) / 3);
     bounds_.reserve(nodes_.capacity() * chunkCapacity_);
     errors_.reserve(nodes_.capacity() * chunkCapacity_);
+    metadata_.reserve(nodes_.capacity() * chunkCapacity_);
     draws_.reserve(nodes_.capacity() * chunkCapacity_);
     drawBounds_.reserve(draws_.capacity());
     casterDraws_.reserve(draws_.capacity() * 2);
@@ -100,6 +118,7 @@ void TerrainLod::setGrid(TerrainGrid grid) {
     build(0, 0, step, level);
     bounds_.resize(nodes_.size() * chunkCapacity_);
     errors_.resize(nodes_.size() * chunkCapacity_);
+    metadata_.resize(nodes_.size() * chunkCapacity_);
     std::fill(requiredRanges_.begin(), requiredRanges_.end(), config_.firstRange);
 }
 void TerrainLod::setBounds(uint32_t slot, const glm::vec2 *leaf) {
@@ -132,13 +151,14 @@ void TerrainLod::setQualityMetadata(uint32_t slot, const void *levels) {
             offset += width * width;
             width >>= 1;
         }
-        glm::vec4 v;
+        TerrainPatchMetadata v;
         const auto index = offset + (n.z / (patchCells() * n.step)) * width + n.x / (patchCells() * n.step);
         std::memcpy(&v, static_cast<const uint8_t *>(levels) + index * sizeof(v), sizeof(v));
         auto &b = bounds_[i * chunkCapacity_ + slot];
-        b = {std::min(b.x, v.x), std::max(b.y, v.y)};
+        b = {std::min(b.x, v.heights.x), std::max(b.y, v.heights.y)};
+        metadata_[i * chunkCapacity_ + slot] = v;
         auto &e = errors_[i * chunkCapacity_ + slot];
-        e = {v.z, v.w};
+        e = v.error;
         if (n.level)
             for (auto child : n.children) {
                 e = glm::max(e, errors_[child * chunkCapacity_ + slot]);
@@ -146,6 +166,15 @@ void TerrainLod::setQualityMetadata(uint32_t slot, const void *levels) {
                 b = {std::min(b.x, cb.x), std::max(b.y, cb.y)};
             }
     }
+}
+TerrainPatchMetadata TerrainLod::metadata(uint32_t slot, uint32_t x, uint32_t z, uint32_t level) const {
+    uint32_t i = 0;
+    while (nodes_[i].level > level) {
+        const auto &n = nodes_[i];
+        const auto half = n.step * patchCells() / 2;
+        i = n.children[(x >= n.x + half ? 1u : 0u) | (z >= n.z + half ? 2u : 0u)];
+    }
+    return metadata_[i * chunkCapacity_ + slot];
 }
 float TerrainLod::projectedError(const TerrainPatchDraw &p, ChunkCoord origin, uint32_t level,
                                  const Camera &observer, float focalPixels, bool eroded) const {
@@ -156,9 +185,10 @@ float TerrainLod::projectedError(const TerrainPatchDraw &p, ChunkCoord origin, u
         const auto b = bounds_[i * chunkCapacity_ + p.slot];
         const float spacing = grid_.spacing * float(1u << level);
         const auto offset = observer.terrainOffset(origin, grid_);
-        const glm::vec3 lo = offset + glm::vec3(n.x * spacing, b.x, n.z * spacing);
-        const glm::vec3 hi = offset + glm::vec3((n.x + patchCells() * n.step) * spacing, b.y,
-                                                (n.z + patchCells() * n.step) * spacing);
+        glm::vec3 lo = offset + glm::vec3(n.x * spacing, b.x, n.z * spacing);
+        glm::vec3 hi = offset + glm::vec3((n.x + patchCells() * n.step) * spacing, b.y,
+                                          (n.z + patchCells() * n.step) * spacing);
+        curveBounds(lo, hi, observer.curvature);
         const auto forward = observer.forward();
         const glm::vec3 nearCorner{forward.x >= 0 ? lo.x : hi.x, forward.y >= 0 ? lo.y : hi.y,
                                    forward.z >= 0 ? lo.z : hi.z};
@@ -170,15 +200,14 @@ float TerrainLod::projectedError(const TerrainPatchDraw &p, ChunkCoord origin, u
 void TerrainLod::box(uint32_t i, uint32_t slot, glm::vec3 offset, glm::vec3 &lo, glm::vec3 &hi) const {
     const auto &n = nodes_[i];
     auto b = bounds_[i * chunkCapacity_ + slot];
-    if (hierarchical_) {
-        b.x = std::min(b.x, envelope_.x);
-        b.y = std::max(b.y, envelope_.y);
-    }
+    // Metadata encloses this patch and its parent-target samples. Whole-tile
+    // envelopes unnecessarily prevent ridge occlusion and frustum rejection.
     lo = offset + glm::vec3(n.x * grid_.spacing, b.x, n.z * grid_.spacing);
     hi = offset + glm::vec3((n.x + n.step * patchCells()) * grid_.spacing, b.y,
                             (n.z + n.step * patchCells()) * grid_.spacing);
 }
 bool TerrainLod::visible(glm::vec3 lo, glm::vec3 hi) const {
+    curveBounds(lo, hi, hierarchyCamera_.curvature);
     for (auto p : planes_) {
         const glm::vec3 v(p.x >= 0 ? hi.x : lo.x, p.y >= 0 ? hi.y : lo.y, p.z >= 0 ? hi.z : lo.z);
         if (glm::dot(glm::vec3(p), v) + p.w < -0.01f)
@@ -199,7 +228,7 @@ void TerrainLod::visit(uint32_t i, uint32_t slot, glm::vec3 offset, glm::vec3 ob
         return;
     }
     uint32_t mask = allowed, viewMask = inView ? allowed : 0;
-    if (n.level)
+    if (n.level > minimumLevel_)
         for (uint32_t q = 0; q < 4; ++q) {
             if (!(allowed & (1u << q)))
                 continue;
@@ -220,6 +249,7 @@ void TerrainLod::visit(uint32_t i, uint32_t slot, glm::vec3 offset, glm::vec3 ob
             }
         }
     box(i, slot, offset, lo, hi);
+    curveBounds(lo, hi, hierarchyCamera_.curvature);
     const VisibilityBounds bounds{lo - glm::vec3(.01f), hi + glm::vec3(.01f), stats_.boundsReady};
     if (mask && collectCasters_) {
         casterDraws_.push_back({slot, n.x, n.z, n.step, n.level, mask, exterior_});
@@ -230,14 +260,16 @@ void TerrainLod::visit(uint32_t i, uint32_t slot, glm::vec3 offset, glm::vec3 ob
         drawBounds_.push_back(bounds);
         ++stats_.selected;
         ++stats_.perLevel[std::min(n.level + tileLevel_, maxTerrainLodLevels - 1)];
-        stats_.triangles += uint64_t(patchCells()) * patchCells() / 2 * bits(viewMask);
+        const auto triangles = uint64_t(patchCells()) * patchCells() / 2 * bits(viewMask);
+        stats_.triangles += triangles;
+        stats_.trianglesPerLevel[std::min(n.level + tileLevel_, maxTerrainLodLevels - 1)] += triangles;
     }
 }
-void TerrainLod::selectExteriorTile(uint32_t slot, ChunkCoord origin, uint32_t level, glm::vec2 envelope) {
+void TerrainLod::selectExteriorTile(uint32_t slot, ChunkCoord origin, uint32_t level) {
     if (!collectCasters_)
         return;
     exterior_ = true;
-    selectTile(slot, origin, level, 15, true, false, envelope);
+    selectTile(slot, origin, level, 15, true, false);
     exterior_ = false;
 }
 
@@ -250,7 +282,8 @@ void TerrainLod::select(const ChunkCoord *chunks, const uint32_t *slots, uint32_
                         const Camera &observer, const glm::mat4 &vp, bool enabled, bool culling, bool ready,
                         float rangeOverride) {
     hierarchical_ = false;
-    tileLevel_ = 0;
+    hierarchyCamera_ = camera;
+    tileLevel_ = minimumLevel_ = 0;
     if (count > chunkCapacity_)
         throw std::invalid_argument("LOD chunk count");
     draws_.clear();
@@ -291,15 +324,15 @@ void TerrainLod::beginHierarchy(const Camera &camera, const Camera &observer, co
              (radius + 1) * e - float(camera.local.x), (radius + 1) * e - float(camera.local.z)};
 }
 void TerrainLod::selectTile(uint32_t slot, ChunkCoord origin, uint32_t level, uint32_t mask, bool enabled,
-                            bool culling, glm::vec2 envelope) {
+                            bool culling, uint32_t minimumLevel) {
     if (!mask)
         return;
     const auto offset = hierarchyCamera_.terrainOffset(origin, grid_);
     const float spacing = grid_.spacing;
     grid_.spacing *= float(1u << level);
     stats_.firstRange = hierarchyRange_ * float(1u << level);
-    envelope_ = envelope;
     tileLevel_ = level;
+    minimumLevel_ = minimumLevel;
     visit(0, slot, offset, hierarchyEye_, enabled, culling, mask);
     grid_.spacing = spacing;
     stats_.firstRange = hierarchyRange_;

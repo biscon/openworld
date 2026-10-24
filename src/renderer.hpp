@@ -1,5 +1,6 @@
 #pragma once
 
+#include "atmosphere.hpp"
 #include "gtao.hpp"
 #include "lighting.hpp"
 #include "material_assets.hpp"
@@ -30,6 +31,9 @@ struct RendererOptions {
     ShadowCapacity shadowCapacity;
     bool forceDirectShadows = false, forceManualShadowFiltering = false, forceNoShadowDepth = false;
     uint32_t visibilityCapacity = 65536;
+    uint64_t atmosphereBudgetBytes = 64ull << 20;
+    bool forceNoAtmosphere = false;
+    bool curvedHorizon = false;
     uint64_t taaBudgetBytes = 512ull << 20, bloomBudgetBytes = 128ull << 20;
     bool forceNoTaa = false, forceNoBloom = false;
     uint64_t gtaoBudgetBytes = 512ull * 1024 * 1024;
@@ -44,11 +48,12 @@ struct RendererOptions {
     TerrainStreamingConfig streaming;
     bool ui = true;
     uint32_t width = 1280, height = 800; // Offscreen extent.
-    uint32_t renderHeight = 0; // Scene height; zero follows output. Width follows output aspect.
+    uint32_t renderHeight = 0;           // Scene height; zero follows output. Width follows output aspect.
 };
 
 struct SceneSettings {
     ShadingMode shading = ShadingMode::Pbr;
+    AtmosphereSettings atmosphere;
     TaaSettings taa;
     BloomSettings bloom;
     GtaoSettings gtao;
@@ -100,14 +105,16 @@ class Renderer {
     bool releaseMaterial(MaterialHandle);
     const SceneStats &sceneStats() const;
     const MaterialStats &materialStats() const;
-    bool reloadMaterials(
-        const std::filesystem::path &); // Explicit asset load; published on subsequent frames.
+    bool
+    reloadMaterials(const std::filesystem::path &); // Explicit asset load; published on subsequent frames.
     void resize();
     void resizeOffscreen(uint32_t width, uint32_t height);
     // Queued for next frame; 0 selects native, otherwise 1..16384.
     void setRenderHeight(uint32_t height);
     void resetTemporalHistory();
     bool invalidateInstanceHistory(InstanceHandle);
+    const AtmosphereStats &atmosphereStats() const;
+    AtmosphereSnapshot readAtmosphereSnapshot();
     const PostStats &postStats() const;
     PostSnapshot readPostSnapshot();
     HdrSnapshot readHdrSnapshot(); // Blocking diagnostic, pre-exposed pixels.
@@ -153,8 +160,13 @@ class Renderer {
     std::vector<TerrainSample> sampleTerrainNormalFixture(TerrainGrid, uint32_t level,
                                                           uint32_t tileLevel = 0);
     std::vector<TerrainSample> normalsForFixture(const std::vector<glm::vec2> &heights);
+    // Blocking numerical probe; non-streamed/non-LOD scratch only.
+    std::vector<TerrainSample> sampleCurvatureFixture(const std::vector<TerrainSample> &,
+                                                     glm::vec4 curvature, bool reducedTrigPrecision);
     // Diagnostic observer override; subsequent render must use freezeLod=true.
     void setTerrainLodObserver(const Camera &);
+    TerrainLodReviewState terrainLodReviewState() const;
+    void setTerrainLodReviewState(const TerrainLodReviewState &);
     void capture(const std::filesystem::path &path); // Offscreen PPM capture.
     void waitIdle();
     const std::string &deviceName() const;

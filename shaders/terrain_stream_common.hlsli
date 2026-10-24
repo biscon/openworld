@@ -4,7 +4,7 @@
 static bool previousGeometryActive=false;
 static TemporalTerrainRecord previousGeometry;
 #define TERRAIN_RECORD_ID
-struct View { column_major float4x4 viewProjection; float4 observer; float4 grid; float4 camera; float4 clip; };
+struct View { column_major float4x4 viewProjection; float4 observer; float4 grid; float4 camera; float4 clip; float4 curvature; float4 shadowClip; };
 [[vk::binding(0,0)]] ConstantBuffer<View> view;
 [[vk::binding(1,0)]] StructuredBuffer<float2> heights;
 struct Weights { float4 rows[4]; float4 heights[4]; float4 parentRows[4]; };
@@ -19,6 +19,8 @@ struct Weights { float4 rows[4]; float4 heights[4]; float4 parentRows[4]; };
 #endif
 [[vk::binding(9,0)]] Texture2DArray<float4> parentFineNormals;
 [[vk::binding(10,0)]] Texture2DArray<float4> parentNextNormals;
+[[vk::binding(11,0)]] Texture2DArray<float4> thirdNormals;
+[[vk::binding(12,0)]] Texture2DArray<float4> parentThirdNormals;
 struct Draw { float4 offset; uint4 options; uint4 patch; float4 morph; uint4 normals; uint4 indices; uint4 parent; float4 tile; };
 #if defined(TERRAIN_SHADOW) || defined(TERRAIN_SHADOW_FRAGMENT)
 [[vk::binding(0,3)]] StructuredBuffer<Draw> drawRecords;
@@ -52,7 +54,7 @@ float exactLerp(float a,float b,float f) {
 }
 uint heightOffset(uint level) {
     uint result=0;
-    for(uint l=0;l<level;++l){uint w=(draw.options.z>>l)+1;result+=w*w;}
+    for(uint l=(draw.options.w&32)!=0?1:0;l<level;++l){uint w=(draw.options.z>>l)+1;result+=w*w;}
     return result;
 }
 float levelHeight(uint2 p,uint level) {
@@ -63,28 +65,6 @@ float levelHeight(uint2 p,uint level) {
 float terrainHeight(uint2 p) {
     uint level=draw.tile.y!=0?uint(draw.morph.z):0;
     return levelHeight(p>>level,level);
-}
-float triangleLevelHeight(float2 p,uint level) {
-    uint cells=draw.options.z>>level;
-    p/=float(1u<<level);
-    uint2 a=min(uint2(p),cells-1);float2 f=p-a;
-    float h00=levelHeight(a,level),h10=levelHeight(a+uint2(1,0),level);
-    float h01=levelHeight(a+uint2(0,1),level),h11=levelHeight(a+1,level);
-    if(f.y==0) return exactLerp(h00,h10,f.x);
-    if(f.y==1) return exactLerp(h01,h11,f.x);
-    if(f.x==0) return exactLerp(h00,h01,f.y);
-    if(f.x==1) return exactLerp(h10,h11,f.y);
-    return f.x>=f.y ? h00+(h10-h00)*f.x+(h11-h10)*f.y : h00+(h11-h01)*f.x+(h01-h00)*f.y;
-}
-float interpolateHeight(float2 p,float morph) {
-    if(draw.tile.y!=0) {
-        uint level=uint(draw.morph.z);
-        float h=triangleLevelHeight(p,level);
-        return morph>0?exactLerp(h,triangleLevelHeight(p,level+1),morph):h;
-    }
-    uint2 a=min(uint2(p),draw.options.z-1);float2 f=p-float2(a);
-    return exactLerp(exactLerp(terrainHeight(a),terrainHeight(a+uint2(1,0)),f.x),
-                exactLerp(terrainHeight(a+uint2(0,1)),terrainHeight(a+1),f.x),f.y);
 }
 float2 weightCoordinate(float2 p) {
     float cells=draw.options.z, band=min(view.grid.w,cells*0.5);
@@ -147,7 +127,55 @@ float3 ownNormal(float2 grid,float morph) {
     }
     return lerp(coarse,fine,weight);
 }
+float normalField(float distance) {
+    float level=max(0,floor(log2(max(distance/64,1e-6)))+1);
+    return level+saturate((distance/(64*exp2(level))-.75)*4);
+}
+float3 stationaryNormalLevel(float2 grid,uint relative,uint base,uint detailSlot,uint coverageSlot,bool parent) {
+    uint maximum=draw.indices.w;
+    uint width,height,layers;
+    uint halo=(1u<<(maximum-relative))-1;
+    uint slot=relative==maximum?coverageSlot:detailSlot;
+    float2 texel=grid*view.grid.z/float(1u<<relative)+halo+.5;
+    uint choice=relative-base;
+    if(parent) {
+        if(choice==0) {parentFineNormals.GetDimensions(width,height,layers);return parentFineNormals.SampleLevel(normalSampler,float3(texel/float2(width,height),slot*2+draw.options.x),0).xyz;}
+        if(choice==1) {parentNextNormals.GetDimensions(width,height,layers);return parentNextNormals.SampleLevel(normalSampler,float3(texel/float2(width,height),slot*2+draw.options.x),0).xyz;}
+        parentThirdNormals.GetDimensions(width,height,layers);return parentThirdNormals.SampleLevel(normalSampler,float3(texel/float2(width,height),slot*2+draw.options.x),0).xyz;
+    }
+    if(choice==0) {fineNormals.GetDimensions(width,height,layers);return fineNormals.SampleLevel(normalSampler,float3(texel/float2(width,height),slot*2+draw.options.x),0).xyz;}
+    if(choice==1) {nextNormals.GetDimensions(width,height,layers);return nextNormals.SampleLevel(normalSampler,float3(texel/float2(width,height),slot*2+draw.options.x),0).xyz;}
+    thirdNormals.GetDimensions(width,height,layers);return thirdNormals.SampleLevel(normalSampler,float3(texel/float2(width,height),slot*2+draw.options.x),0).xyz;
+}
+float3 stationaryNormalAt(float2 grid,float absolute,bool parent) {
+    uint base=parent?max(1u,draw.normals.z)-1:draw.normals.z;
+    uint coverageSlot=parent?draw.parent.x:draw.indices.y;
+    uint detailSlot=parent?draw.indices.z:draw.normals.w;
+    uint width,height,layers;coarseNormals.GetDimensions(width,height,layers);
+    float2 uv=(grid*view.grid.z/float(1u<<draw.indices.w)+.5)/float2(width,height);
+    float3 coarse=coarseNormals.SampleLevel(normalSampler,float3(uv,coverageSlot*2+draw.options.x),0).xyz;
+    if(detailSlot==0xffffffff || base>=draw.indices.w)return coarse;
+    float weight=availability(grid);
+    if(parent) {
+        float2 q=weightCoordinate(grid);uint2 a=min(uint2(q),2);float2 f=q-a;
+        weight=lerp(lerp(weights.parentRows[a.y][a.x],weights.parentRows[a.y][a.x+1],f.x),lerp(weights.parentRows[a.y+1][a.x],weights.parentRows[a.y+1][a.x+1],f.x),f.y);
+    }
+    float level=clamp(absolute-draw.tile.z-(parent?1:0),float(base),float(min(base+2,draw.indices.w)));
+    uint lo=uint(level),hi=min(lo+1,draw.indices.w);
+    float3 fine=stationaryNormalLevel(grid,lo,base,detailSlot,coverageSlot,parent);
+    if(frac(level)>0)fine=lerp(fine,stationaryNormalLevel(grid,hi,base,detailSlot,coverageSlot,parent),frac(level));
+    return lerp(coarse,fine,weight);
+}
 float3 sampledNormal(float2 grid,float morph) {
+    if((draw.options.w&128)!=0) {
+        float absolute=normalField(distance(renderPosition(grid,0).xz,view.observer.xz));
+        float3 n=stationaryNormalAt(grid,absolute,false);
+        if(draw.parent.x!=0xffffffff) {
+            float weight=heightAvailability(grid);
+            if(weight<1)n=lerp(stationaryNormalAt(grid*.5+float2(draw.parent.yz),absolute,true),n,weight);
+        }
+        return normalize(n);
+    }
     float3 n=ownNormal(grid,morph);
     if(draw.parent.x!=0xffffffff) {
         float weight=heightAvailability(grid);

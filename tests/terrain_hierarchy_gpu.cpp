@@ -55,11 +55,14 @@ void settle(Renderer &r, Camera &c, SceneSettings &s) {
         observedMultipleStages |= a.generationSegments > 1;
         require(a.generationSegments <= TerrainGenerationBudget::maximumSegments, "bounded stage metadata");
         require(a.generationEstimatedMilliseconds <= TerrainGenerationBudget::targetMilliseconds + 1e-8 ||
-                    a.generationGroups == 1, "shared frame budget except one minimum-progress group");
+                    a.generationGroups == 1,
+                "shared frame budget except one minimum-progress group");
         require(r.validationErrors() == 0, "hierarchy Vulkan validation");
         const auto &quality = r.terrainRenderStats();
-        require(quality.triangles <= quality.baselineTriangles * 2, "quality stays within twice baseline geometry");
-        require(quality.qualityScale >= 1 && quality.qualityScale <= 2 && std::isfinite(quality.maximumErrorPixels),
+        require(quality.triangles <= quality.triangleBudget,
+                "stationary quality stays within fixed geometry budget");
+        require(quality.qualityScale >= 1 && quality.qualityScale <= 2 &&
+                    std::isfinite(quality.maximumErrorPixels),
                 "quality ranges and projected errors stay finite and bounded");
         stable = a.pending == 0 && a.detailPending == 0 && a.ioJobs == 0 ? stable + 1 : 0;
         if (!stable)
@@ -115,7 +118,8 @@ void checkSamples(Renderer &r, Camera &c) {
     }
     require(normalsCompared, "mixed-level normal comparison available");
 }
-void sharedVertices(Renderer &r) {
+void sharedVertices(Renderer &r, const Camera &camera) {
+    const auto inverse = glm::inverse(camera.viewProjection(float(r.renderWidth()) / r.renderHeight()));
     const auto positions = r.readTerrainVertexPositions();
     const auto tiles = r.readTerrainResidency();
     const auto patches = r.readTerrainPatches();
@@ -125,29 +129,36 @@ void sharedVertices(Renderer &r) {
         const auto tile =
             *std::find_if(tiles.begin(), tiles.end(), [&](auto t) { return t.handle.index == patch.slot; });
         const int64_t scale = int64_t(1) << tile.key.level;
-        for (uint32_t z = 0; z <= 8; ++z)
-            for (uint32_t x = 0; x <= 8; ++x) {
-                bool used = false;
-                for (uint32_t q = 0; q < 4; ++q)
-                    if (patch.mask & (1u << q))
-                        used |= x >= (q & 1) * 4 && x <= (q & 1) * 4 + 4 && z >= (q >> 1) * 4 &&
-                                z <= (q >> 1) * 4 + 4;
-                if (!used)
+        const uint32_t cells = patch.cells;
+        for (uint32_t z = 0; z <= cells; ++z)
+            for (uint32_t x = 0; x <= cells; ++x) {
+                if (((x == 0 && (patch.edges & 1)) || (x == cells && (patch.edges & 2))) && (z & 1))
+                    continue;
+                if (((z == 0 && (patch.edges & 4)) || (z == cells && (patch.edges & 8))) && (x & 1))
                     continue;
                 const auto key = std::make_pair((tile.key.x * 32 + patch.x + x * patch.step) * scale,
                                                 (tile.key.z * 32 + patch.z + z * patch.step) * scale);
-                const auto value = positions[offset + z * 9 + x];
+                const auto value = positions[offset + z * (cells + 1) + x];
+                auto world = inverse * value;
+                world /= world.w;
+                const auto local = glm::uvec2(patch.x + x * patch.step, patch.z + z * patch.step);
+                const glm::dvec2 origin(double(tile.key.x * scale - camera.chunk.x) * 16 - camera.local.x,
+                                        double(tile.key.z * scale - camera.chunk.z) * 16 - camera.local.z);
+                const auto fineXZ = origin + glm::dvec2(local) * double(scale) * .5;
+                const glm::dvec2 renderedXZ(world.x, world.z);
+                require(glm::length(renderedXZ - fineXZ) < .002,
+                        "Stationary geometry retains geographic XZ at every level");
                 auto [it, inserted] = points.emplace(key, value);
                 if (!inserted)
                     near(glm::length(it->second - value), 0, 1e-5,
                          "shared GPU vertices stay connected through residency "
                          "transitions");
             }
-        offset += 81;
+        offset += (cells + 1) * (cells + 1);
     }
 }
-void noSkyHoles(Renderer &r, const std::filesystem::path &path) {
-    sharedVertices(r);
+void noSkyHoles(Renderer &r, const Camera &camera, const std::filesystem::path &path) {
+    sharedVertices(r, camera);
     r.capture(path);
     std::ifstream f(path, std::ios::binary);
     std::string magic;
@@ -208,7 +219,7 @@ void run() {
         s.background[0] = s.background[2] = 1;
         s.background[1] = 0;
         r.render(c, s);
-        noSkyHoles(r, temp.path / "initial.ppm");
+        noSkyHoles(r, c, temp.path / "initial.ppm");
         for (int i = 0; i < 48; ++i) {
             c.local.x += 1.0;
             c.local.z += i < 24 ? .4 : -.4;
@@ -221,7 +232,7 @@ void run() {
             r.render(c, s);
             if (i % 6 == 0) {
 
-                noSkyHoles(r, temp.path / "transition.ppm");
+                noSkyHoles(r, c, temp.path / "transition.ppm");
             }
         }
         // A previously blocked parent neighbourhood at this position left all
@@ -238,7 +249,7 @@ void run() {
             highest = std::max(highest, h.y);
         c.local.y = highest + 10;
         r.render(c, s);
-        noSkyHoles(r, temp.path / "moved-refined.ppm");
+        noSkyHoles(r, c, temp.path / "moved-refined.ppm");
         require(r.terrainRenderStats().perLevel[0] > 0, "moved camera draws finest LOD after settling");
         auto changed = TerrainSettings{};
         changed.seed = 17;
@@ -319,7 +330,7 @@ void pressure() {
         c.update({}, 0, o.terrainGrid);
         r.render(c, s);
         if (i % 10 == 0)
-            noSkyHoles(r, temp.path / "pressure.ppm");
+            noSkyHoles(r, c, temp.path / "pressure.ppm");
     }
     require(r.terrainAllocatedBytes() == memory && !r.validationErrors(),
             "pressure retains bounded validated storage");
@@ -368,7 +379,7 @@ void ridgeTransitions() {
             s.eroded = eroded;
             r.render(c, s);
             if (frame % 8 == 0)
-                noSkyHoles(r, temp.path / "ridge-transition.ppm");
+                noSkyHoles(r, c, temp.path / "ridge-transition.ppm");
         }
     }
     require(r.terrainAllocatedBytes() == memory && !r.validationErrors(),

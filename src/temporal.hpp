@@ -1,6 +1,7 @@
 #pragma once
 #include "scene.hpp"
 #include <array>
+#include <stdexcept>
 #include <vector>
 namespace ow {
 struct TaaSettings {
@@ -32,11 +33,12 @@ struct PostSnapshot {
 };
 struct TemporalView {
     glm::mat4 current{1}, previous{1}, raster{1};
+    glm::vec4 curvature{0}, previousCurvature{0};
     glm::vec4 originDelta{0}; // Current origin relative to previous origin.
     glm::vec4 pixels{0};      // width, height, jitter x/y in pixels
     glm::vec4 state{0};       // active, history valid, exposure ratio, terrain record capacity
 };
-static_assert(sizeof(TemporalView) == 240);
+static_assert(sizeof(TemporalView) == 272);
 // Separate from the 128-byte draw ABI. Shader only accesses unchanged resident
 // heights.
 struct TemporalTerrainRecord {
@@ -57,17 +59,23 @@ class TerrainHistory {
         TemporalTerrainRecord value;
     };
     std::vector<Entry> previous_, pending_;
+    std::vector<uint32_t> previousOrder_;
     size_t capacity_;
 
   public:
     explicit TerrainHistory(size_t capacity) : capacity_(capacity) {
+        if (capacity > UINT32_MAX)
+            throw std::invalid_argument("Terrain history capacity exceeds index range");
         previous_.reserve(capacity);
         pending_.reserve(capacity);
+        previousOrder_.reserve(capacity);
     }
     void begin(bool valid) {
         pending_.clear();
-        if (!valid)
+        if (!valid) {
             previous_.clear();
+            previousOrder_.clear();
+        }
     }
     TemporalTerrainRecord append(const TemporalTerrainKey &, const TemporalTerrainRecord &);
     void submitted();

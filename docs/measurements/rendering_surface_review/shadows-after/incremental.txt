@@ -1,0 +1,1 @@
+Paired full-frame GPU delta (including generation): median 1.73393 ms; p95 1.96133 ms. GPU metrics describe completed submissions, with the same frame delay in each run.

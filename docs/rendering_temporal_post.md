@@ -2,7 +2,8 @@
 
 Status: implemented; verification results are recorded below. Target-GPU and live
 windowed acceptance remain separate gates. Auto-exposure, temporal upscaling,
-sharpening and sky/fog histories are deferred.
+sharpening and separate fog histories are deferred. [Slice 5H](rendering_atmosphere.md)
+adds sky reprojection to the existing TAA history.
 
 ## Colour, resolution and controls
 
@@ -24,8 +25,9 @@ Raw `readHdrSnapshot()` remains unchanged. `readPostSnapshot()` is a blocking
 observer, returning resolved colour, motion, reactivity, signed history depth,
 reconstructed bloom levels and dimensions. Negative history depth marks rejected
 history; magnitude is view-space metres. These buffers never feed CPU rendering
-choices. The current synthetic pre-exposed background is not physical sky:
-background without neighbouring geometry does not accumulate history.
+choices. Slice 5H writes rotation-only sky motion (W=2) and permits background-to-
+background history when depth remains zero. Geometry motion retains W=1 and depth
+validation. The synthetic clear colour with atmosphere Off does not accumulate history.
 
 ## Submitted-frame state and geometry
 
@@ -42,9 +44,10 @@ that history. Replacement mesh/material identities reject correspondence. Call
 `invalidateInstanceHistory(handle)` for object teleports. Camera origins retain
 integer cells plus double local coordinates before conversion to relative floats.
 
-Terrain previous/current records live in preallocated contiguous arrays. The prior
-array is sorted by surface key at submission and queried with binary search during
-preparation; cost is O(n log n), with no allocator traffic. Keys include world/slot
+Terrain previous/current records live in preallocated contiguous arrays. A compact
+32-bit index array is sorted by surface key at submission and queried with binary
+search during preparation; 432-byte records stay in append order. Cost remains
+O(n log n), with no allocator traffic. Keys include world/slot
 identity, generation/content revision, patch coordinates, topology, LOD and relevant
 residency/detail state. The original 128-byte draw ABI remains unchanged. A separate
 368-byte GPU record stores previous draw constants, blend weights, observer and
@@ -58,8 +61,9 @@ Tracking is bounded by visibility capacity, further reduced to the actual maximu
 draw count for non-streamed terrain. Overflow rejects temporal correspondence,
 reports a counter and keeps direct rendering intact. Mesh storage follows instance
 capacity. The streaming terrain tracker uses at most two arrays of 432-byte CPU
-entries and two GPU record buffers; at 65536 entries these are about 54 MiB CPU and
-46 MiB GPU. Residency budgets and world/cache identities are unchanged.
+entries, one 32-bit index per slot and two GPU record buffers; at 65536 entries
+these are about 54.25 MiB CPU and 46 MiB GPU. Residency budgets and world/cache
+identities are unchanged.
 
 `resetTemporalHistory()` handles explicit camera cuts. Automatic cuts exceed 256 m
 translation or 45 degrees rotation between submitted frames. Scene extent changes,
@@ -80,6 +84,10 @@ of 2 cm and 1% of expected previous view depth, including FP16 motion-depth prec
 History weight is bounded by 0.9 and reduced by motion, reactive coverage and
 luminance disagreement. Calculations use FP32; finite RGBA16F output uses the existing
 65504 representable limit. Signed R32F history depth doubles as rejection diagnostics.
+The [continuous-horizon renderer](rendering_horizon.md) stores motion depth in
+kilometres internally and converts it back to metres for history validation and
+public snapshots. It uses interpolated rendered positions for motion, with separate
+flat geographic positions for materials, and retains each frame’s curvature mapping.
 
 Algorithm reference: [Intel TAA](https://github.com/GameTechDev/TAA). The implementation
 is engine-owned HLSL; no upstream application or copied shader source is included.

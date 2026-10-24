@@ -422,11 +422,17 @@ void VulkanPost::begin(uint32_t frame, const Camera &camera, TerrainGrid grid, c
         (glm::length(delta) > 256 ||
          glm::dot(camera.forward(), s.previousCamera.forward()) < std::cos(glm::radians(45.f))))
         reset(TemporalReset::CameraCut);
+    if (s.haveHistory && (camera.curvature.x != s.previousCamera.curvature.x ||
+                          camera.curvature.z != s.previousCamera.curvature.z ||
+                          camera.renderFar != s.previousCamera.renderFar))
+        reset(TemporalReset::Settings);
     s.view = {};
+    s.view.curvature = camera.curvature;
+    s.view.previousCurvature = s.haveHistory ? s.previousCamera.curvature : camera.curvature;
     s.view.current = camera.viewProjection(float(s.width) / s.height);
     s.view.previous =
         s.haveHistory ? s.previousCamera.viewProjection(float(s.width) / s.height) : s.view.current;
-    s.view.originDelta = glm::vec4(glm::vec3(delta), 0);
+    s.view.originDelta = glm::vec4(glm::vec3(delta), camera.renderFar);
     auto jitter = s.stats.taa ? temporalJitter(s.sequence) : glm::vec2(0);
     s.view.raster = jitterProjection(s.view.current, jitter, {s.width, s.height});
     s.view.pixels = {s.width, s.height, jitter.x, jitter.y};
@@ -677,6 +683,9 @@ PostSnapshot VulkanPost::decodeSnapshot(const void *data) const {
     if (f.completedTaa) {
         out.resolved = rgba(f.taa.history);
         out.motion = rgba(f.taa.motion);
+        if (static_cast<const TemporalView *>(f.view.mapped)->curvature.z != 0)
+            for (auto &motion : out.motion)
+                motion.z *= 1000; // Public snapshots remain metres.
         out.reactivity.resize(size_t(s.width) * s.height);
         for (size_t i = 0; i < out.reactivity.size(); ++i)
             out.reactivity[i] = p[i] / 255.f;

@@ -11,6 +11,8 @@ struct Params { column_major float4x4 vp; uint4 viewport; uint4 options; };
 [[vk::push_constant]] ConstantBuffer<Params> params;
 groupshared uint scan[128];
 groupshared uint reasons[128];
+groupshared uint2 triangles[128];
+void addTriangles(inout uint2 total,uint n) {uint old=total.x;total.x+=n;total.y+=total.x<old?1:0;}
 uint classify(Candidate c) {
     if(c.lo.w == 0) return 0;
     float4 corners[8];
@@ -65,6 +67,8 @@ void main(uint3 group:SV_GroupID,uint lane:SV_GroupIndex) {
         Command empty=(Command)0;commands[batch.x+lane]=empty;
     }
     scan[lane]=visible; reasons[lane]=reason;
+    triangles[lane]=0;
+    if(visible)triangles[lane]=uint2(candidates[batch.x+lane].geometry.x/3,candidates[batch.x+lane].geometry.w);
     AllMemoryBarrierWithGroupSync();
     [unroll] for(uint step=1;step<128;step<<=1) {
         uint add=lane>=step?scan[lane-step]:0;
@@ -79,6 +83,15 @@ void main(uint3 group:SV_GroupID,uint lane:SV_GroupIndex) {
     if(lane==0) {
         uint frustum=0,occluded=0;
         for(uint i=0;i<batch.y;++i) {frustum+=reasons[i]==1?1:0;occluded+=reasons[i]==2?1:0;}
-        counts[group.x+params.options.y]=uint4(scan[127],frustum,occluded,0);
+        uint at=(group.x+params.options.y)*3;
+        counts[at]=uint4(scan[127],frustum,occluded,0);
+        uint2 terrain=0,meshes=0;
+        for(uint j=0;j<batch.y;++j) {
+            if(triangles[j].y!=0)addTriangles(terrain,triangles[j].x);
+            else addTriangles(meshes,triangles[j].x);
+        }
+        uint4 totals=uint4(terrain,meshes);
+        if(params.options.x==0)counts[at+1]=totals;
+        counts[at+2]=totals;
     }
 }

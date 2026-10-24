@@ -20,6 +20,127 @@ void publish(TerrainStreamer &s) {
         if (s.slot(i).state == TerrainStreamer::State::Requested)
             s.slot(i).state = TerrainStreamer::State::Resident;
 }
+void horizon() {
+    TerrainGrid grid{32, .5f};
+    const auto base = terrainHierarchyCapacity(8);
+    TerrainStreamer stream(base + 48 + 16, 8, grid, true, 16, 48);
+    Camera camera;
+    camera.chunk = {-1, 1000000};
+    camera.local = {8, 30, 8};
+    for (int step = 0; step < 30; ++step) {
+        stream.demand(camera, 8, step, step, 1);
+        publish(stream);
+        stream.advance(.25f);
+    }
+    require(stream.outerRadius() == 16 && stream.radius() == 8,
+            "Independent detailed and outer coverage");
+    require(stream.topLevel() == terrainHierarchyLevel(8), "Horizon preserves shadow caster level");
+    require(stream.pressureEvents() == 0, "Horizon fits reserved storage");
+    uint32_t outer = 0;
+    for (uint32_t i = 0; i < stream.capacity(); ++i) {
+        const auto &slot = stream.slot(i);
+        if (!slot.horizonOnly || !slot.wanted)
+            continue;
+        ++outer;
+        require(slot.level == stream.topLevel(), "Horizon requests only coarse tiles");
+        require(i >= base && i < base + 48, "Horizon does not displace near or shadow slots");
+        require(slot.active && slot.drawMask == 15,
+                "Resident horizon provides full coarse coverage");
+    }
+    require(outer > 0, "Horizon extends terrain");
+    const auto before = allocations.load();
+    for (int i = 0; i < 100; ++i) {
+        stream.demand(camera, 8, 30, 30, 1);
+        stream.advance(.016f);
+    }
+    require(allocations.load() == before, "Horizon demand allocates nothing");
+    for (int x : {-17, 0, 15, 32}) {
+        camera.chunk.x = x;
+        for (int i = 0; i < 40; ++i) {
+            stream.demand(camera, 8, 100, 100, 1);
+            publish(stream);
+            stream.advance(.25f);
+        }
+        const int centre = stream.find(camera.chunk);
+        require(centre >= 0 && stream.slot(centre).active, "Horizon flight retains near detail");
+    }
+    for (int i = 0; i < 40; ++i) {
+        stream.demand(camera, 1, 100, 100, 1);
+        publish(stream);
+        stream.advance(.25f);
+    }
+    require(stream.outerRadius() == 2, "Outer range follows detailed radius changes");
+}
+void distantHierarchy() {
+    TerrainGrid grid{256, .5f};
+    const auto base = terrainHierarchyCapacity(128), distant = 48u * 6;
+    TerrainStreamer stream(base + distant + 16, 128, grid, true, 16, distant, 8192);
+    Camera camera;
+    require(stream.detailedLevel() == 7 && stream.topLevel() == 13,
+            "Independent shadow and distant levels");
+    for (int x : {-8193, -1, 0, 127, 8191}) {
+        camera.chunk = {x, -x - 1};
+        for (int frame = 0; frame < 80; ++frame) {
+            stream.demand(camera, 64, 100, 100, 1);
+            publish(stream);
+            stream.advance(.25f);
+        }
+        const int centre = stream.find(camera.chunk);
+        require(centre >= 0 && stream.slot(centre).active,
+                "Near terrain remains active under distant ancestors");
+        require(stream.outerRadius() == 8192 && stream.radius() == 64,
+                "Distant range independent of detail radius");
+        for (uint32_t i = 0; i < stream.capacity(); ++i) {
+            const auto &tile = stream.slot(i);
+            if (tile.wanted && tile.horizonOnly)
+                require(i >= base && i < base + distant && tile.level > 7,
+                        "Distant pool cannot consume near or shadow slots");
+        }
+    }
+    TerrainStreamer small(terrainHierarchyCapacity(8) + 48 * 13, 8, {32, .5f}, true, 0, 48 * 13,
+                          65536);
+    for (int i = 0; i < 40; ++i) {
+        small.demand(camera, 8, 100, 100, 1);
+        publish(small);
+        small.advance(.25f);
+    }
+    require(small.topLevel() == 16 && small.slot(small.find(camera.chunk)).active,
+            "Small chunks support distant data levels beyond the per-tile LOD count");
+    const auto before = allocations.load();
+    for (int i = 0; i < 30; ++i) {
+        stream.demand(camera, 32, 100, 100, 1);
+        stream.advance(.016f);
+    }
+    require(allocations.load() == before, "Extended hierarchy demand has no allocations");
+}
+void curvature() {
+    glm::vec4 mapping{6360000, 2000, 1, 16384};
+    near(glm::length(curvePosition(glm::dvec3(0), mapping)), 0, 1e-9, "Camera is curvature origin");
+    const auto p = curvePosition({100000, -2000, 0}, mapping);
+    near(glm::length(p + glm::dvec3(0, 6362000, 0)), 6360000, 1e-7,
+         "Zero-altitude terrain lies on shared sphere");
+    for (float x : {-1000000.f, -100000.f, -10.f, 0.f, 20000.f, 500000.f}) {
+        glm::vec3 lo{x, -4000, -80000}, hi{x + 32000, 2000, 64000}, a = lo, b = hi;
+        curveBounds(a, b, mapping);
+        for (int i = 0; i <= 8; ++i)
+            for (int j = 0; j <= 8; ++j)
+                for (int k = 0; k <= 2; ++k) {
+                    const auto q = curvePosition(
+                        glm::dvec3(glm::mix(lo, hi, glm::vec3(i / 8.f, k / 2.f, j / 8.f))),
+                        mapping);
+                    require(glm::all(glm::greaterThanEqual(q, glm::dvec3(a))) &&
+                                glm::all(glm::lessThanEqual(q, glm::dvec3(b))),
+                            "Curved bounds contain interior and boundary samples");
+                }
+    }
+    const auto distance = horizonCoverage(6360000, -4000, 4000);
+    require(distance > 500000 && distance < 1048576,
+            "Horizon covers low flight and supported elevation bounds");
+    Camera c;
+    c.renderFar = 1572864;
+    auto q = c.viewProjection(1) * glm::vec4(0, 0, -c.renderFar, 1);
+    near(q.z / q.w, 0, 1e-7, "Extended reversed-Z far endpoint");
+}
 void hierarchy() {
     for (int64_t v = -100; v < 100; ++v) {
         const auto p = terrainParent({v, v, 0});
@@ -125,7 +246,7 @@ void selection() {
             if (!s.active)
                 continue;
             const int64_t scale = int64_t(1) << s.level;
-            lod.selectTile(i, {s.chunk.x * scale, s.chunk.z * scale}, s.level, s.drawMask, true, false, {0, 0});
+            lod.selectTile(i, {s.chunk.x * scale, s.chunk.z * scale}, s.level, s.drawMask, true, false);
         }
         rects.clear();
         for (auto patch : lod.draws()) {
@@ -188,7 +309,7 @@ void refinementFollowsCamera() {
                     continue;
                 const auto scale = int64_t(1) << tile.level;
                 lod.selectTile(i, {tile.chunk.x * scale, tile.chunk.z * scale}, tile.level, tile.drawMask,
-                               true, false, {0, 0});
+                               true, false);
             }
             bool fineUnderCamera = false;
             for (const auto &patch : lod.draws())
@@ -210,6 +331,43 @@ void budgets() {
     p = terrainHierarchyPoolCapacity(100 * terrainMiB, 1024, 128, true, coverage, detail);
     require(p.maximumRadius < 128, "insufficient budget reduces effective distance");
 }
+void stationaryPublication() {
+    const TerrainGrid grid{32, .5f};
+    TerrainStreamer stream(terrainHierarchyCapacity(8), 8, grid, true);
+    Camera camera;
+    camera.local = {8, 20, 8};
+    for (int frame = 0; frame < 40; ++frame) {
+        stream.demand(camera, 8, frame, frame, 1);
+        publish(stream);
+        stream.advance(.25f);
+    }
+    const int index = stream.find(camera.chunk);
+    require(index >= 0 && stream.slot(index).active, "Publication fixture settles fine ground");
+    auto &child = stream.slot(index);
+    child.active = child.visible = child.refine = false;
+    child.heightFade = .5f;
+    stream.advance(.025f);
+    require(!child.active, "Cancelling incomplete readiness never publishes a child");
+    child.refine = true;
+    stream.advance(.05f);
+    require(!child.active, "Partial readiness retains parent coverage");
+    stream.advance(.1f);
+    require(child.active, "Complete readiness publishes the child");
+    child.refine = false;
+    stream.advance(.05f);
+    require(child.active, "Departing child remains visible until retirement is ready");
+    child.refine = true;
+    stream.advance(.025f);
+    require(child.active, "Re-entering demand cannot withdraw an already visible child");
+    child.refine = false;
+    stream.advance(.25f);
+    require(!child.active, "Completed withdrawal restores parent coverage");
+    const int parent = stream.findTile(terrainParent(child.tile()));
+    const auto quadrant = uint32_t(child.chunk.x - terrainFloorDivide(child.chunk.x, 2) * 2) +
+                          2 * uint32_t(child.chunk.z - terrainFloorDivide(child.chunk.z, 2) * 2);
+    require(parent >= 0 && (stream.slot(parent).drawMask & (1u << quadrant)),
+            "Withdrawn child leaves complete parent coverage");
+}
 void depth() {
     Camera c;
     c.pitch = c.yaw = 0;
@@ -220,9 +378,13 @@ void depth() {
 } // namespace
 int main() {
     try {
+        horizon();
+        distantHierarchy();
+        curvature();
         hierarchy();
         selection();
         refinementFollowsCamera();
+        stationaryPublication();
         budgets();
         depth();
         std::cout << "Terrain hierarchy CPU tests passed\n";

@@ -31,6 +31,9 @@ struct RenderingStats {
     uint64_t hdrBytes = 0, lightingBytes = 0;
     double sceneMilliseconds = 0, outputMilliseconds = 0;
     double frameMilliseconds = 0; // Uploads/generation through output and UI; excludes presentation wait.
+    // Current-frame CPU work, excluding GPU/fence/presentation waits. Streamed terrain only.
+    double terrainSelectionMilliseconds = 0, terrainPreparationMilliseconds = 0,
+           terrainFinalizeMilliseconds = 0;
     double lightingStartupMilliseconds = 0; // CPU bake, uploads; excludes pipelines.
     bool timingsAvailable = false;
 };

@@ -62,6 +62,8 @@ class VulkanTerrain {
     std::vector<TerrainSample> sampleTerrainNormalFixture(TerrainGrid, uint32_t level,
                                                           uint32_t tileLevel);
     std::vector<TerrainSample> normalsForFixture(const std::vector<glm::vec2> &heights);
+    std::vector<TerrainSample> sampleCurvatureFixture(const std::vector<TerrainSample> &,
+                                                     glm::vec4 curvature, bool reducedTrigPrecision);
 
   private:
     friend class VulkanTerrainStream;
@@ -112,6 +114,7 @@ class VulkanTerrain {
     VkPipeline heightPipeline_{}, normalPipeline_{}, filterPipeline_{}, boundsPipeline_{};
     std::array<VkPipeline, 2> heightLevelPipelines_{};
     VkPipeline normalFixturePipeline_{};
+    VkPipeline curvatureFixturePipeline_{};
     VkPipeline geographyPipeline_{}; // Lazily created for blocking diagnostics only.
     std::filesystem::path geographyShader_;
     void readBuffer(const Buffer &, void *out, VkDeviceSize bytes, VkDeviceSize offset = 0);

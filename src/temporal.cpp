@@ -1,5 +1,6 @@
 #include "temporal.hpp"
 #include <cmath>
+#include <numeric>
 namespace ow {
 const char *postFallbackName(PostFallback r) {
     switch (r) {
@@ -91,15 +92,19 @@ TemporalTerrainRecord TerrainHistory::append(const TemporalTerrainKey &key,
                                              const TemporalTerrainRecord &value) {
     if (pending_.size() >= capacity_)
         return {};
-    auto it = std::lower_bound(previous_.begin(), previous_.end(), key,
-                               [](const Entry &a, const auto &b) { return a.key < b; });
-    auto result = it != previous_.end() && it->key == key ? it->value : TemporalTerrainRecord{};
+    auto it = std::lower_bound(previousOrder_.begin(), previousOrder_.end(), key,
+                              [&](uint32_t a, const auto &b) { return previous_[a].key < b; });
+    auto result = it != previousOrder_.end() && previous_[*it].key == key
+                      ? previous_[*it].value
+                      : TemporalTerrainRecord{};
     pending_.push_back({key, value});
     return result;
 }
 void TerrainHistory::submitted() {
     previous_.swap(pending_);
-    std::sort(previous_.begin(), previous_.end(),
-              [](const Entry &a, const Entry &b) { return a.key < b.key; });
+    previousOrder_.resize(previous_.size());
+    std::iota(previousOrder_.begin(), previousOrder_.end(), 0u);
+    std::sort(previousOrder_.begin(), previousOrder_.end(),
+              [&](uint32_t a, uint32_t b) { return previous_[a].key < previous_[b].key; });
 }
 } // namespace ow

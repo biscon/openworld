@@ -40,7 +40,9 @@ Clear depth zero prevents rejection. Integer loads avoid filtering assumptions.
 
 Mesh upload retains local bounds; transformed AABBs include rotation, mirrored and
 nonuniform scale, with a rounding allowance proportional to the transform magnitude. Terrain selection exports bounds alongside patches, including
-filtered/coarser levels and parent/refinement envelopes; unknown bounds render.
+the per-patch fine/coarser endpoint metadata and visual curvature; unknown bounds render.
+The whole-tile/parent height envelope no longer inflates every patch. See the
+[surface correction](rendering_surface_review.md).
 All eight corners define projected bounds and nearest reversed depth. Camera-inside,
 near-plane crossing and nonfinite projections render. Rectangles expand one pixel,
 with magnitude-aware bounds/clip-plane rounding margins, then query every overlapped texel at a level covering at most 2x2 texels. Reject only
@@ -59,6 +61,9 @@ Renderer owns the shared depth-to-compute and compute-to-attachment transitions;
 Explicit dependencies cover host/upload/reset to compute, depth writes to sampling,
 each pyramid level, compute to indirect/shader reads, and depth sampling back to
 attachment access. Visibility results never cause CPU waits/readback decisions.
+Depth and opaque-colour triangle totals are split between terrain and meshes;
+completed counters include their originating frame serial and mode. CPU-selected
+terrain triangles/per-LOD totals and shadow raster triangles are labelled separately.
 Aggregate counters/timestamps are collected after existing fences only (two frame
 slots of latency); the UI labels these completed results separately from current
 candidate/batch counts. Resource
@@ -137,7 +142,7 @@ The full-depth baseline still renders depth geometry before culling colour geome
 Tile/LOD descriptors and per-mesh geometry limit batch merging; no speedup is assumed
 for highly fragmented state or open terrain. The native-resolution pyramid costs
 roughly `4 * width * height * 4/3` bytes per frame, plus driver allocation padding.
-Candidate/record/batch/command/count buffers use `228 * capacity` bytes per frame
+Candidate/record/batch/command/count buffers use `260 * capacity` bytes per frame
 before padding; two frame slots are allocated at startup. CPU prepared lists are
 bounded by the existing terrain/scene capacities. Hi-Z is opt-in; two-phase history,
 transparent occlusion, selected occluders and shared geometry arenas are deferred.
@@ -170,3 +175,8 @@ justify enabling Hi-Z by default. Raw median/p95 rows and metadata are retained 
 ![Owned open-plain fixture with Hi-Z](images/rendering_5e/plain.png)
 
 ![Small streamed terrain flight with Hi-Z](images/rendering_5e/streamed_terrain.png)
+
+The interactive demo enables the opaque depth prepass by default following native
+performance review. The checkbox and `--no-depth-prepass` retain the comparison
+path; Hi-Z/GTAO still require a prepass when effective. Core `SceneSettings` leaves
+the choice explicit for tools and owned fixtures.

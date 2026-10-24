@@ -27,13 +27,16 @@ void main(uint3 tid:SV_DispatchThreadID){
         reactive=max(reactive,reactivity.Load(int3(q,0)).r);
     }
     current/=max(total,1e-6);mean/=9;float3 sigma=sqrt(max(moment/9-mean*mean,0));
-    float4 velocity=motion.Load(int3(chosen,0));float2 oldUv=uv+velocity.xy;
-    bool valid=temporal.state.y!=0&&velocity.w>0&&nearest>0&&all(oldUv>0)&&all(oldUv<1);
+    int2 centrePixel=clamp(centre,0,int2(settings.dims.xy)-1);
+    if(sourceDepth.Load(int3(centrePixel,0)).r==0){chosen=centrePixel;nearest=0;}
+    float4 velocity=motion.Load(int3(chosen,0));velocity.z*=temporal.curvature.z!=0?1000:1;float2 oldUv=uv+velocity.xy;
+    bool sky=nearest==0&&velocity.w>1.5;
+    bool valid=temporal.state.y!=0&&velocity.w>0&&(nearest>0||sky)&&all(oldUv>0)&&all(oldUv<1);
     float4 old=0;float oldZ=0;
     if(valid){
         int2 hp=clamp(int2(oldUv*settings.dims.xy),0,int2(settings.dims.xy)-1);
         oldZ=abs(historyDepth.Load(int3(hp,0)).r);
-        valid=oldZ>0&&abs(oldZ-velocity.z)<=max(.02,velocity.z*.01);
+        valid=sky?oldZ==0:oldZ>0&&abs(oldZ-velocity.z)<=max(.02,velocity.z*.01);
         if(valid){old=cubicHistory(oldUv);old.rgb*=temporal.state.z;reactive=max(reactive,saturate(old.a));valid=all(isfinite(old));}
     }
     float3 clipped=rgb(clamp(ycocg(old.rgb),mean-1.25*sigma,mean+1.25*sigma));
@@ -43,7 +46,7 @@ void main(uint3 tid:SV_DispatchThreadID){
     // Invalid/background pixels never read uninitialized history or amplify NaNs.
     float3 colour=weight>0?lerp(current,clipped,weight):current;
     result[p]=float4(finiteHdr(colour),reactivity.Load(int3(chosen,0)).r);
-    const float zn=.5,zf=64000;
+    const float zn=.5;float zf=temporal.originDelta.w;
     float z=nearest>0?(zn*zf/(zf-zn))/(nearest+zn/(zf-zn)):0;
     depthResult[p]=weight>0?z:-z;
 }

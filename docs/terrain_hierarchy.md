@@ -2,7 +2,7 @@
 
 Milestone 4 extends the milestone 3 streamer. The application enables hierarchical mode; the flat streamer and fixed-neighbourhood renderer remain diagnostic baselines. See [streaming](terrain_streaming.md) for cache workers, mailbox ownership, transfer slicing and fence retirement, which remain in use.
 
-The [ridge LOD correction](terrain_lod_quality.md) supersedes the original point-sampled height representation and fixed-only distance ranges described below: filtered height levels, endpoint-preserving height morphing and bounded error-driven range extension are now enabled.
+The [ridge LOD correction](terrain_lod_quality.md) supplies filtered height levels. [Stationary ground LOD](terrain_stationary_lod.md) now replaces its shared-range controller and geometry morph with locally refined, stitched geographic patches.
 
 ## Identity and representations
 
@@ -14,7 +14,7 @@ Hierarchical coverage contains base/eroded heights, conservative sampled-surface
 
 Canonical sampling addresses quarter-metre world coordinates using a signed 64-bit integer represented by two 32-bit words. Shader noise-domain conversion multiplies the coordinate by the exact binary frequency using three integer limbs, then extracts lattice and fraction. This avoids shaderInt64/float64 requirements and makes samples at the same absolute filtered level use the same arithmetic regardless of tile origin or data representation. The existing supported noise-lattice range is still checked; world coordinates are not unlimited. The representation uses 24 fractional bits in noise space. GPU fixtures compare matching absolute-level heights exactly; finest-level generation retains the established world.
 
-Normal level zero retains central differences at 0.25 m. Higher absolute normal levels use central differences at half their output spacing, followed by a normalized 3×3 [1,2,1] tent. This is a bounded kernel, not recursive filtering down from every underlying 0.25 m sample. Each 8×8 output group shares its height stencil; filtered normals use 21×21 original height samples; the geometry-height blur is deliberately excluded to retain sub-mesh lighting detail. Halos and world alignment make the same absolute normal level agree across different data-tile levels. Cache representation and the tile level are part of the header identity; incompatible entries regenerate rather than migrate. The filtered representation is now 7 following the [ridge LOD correction](terrain_lod_quality.md); startup diagnostic unfiltered pyramids use representation 8.
+Normal level zero retains central differences at 0.25 m. Higher absolute normal levels use central differences at half their output spacing, followed by a normalized 3×3 [1,2,1] tent. This is a bounded kernel, not recursive filtering down from every underlying 0.25 m sample. Each 8×8 output group shares its height stencil; filtered normals use 21×21 original height samples; the geometry-height blur is deliberately excluded to retain sub-mesh lighting detail. Halos and world alignment make the same absolute normal level agree across different data-tile levels. Cache representation and the tile level are part of the header identity; incompatible entries regenerate rather than migrate. The filtered representation is now 11 (unfiltered diagnostic 12, compact distant 13): metadata includes current/parent approximation error and replacement displacement for [stationary ground LOD](terrain_stationary_lod.md). Old cached payloads regenerate.
 
 ## Demand, ownership and pressure
 
@@ -30,15 +30,26 @@ Refinement demand must also include that parent neighbourhood **before** a child
 
 ## Selection and transitions
 
-Hierarchical selection uses horizontal distance bands doubling from a baseline of 64 m. Sampled approximation errors can expand the shared ranges by up to two times, subject to a twice-baseline triangle allowance. Sampled height bounds, expanded by the parent envelope during transitions, control frustum culling and conservative pixel-error projection. The existing quadrant topology and coherent even-vertex anchors are retained. Data-level neighbourhood readiness and the distance-band spacing keep neighbouring selected geometry within one level; reduced fixtures verify this with delayed products and partial parent masks.
+Hierarchical selection now uses [stationary ground LOD](terrain_stationary_lod.md):
+world-keyed half-patches, local replacement-error refinement, 64 m protected ground,
+2:1 edge/corner balance and 16 reusable stitch patterns. The default fixed triangle
+allowance is 2,097,152; resource pressure is reported explicitly. Per-patch metadata
+includes both filtered representations for conservative culling. View frustum culling
+follows selection, so camera rotation cannot change shared seams.
 
-Height availability approaches its target over 0.25 seconds. Only the finest geometry in a data tile needs an additional collapse toward its parent grid; coarser geometry already samples that grid. Shared 4×4 availability controls use identical edge/corner minima. Intermediate geometry blends current and parent triangle heights while collapsing toward even-grid anchors, so different data representations evaluate the same morphed edge. Lookup endpoints are exact, and rendering adds the integer camera-chunk-relative tile origin before subtracting camera-local position once.
+Children become visible only after their existing readiness timer and complete
+parent-neighbourhood dependencies settle. A departing child retains its coverage
+until retirement is ready. Heights no longer fade with either distance or residency;
+shared boundaries use the coarsest incident canonical representation. The availability
+weights remain useful for normal publication and dependency lifetime, not geometry
+movement. Normals follow their own geographic distance/filter field and bounded
+motion-predicted detail demand, independently of selected geometry. The existing
+prefetch ring supplies upcoming coverage without new steady-state allocation.
 
-Normals transition between the tile and available parent representation using the same spatial availability, independently of fine-normal arrival. Fine normals retain their own short residency fade and shared boundary weights. Parent normal sampling uses the matching absolute normal level when available. Level-colour diagnostics show absolute geometry levels (palette repeats after eight colours).
-
-Turning LOD off in hierarchical mode draws the finest **resident** grid; it does not request all base tiles at 16 km. This diagnostic can submit many triangles. Frozen LOD retains the distance observer while streaming demand and visibility continue following the camera.
-
-The renderer uses reversed-Z with D32, a 0.5 m near plane and a 64 km far plane. Depth clears to zero and tests greater. Camera-relative positioning remains in use.
+Turning LOD off requests the finest **resident** representation within the same
+fixed triangle allowance; it cannot materialize fine data at every distant level.
+Frozen LOD retains the geographic partition and observer while visibility and
+streaming continue following the live camera. Bookmarks now store those patch keys.
 
 ## GPU work and diagnostics
 

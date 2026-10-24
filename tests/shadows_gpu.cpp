@@ -141,7 +141,8 @@ void offscreenAndMaterials() {
     compare(shadow, r.readHdrSnapshot(), "Mirrored caster preserves geometric shadow");
     r.render(c, s);
     compare(shadow, r.readHdrSnapshot(), "Repeated frame retains mirrored shadow");
-    // A transparent receiver must sample its own position, without a camera depth dependency.
+    // A transparent receiver must sample its own position, without a camera depth
+    // dependency.
     m.alpha = AlphaMode::Blend;
     m.baseColour.a = .5f;
     wall.material = r.createMaterial(m);
@@ -156,7 +157,8 @@ void offscreenAndMaterials() {
     for (size_t i = 0; i < transparentOn.pixels.size(); ++i)
         received +=
             transparentOff.pixels[i].x > .01f && transparentOn.pixels[i].x < transparentOff.pixels[i].x * .8f;
-    require(received > 5, "Blended surfaces receive offscreen-caster shadows at their own positions");
+    require(received > 5, "Blended surfaces receive offscreen-caster shadows at "
+                          "their own positions");
     wall.material = material;
     r.updateInstance(wallHandle, wall);
     m.alpha = AlphaMode::Opaque;
@@ -265,7 +267,8 @@ void cascadeRanges() {
         size_t dark = 0;
         for (size_t i = 0; i < on.pixels.size(); ++i)
             dark += off.pixels[i].x > .99f && on.pixels[i].x < .7f;
-        require(dark > 5, "Sun shadows remain present through every cascade boundary and far mountains");
+        require(dark > 5, "Sun shadows remain present through every cascade "
+                          "boundary and far mountains");
         if (distance == 4000) {
             auto depth = r.readShadowSnapshot();
             const size_t first = 4ull * 512 * 512;
@@ -390,8 +393,56 @@ HdrSnapshot commandImage(bool direct, bool manual) {
 void commandRanges() {
     auto indirect = commandImage(false, false);
     compare(indirect, commandImage(true, false),
-            "Compact indirect matches direct rendering, including after Hi-Z counted draws");
-    compare(indirect, commandImage(false, true), "Manual PCF matches hardware comparison filtering");
+            "Compact indirect matches direct rendering, including after Hi-Z "
+            "counted draws");
+    compare(indirect, commandImage(false, true), "Legacy manual-filter override preserves unified PCF results");
+}
+// An isolated plane cannot shadow itself. Exercise a grazing light, subtexel
+// translations and different cascade footprints with the production PCF path.
+void receiverPlanes() {
+    RendererOptions o;
+    o.ui = false;
+    o.requireValidation = true;
+    o.shaderDirectory = OPENWORLD_SHADER_DIR;
+    o.width = 65;
+    o.height = 49;
+    o.terrainGrid = {8, .5f};
+    o.terrainCapacity = 8;
+    o.shadowCapacity.resolution = 256;
+    Renderer r(o);
+    SceneSettings s;
+    s.terrainVisible = false;
+    s.shadows.diagnostic = 1;
+    s.shadows.nearDistance = 100;
+    s.shadows.farDistance = 512;
+    MeshMaterial material;
+    material.doubleSided = true;
+    MeshInstance plane;
+    plane.mesh = r.uploadMesh(makeQuad());
+    plane.material = r.createMaterial(material);
+    plane.scale = {2000, 2000, 1};
+    plane.position.local = {0, 0, -80};
+    r.createInstance(plane);
+    Camera c;
+    for (float grazing : {.7f, .1f, .02f}) {
+        s.lighting.sunDirection = glm::normalize(glm::vec3(1, .3f, grazing));
+        for (double distance : {8., 80., 240.})
+            for (double subtexel : {0., .03125, .137}) {
+                c.local = {subtexel, subtexel * .7, -80 + distance};
+                r.render(c, s);
+                auto hdr = r.readHdrSnapshot();
+                uint32_t dark = 0;
+                for (const auto &pixel : hdr.pixels)
+                    dark += pixel.x < .99f;
+                if (dark)
+                    std::cerr << "Plane grazing=" << grazing << " distance=" << distance
+                              << " phase=" << subtexel << " dark=" << dark
+                              << " centre=" << hdr.pixels[hdr.pixels.size() / 2].x << '\n';
+                require(dark == 0, "Isolated plane stays lit at grazing slopes and "
+                                   "subtexel positions");
+            }
+    }
+    require(r.validationErrors() == 0, "Receiver plane Vulkan validation");
 }
 void steepTerrain() {
     RendererOptions o;
@@ -404,6 +455,7 @@ void steepTerrain() {
     o.terrainGrid = {64, .5f};
     o.terrainCapacity = 64;
     o.lod = {true, 8, 32};
+    o.lod.triangleBudget = 524288; // Bounded draw storage for this smaller 64-cell fixture.
     o.normalSubdivisions = 1;
     o.streaming.enabled = o.streaming.hierarchical = true;
     o.streaming.diskCache = false;
@@ -453,7 +505,9 @@ void steepTerrain() {
     for (double distance : {0., 100., 400.}) {
         Camera observer = c;
         observer.local.z += distance;
-        r.setTerrainLodObserver(observer);
+        // Select a fresh partition at each observer, then freeze it for the
+        // paired shadow comparison. Moving a frozen observer alone preserves keys.
+        r.setTerrainLodReviewState({observer, 1, 0, true});
         s.freezeLod = true;
         s.shadows.mode = ShadowMode::Off;
         r.render(c, s);
@@ -598,7 +652,9 @@ void terrain() {
 int main(int argc, char **argv) {
     try {
         if (argc > 1) {
-            if (std::string(argv[1]) == "steep")
+            if (std::string(argv[1]) == "planes")
+                receiverPlanes();
+            else if (std::string(argv[1]) == "steep")
                 steepTerrain();
             else if (std::string(argv[1]) == "commands")
                 commandRanges();
@@ -617,6 +673,7 @@ int main(int argc, char **argv) {
         offscreenAndMaterials();
         terrain();
         streamed();
+        receiverPlanes();
         steepTerrain();
         std::cout << "shadows gpu passed\n";
     } catch (const std::exception &e) {

@@ -294,7 +294,7 @@ void VulkanTerrain::initialize(const std::filesystem::path &shaders) {
     }
     const auto leaves = lod_ ? capacity_ / lod_->patchCells() : 1;
     boundsStride_ =
-        align(VkDeviceSize(leaves) * leaves * 32, properties.limits.minStorageBufferOffsetAlignment);
+        align(VkDeviceSize(leaves) * leaves * 64, properties.limits.minStorageBufferOffsetAlignment);
     createBuffer(bounds_, boundsStride_ * chunkCapacity_,
                  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
     VkDescriptorSetLayoutBinding bindings[12]{};
@@ -775,8 +775,51 @@ std::vector<TerrainSample> VulkanTerrain::normalsForFixture(const std::vector<gl
         throw;
     }
 }
+std::vector<TerrainSample> VulkanTerrain::sampleCurvatureFixture(const std::vector<TerrainSample> &points,
+                                                              glm::vec4 curvature, bool reduced) {
+    const uint64_t bytes = points.size() * sizeof(TerrainSample);
+    if (lod_ || chunkCapacity_ != 1 || points.empty() || bytes > sampleBytes_ || bytes > heights_.size)
+        throw std::invalid_argument("Curvature fixture exceeds non-LOD scratch capacity");
+    check(vkDeviceWaitIdle(context_.device), "Wait before curvature fixture");
+    if (!curvatureFixturePipeline_)
+        curvatureFixturePipeline_ = pipeline(geographyShader_.parent_path() / "curvature_fixture.comp.spv");
+    slots_[0].valid = false;
+    Buffer upload;
+    try {
+        createBuffer(upload, bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true);
+        std::memcpy(upload.mapped, points.data(), size_t(bytes));
+        auto cmd = beginImmediate();
+        barrier(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT,
+                VK_PIPELINE_STAGE_2_COPY_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+        VkBufferCopy copy{0, 0, bytes};
+        vkCmdCopyBuffer(cmd, upload.handle, heights_.handle, 1, &copy);
+        barrier(cmd, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, curvatureFixturePipeline_);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, computeLayout_, 0, 1,
+                               &slots_[0].descriptors[0][0], 0, nullptr);
+        struct Push {
+            glm::vec4 curvature;
+            glm::uvec4 options;
+        } push{curvature, {uint32_t(points.size()), reduced ? 1u : 0u, 0, 0}};
+        vkCmdPushConstants(cmd, computeLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
+        vkCmdDispatch(cmd, (uint32_t(points.size()) + 63) / 64, 1, 1);
+        endImmediate(cmd);
+        std::vector<TerrainSample> out(points.size());
+        readBuffer(samples_, out.data(), bytes);
+        destroyBuffer(upload);
+        return out;
+    } catch (...) {
+        destroyBuffer(upload);
+        throw;
+    }
+}
 void VulkanTerrain::cleanup() {
     auto d = context_.device;
+    if (curvatureFixturePipeline_)
+        vkDestroyPipeline(d, curvatureFixturePipeline_, nullptr);
     if (normalFixturePipeline_)
         vkDestroyPipeline(d, normalFixturePipeline_, nullptr);
     for (auto p : heightLevelPipelines_)

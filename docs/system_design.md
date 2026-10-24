@@ -15,6 +15,18 @@ Milestone 4 adds [hierarchical terrain residency](terrain_hierarchy.md): coarse 
 
 ## System design index
 
+- [Terrain CPU preparation cost](terrain_stationary_lod.md#cpu-preparation-cost) — implemented and CPU-benchmarked: retain the stationary mesh and quality budgets while reducing neighbour lookup work and sorting compact temporal indices instead of whole surface records. Native frame-time acceptance remains required.
+
+- [Curvature precision correction](rendering_horizon.md#curvature-precision-correction) — implemented; native wobble correction confirmed: stable small-angle position and tangent mapping, with GPU regression coverage for bounded trigonometric error. RTX 3060 review confirms the moving circular band is resolved; performance acceptance remains separate.
+
+- [Stationary ground terrain LOD](terrain_stationary_lod.md) — implemented; native acceptance pending: local selection, immutable patch interiors, stitched boundaries and explicit transition/resource limits, replacing the unresolved radial morph.
+
+- [Stable terrain surfaces and rendering review](rendering_surface_review.md) — initial correction and software validation; the remaining moving band is addressed by the stationary ground LOD design above. Includes per-texel CSM filtering, conservative patch bounds, completed triangle counters and saved review views; the follow-up diagnosis records the remaining transition-quality gap.
+
+- [Continuous distant terrain and natural horizon](rendering_horizon.md) — implemented: bounded compact distant levels, visual curvature and extended atmospheric transport; target-GPU/flight acceptance remains pending.
+
+- [Sky, atmosphere and distant coverage](rendering_atmosphere.md) — implemented slice 5H: physical transport, sky/environment lighting and bounded coarse horizon coverage. Owned software verification is recorded in the design; target-GPU and full-scale flight acceptance remain pending.
+
 - [Temporal antialiasing and HDR bloom](rendering_temporal_post.md) — implemented slice 5G: submitted-frame geometry history, native scene-resolution TAA and bounded pre-exposed bloom. Verification is recorded in the design; target-GPU/live review remains pending. Auto-exposure is deferred.
 
 - [Local terrain asset builds](rendering_materials.md#local-asset-builds) — implemented: CMake imports tracked source artwork into each build tree; generated DDS files are removed from the source tree without rewriting history. Debug/Release, incremental-build fixtures and software Vulkan material checks pass.
@@ -34,7 +46,7 @@ Milestone 4 adds [hierarchical terrain residency](terrain_hierarchy.md): coarse 
 
 - [Terrain blending and repetition control](rendering_terrain_blending.md) — slice 5C implemented (software Vulkan verification; target-GPU/live flight pending): height-aware composition, cliff projection, dedicated macro artwork. A performance revision removes stochastic sampling, separates macro filtering, and adds an optional terrain depth prepass; see the linked design for status and tradeoffs.
 
-- [Terrain ridge LOD quality](terrain_lod_quality.md) — implemented: filtered geometry levels, bounded error-driven shared LOD ranges and parent-surface transitions; independent per-patch refinement remains deferred. The shading-detail correction restores independent normal filtering and aligns normal demand with geometry range expansion (software Vulkan verified; target-GPU review pending).
+- [Terrain ridge LOD quality](terrain_lod_quality.md) — filtered geometry and independent normal filtering remain in use. Its historical shared-range and morph controller is superseded by stationary ground LOD with local refinement and stitched boundaries.
 
 - [Terrain materials](rendering_materials.md) — slice 5B implemented (software verification; target-GPU/live flight pending): offline image-generated PBR palettes, bounded bindless binding and stable world mapping.
   The coverage continuity correction uses a material-only smooth ridge-feedback gradient; generated heights and cache identities remain unchanged. See the material design for its regression strategy.

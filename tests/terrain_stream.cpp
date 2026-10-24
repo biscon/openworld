@@ -474,6 +474,52 @@ void cache() {
     require(broken.read(key, {1, 1}) >= 0, "shutdown with queued work");
 }
 } // namespace
+void compactPayload() {
+    Temp temp;
+    ow::TerrainPayloadLayout layout({32, .5f}, 2, 8, true);
+    ow::TerrainStreamingConfig config;
+    config.cacheDirectory = temp.path;
+    ow::TerrainCache cache(layout, config);
+    ow::TerrainCacheKey key;
+    key.representation = 13;
+    key.tileLevel = 4;
+    std::vector<uint8_t> data(layout.coverageBytes, 0), out(data.size());
+    for (uint32_t level = 0; level <= layout.levels; ++level) {
+        const uint32_t width = (32 >> level) + 1;
+        for (uint32_t z = 0; z < width; ++z)
+            for (uint32_t x = 0; x < width; ++x) {
+                const glm::vec2 h(float((x + z) * (1u << level)));
+                std::memcpy(data.data() + layout.heightOffsets[level] + (z * width + x) * 8, &h, 8);
+            }
+    }
+    for (uint64_t i = 0; i < layout.leafBoundsBytes; i += 8) {
+        const glm::vec2 b{-1, 65};
+        std::memcpy(data.data() + layout.boundsOffset + i, &b, 8);
+    }
+    for (uint64_t i = layout.errorOffset; i < layout.boundsBytes; i += sizeof(ow::TerrainPatchMetadata)) {
+        const ow::TerrainPatchMetadata b{{-1,65}, {}, {}, {}};
+        std::memcpy(data.data() + layout.boundsOffset + i, &b, sizeof(b));
+    }
+    require(cache.save(key, data.data()) == ow::TerrainCache::Result::Written,
+            "Compact cache write");
+    require(std::filesystem::file_size(cache.path(key)) ==
+                144 + layout.coverageBytes - layout.heightOffsets[1],
+            "Compact cache omits finest height grid");
+    require(cache.load(key, out.data()) == ow::TerrainCache::Result::Hit && out == data,
+            "Compact cache restores scratch and preserves stored levels exactly");
+    auto full = key;
+    full.representation = 11;
+    require(cache.load(full, out.data()) == ow::TerrainCache::Result::Miss,
+            "Compact and full cache identities remain separate");
+    {
+        std::fstream f(cache.path(key), std::ios::binary | std::ios::in | std::ios::out);
+        f.seekp(150);
+        char bad = 127;
+        f.write(&bad, 1);
+    }
+    require(cache.load(key, out.data()) == ow::TerrainCache::Result::Miss,
+            "Corrupted compact cache regenerates");
+}
 void filteredPayload() {
     ow::TerrainPayloadLayout layout({32, .5f}, 2, 8, true);
     std::vector<uint8_t> data(layout.coverageBytes, 0);
@@ -493,6 +539,7 @@ void filteredPayload() {
 int main() {
     try {
         filteredPayload();
+        compactPayload();
         detailPolicy();
         cancelledReads(true);
         cancelledReads(false);

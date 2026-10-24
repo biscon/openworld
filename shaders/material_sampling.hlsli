@@ -54,10 +54,9 @@ float4 heightWeights(float4 coverage,float4 heights,float influence,float width)
     adjusted=total>1e-6?adjusted/total:base;
     return lerp(base,adjusted,saturate(influence));
 }
-MaterialEvaluation evaluateMappedMaterial(float3 normal,float3 relative,float4 coverage) {
+MaterialEvaluation evaluateMappedMaterial(float3 normal,float3 relative,float4 coverage,float3 pdx,float3 pdy) {
     MaterialEvaluation result=(MaterialEvaluation)0;
     normal=normalize(normal);
-    float3 pdx=ddx(relative),pdy=ddy(relative);
     float3 micro=relative*materialInfo.coordinates.microPhase.w+materialInfo.coordinates.microPhase.xyz;
     float3 macro=relative*materialInfo.coordinates.macroPhase.w+materialInfo.coordinates.macroPhase.xyz;
     float footprint=max(length(pdx),length(pdy))*materialInfo.coordinates.microPhase.w;
@@ -115,5 +114,8 @@ MaterialEvaluation evaluateMappedMaterial(float3 normal,float3 relative,float4 c
     result.surface.ao=saturate(scalar.g);result.surface.metallic=0;result.surface.emissive=0;
     result.surface.normal=normalize(normal-gradient);
     return result;
+}
+MaterialEvaluation evaluateMappedMaterial(float3 normal,float3 relative,float4 coverage) {
+    return evaluateMappedMaterial(normal,relative,coverage,ddx(relative),ddy(relative));
 }
 #endif

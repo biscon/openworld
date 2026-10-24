@@ -4,7 +4,19 @@
 
 namespace ow {
 enum class TerrainComputeKernel : uint32_t {
-    Height, Normal, Filter, Bounds, Pack, TileHeight, TileNormal, TileFilteredNormal, TileFilteredHeight, QualityBounds, Count
+    Height,
+    Normal,
+    Filter,
+    Bounds,
+    Pack,
+    TileHeight,
+    TileNormal,
+    TileFilteredNormal,
+    TileFilteredHeight,
+    QualityBounds,
+    CompactExpand,
+    CompactBounds,
+    Count
 };
 // Workgroup cost, not dispatch count: dispatch rectangles can change shape.
 // Observations belong to completed submissions, never the current generation.

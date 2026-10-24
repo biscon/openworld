@@ -28,7 +28,7 @@ class VulkanGtao {
     // Source depth must be in DEPTH_READ_ONLY_OPTIMAL; does not transition
     // caller-owned depth.
     void record(VkCommandBuffer, VkImageView sourceDepth, glm::vec2 jitter = {},
-                uint32_t temporalPhase = 0);
+                uint32_t temporalPhase = 0, float farDistance = 64000);
     const GtaoStats &stats() const;
     VkDeviceSize snapshotBytes(uint32_t frame) const;
     void copySnapshot(VkCommandBuffer, uint32_t frame, VkBuffer) const;

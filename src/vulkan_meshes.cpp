@@ -317,6 +317,14 @@ void VulkanMeshes::prepare(uint32_t frame, const Camera &camera, TerrainGrid ter
         auto rotation = glm::mat4_cast(glm::normalize(i.rotation));
         auto transform = glm::translate(glm::mat4(1), glm::vec3(relativePosition(i.position, origin))) *
                          rotation * glm::scale(glm::mat4(1), i.scale);
+        auto flatBounds = transformBounds((*geometry)->lo, (*geometry)->hi, transform);
+        if (camera.curvature.z != 0) {
+            const auto nearest = glm::max(glm::max(flatBounds.lo, -flatBounds.hi), glm::vec3(0));
+            if (glm::length(nearest) > camera.renderFar * 2) {
+                ++s.skipped;
+                continue;
+            }
+        }
         bool mirror = i.scale.x * i.scale.y * i.scale.z < 0;
         auto &m = s.materials.meshMaterial(i.material);
         const auto &old = s.history[identity];
@@ -337,9 +345,12 @@ void VulkanMeshes::prepare(uint32_t frame, const Camera &camera, TerrainGrid ter
                   {s.materials.resolve(i.material), mirror ? 1u : 0u, valid ? 1u : 0u, 0},
                   previousTransform};
         const auto centre = glm::vec3(transform * glm::vec4((*geometry)->centre, 1));
-        Draw draw{n++, uint32_t(m.doubleSided) | (mirror ? 2u : 0u), glm::dot(centre, camera.forward()),
+        Draw draw{n++, uint32_t(m.doubleSided) | (mirror ? 2u : 0u),
+                  glm::dot(glm::vec3(curvePosition(glm::dvec3(centre), camera.curvature)),
+                           camera.forward()),
                   identity, *geometry};
-        draw.bounds = transformBounds((*geometry)->lo, (*geometry)->hi, transform);
+        draw.bounds = flatBounds;
+        curveBounds(draw.bounds.lo, draw.bounds.hi, camera.curvature);
         draw.mesh = i.mesh.slot;
         (m.alpha == AlphaMode::Blend ? f.blend : f.opaque).push_back(std::move(draw));
     }
