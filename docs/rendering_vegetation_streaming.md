@@ -159,7 +159,7 @@ Footprint conformity uses four directional samples and a local base-plane shear;
 it is not per-vertex ground conforming geometry. Steep/unsupported footprints are
 suppressed with their candidate identity retained. V4 still owns production visibility,
 terrain coverage/fades and longer species ranges; V5 owns habitat art/interaction;
-V6 retains full-scene quality, moving-frame CPU spikes and longer stress acceptance.
+The [V6 closeout](rendering_vegetation.md#5j-v6--final-tuning-and-extended-acceptance) defers full-scene quality, moving-frame CPU spikes and longer stress acceptance to combined vegetation-and-tree work.
 
 ## Rock exclusion for grass
 

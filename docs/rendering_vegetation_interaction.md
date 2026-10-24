@@ -1,6 +1,6 @@
 # 5J-V5: interaction and habitat variety
 
-Status: implemented and natively verified. See the [verification and measurement report](measurements/vegetation_5j_v5/README.md) for evidence and remaining V6 performance/visual gates.
+Status: implemented and natively verified. See the [verification and measurement report](measurements/vegetation_5j_v5/README.md) for evidence; the [V6 closeout](rendering_vegetation.md#5j-v6--final-tuning-and-extended-acceptance) records performance/visual work deferred to combined vegetation-and-tree acceptance.
 
 ## Responsibilities and interfaces
 
@@ -126,4 +126,4 @@ The ordinary engine completed 1,200 frames with zero validation errors. The matc
 [after](measurements/vegetation_habitat_correction/mountain.png) views show the isolated
 brown mountain spots removed, with broader, quieter ground colour variation.
 [Verification log](measurements/vegetation_habitat_correction/verification.txt).
-The existing distant grass geometry/ground boundary remains a separate V6 tuning item.
+The existing distant grass geometry/ground boundary is deferred to combined vegetation-and-tree tuning in the V6 closeout.

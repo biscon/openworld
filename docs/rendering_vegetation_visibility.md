@@ -4,7 +4,7 @@ Status: implemented and verified in the ordinary engine with native Vulkan valid
 [Measurements and remaining tuning gates](measurements/vegetation_5j_v4/README.md)
 record default/max-range cost, moving CPU limits and the existing GTAO test failure. This is the engine
 integration slice of [the vegetation roadmap](rendering_vegetation.md). V5 adds
-interaction and habitat variety; V6 performs final tuning and extended acceptance.
+interaction and habitat variety. [V6 documentation closeout](rendering_vegetation.md#5j-v6--final-tuning-and-extended-acceptance) is complete; final tuning and extended acceptance are deferred to the combined vegetation/tree scene.
 
 ## Engine contract
 

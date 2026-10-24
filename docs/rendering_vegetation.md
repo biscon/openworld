@@ -1,8 +1,10 @@
 # Vegetation and ground clutter roadmap
 
-Status: architecture agreed on 2026-10-24. V1 experiment implemented with software
-Vulkan verification and native RTX 3060 measurements. Final density/appearance
-acceptance remains open. The V2 asset/foliage foundation and V3 streaming/attachment are implemented; V4 engine integration is implemented and natively verified; V5 interaction/habitats are implemented with acceptance in progress; V6 remains proposed. This expands
+Status (2026-10-25): V1–V5 implemented and verified, including habitat appearance
+and moving-camera attachment corrections. V6 is closed as a reduced documentation
+closeout; extended visual/performance acceptance is explicitly deferred, not passed.
+Ground vegetation is ready for separate tree work. See the [V6 closeout and handoff](#5j-v6--final-tuning-and-extended-acceptance).
+This expands
 the vegetation part of [rendering roadmap slice 5J](rendering_roadmap.md#5j--representative-scene-content-and-reflections).
 It records the direction, implementation sequence, and acceptance gates. Each slice
 needs its own focused implementation plan before coding; exact layouts, capacities,
@@ -319,7 +321,8 @@ Saved grass/fern/shrub assets, compact instancing, leaf transmission, submitted 
 history and the isolated viewer/probe share one rendering backend. Production grass
 casting defaults to zero and does not enter caster work. The V1 probe retains its
 historical 25 m comparison. Streaming and terrain attachment updates are implemented in V3 below; production
-visibility and ordinary-engine integration are delivered in V4; interaction and final acceptance remain V5–V6 work.
+visibility and ordinary-engine integration are delivered in V4; interaction is delivered in V5.
+Remaining combined-scene acceptance is deferred in the V6 closeout below.
 
 - Build the saved asset/LOD pipeline and a small representative asset set, including
   masked plants; add opacity-aware texture import and deformation metadata.
@@ -331,7 +334,7 @@ visibility and ordinary-engine integration are delivered in V4; interaction and 
 
 ### 5J-V3 — Streamed placement and terrain attachment
 
-Status: implemented. Detailed design and validation: [streaming and attachment](rendering_vegetation_streaming.md). V3 introduced an opt-in main-demo toggle. V4 supersedes it with default-on engine integration and production visibility/coverage; interaction and final acceptance remain V5–V6.
+Status: implemented. Detailed design and validation: [streaming and attachment](rendering_vegetation_streaming.md). V3 introduced an opt-in main-demo toggle. V4 supersedes it with default-on engine integration and production visibility/coverage; V5 delivers interaction. The V6 closeout below records deferred combined-scene acceptance.
 
 - Add stable cell identities, bounded incremental GPU population, residency, and
   terrain reader retention. Define the small terrain/habitat/exclusion input boundary.
@@ -369,13 +372,64 @@ Detailed design: [interaction and habitat variety](rendering_vegetation_interact
 
 ### 5J-V6 — Final tuning and extended acceptance
 
-- Finalize quality presets, diagnostics, review views, and repeatable performance
-  probes. Keep vegetation independently toggleable for paired measurements.
-- Review full grass/plant/shrub scenes under streaming, terrain refinement, changing
-  sun, wind and interaction; exercise TAA, depth, shadows, atmosphere and optional AO.
-- Complete focused Debug/Release correctness and shader checks, Vulkan validation,
-  production-scale allocation/memory stress, and target-GPU frame-time acceptance.
-  Record measured budgets, remaining headroom, limitations, and any unexecuted gates.
+Status (2026-10-25): closed as a documentation closeout by agreement. The useful
+correctness and integration checks were completed during V4/V5 and follow-up fixes.
+The user accepted the current vegetation appearance and the improvement to moving
+patch continuity. No additional diagnostic UI, broad test matrix or standalone
+vegetation tuning project is required before tree work.
+
+**Completed evidence**
+
+- Saved assets/LODs, blended habitats, wind and bounded interaction/recovery are
+  integrated into the ordinary engine, with existing controls, review bookmarks and
+  repeatable probes. [V5 verification](measurements/vegetation_5j_v5/README.md)
+  includes close/grazing/aerial review, sun/wind variants, TAA, depth/shadows and AO/Hi-Z.
+- [Habitat appearance correction](rendering_vegetation_interaction.md#habitat-appearance-correction)
+  removes the isolated bare-soil spots without changing terrain rock classification.
+- [Attachment continuity verification](measurements/vegetation_attachment_continuity/README.md)
+  records zero cell dropouts on the repeated forward route, down from 653. Owned
+  regressions cover queued repairs, previous-position motion, exact settled roots,
+  teleport/revision/retirement and both material binding paths. Debug/Release and
+  native Vulkan synchronization checks pass; all 103 shaders per build validate.
+- Bounded update work, actual GPU allocation accounting and zero warm render-thread
+  C++ allocations are measured. These checks do not establish unlimited-duration
+  streaming stability or allocations inside drivers/background workers.
+
+**Baseline carried into tree work**
+
+The latest normal-renderer traversal/teleport/return run on RTX 3060 at 1080p and
+96 m vegetation range (uniform meadow, TAA/CSM) measured total GPU median/p95
+**8.473 / 10.019 ms**, total render-call CPU **9.454 / 11.234 ms**, vegetation CPU
+**0.530 / 1.946 ms**, **163.889 MiB** vegetation GPU memory and zero warm render-thread
+allocations. Attachment update GPU p95/max was **0.052 / 0.057 ms**; recovery ended
+with no pending cells. [Settings and timing record](measurements/vegetation_attachment_continuity/README.md).
+This is a single whole-scene route, not incremental vegetation cost or a guaranteed FPS.
+
+The 120 FPS / 8.33 ms engineering target, approximate 1.5 ms incremental vegetation
+GPU target, 0.25 ms CPU target and 256 MiB allocation ceiling remain unchanged.
+Memory passes; timing targets remain unmet. Earlier V5 on/off measurements predate
+the appearance/continuity corrections and must not be presented as fresh measurements
+of the current renderer. There is no established spare 120 FPS budget for trees;
+eventual 60 FPS full-feature acceptance also remains unproven.
+
+**Deferred to combined vegetation-and-tree acceptance**
+
+- Quality presets and final density/art tuning, including the distant grass/ground
+  boundary and residual subpixel shimmer.
+- CPU/GPU budget optimization and fresh paired full-scene measurements once a
+  representative tree cluster adds canopy, overdraw, occlusion and shadow costs.
+- Extended cold-cache/refinement/long-route stress and a broader settings/resolution
+  matrix, driven by concrete integration risks or observed regressions.
+- The pre-existing standalone GTAO numerical issue recorded in V4; it is not fixed
+  or waived by vegetation closeout.
+
+Trees remain a separate design with longer visibility and independent placement,
+LOD and shadow budgets. Reuse concrete asset/material, habitat and wind facilities
+where suitable; do not inherit the grass cell capacity, range or receive-only shadow
+policy as tree requirements. Establish added cost early with a representative tree
+cluster. Ground roots can briefly lag terrain refinement while bounded repairs drain;
+exact attachment is restored after repair. This tradeoff remains documented in the
+[streaming contract](rendering_vegetation_streaming.md#continuous-attachment-publication).
 
 Before each slice, document its concrete interfaces, data layout, ownership,
 capacities, failure/fallback behaviour, and focused tests. Link that detailed design
