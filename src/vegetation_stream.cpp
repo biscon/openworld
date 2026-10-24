@@ -49,15 +49,16 @@ VegetationHabitatInput vegetationHabitat(VegetationHabitat preset) {
 VegetationResidency::VegetationResidency(VegetationStreamConfig c) : config_(c) {
     if (!c.cellCapacity || c.cellCapacity > vegetationCellLimit || !c.updatesPerFrame ||
         c.updatesPerFrame > 32 || !std::isfinite(c.demandRadius) || !std::isfinite(c.retentionRadius) ||
-        c.demandRadius <= 0 || c.demandRadius > 96 || c.retentionRadius < c.demandRadius ||
-        c.retentionRadius > 112)
+        c.demandRadius <= 0 || c.demandRadius > 216 || c.retentionRadius < c.demandRadius ||
+        c.retentionRadius > 232)
         throw std::invalid_argument("Invalid vegetation streaming capacity/radius");
     slots_.resize(c.cellCapacity);
     uint32_t size = 1;
     while (size < c.cellCapacity * 2)
         size *= 2;
     table_.resize(size, -1);
-    wanted_.reserve(2601);
+    const auto side = uint32_t(std::ceil(c.demandRadius / 4)) * 2 + 3;
+    wanted_.reserve(side * side);
     ordered_.reserve(c.cellCapacity);
 }
 int VegetationResidency::find(VegetationCellKey key) const {
@@ -75,12 +76,18 @@ void VegetationResidency::insert(uint32_t i) {
         pos = (pos + 1) & (table_.size() - 1);
     table_[pos] = int32_t(i);
 }
-void VegetationResidency::demand(WorldPosition camera, uint64_t revision, uint64_t completed, bool enabled) {
+void VegetationResidency::demand(WorldPosition camera, uint64_t revision, uint64_t completed, bool enabled,
+                                 float requestedRadius) {
+    if (!std::isfinite(requestedRadius) || requestedRadius < 0 || requestedRadius > config_.demandRadius)
+        throw std::invalid_argument("Invalid live vegetation demand radius");
+    const float demandRadius = requestedRadius > 0 ? requestedRadius : config_.demandRadius;
+    const float retentionRadius = demandRadius + config_.retentionRadius - config_.demandRadius;
     if (initialized_ && !retiring_ && previousRevision_ == revision && previousEnabled_ == enabled &&
-        camera.x == previousCamera_.x && camera.z == previousCamera_.z &&
+        previousRadius_ == demandRadius && camera.x == previousCamera_.x && camera.z == previousCamera_.z &&
         camera.local.x == previousCamera_.local.x && camera.local.z == previousCamera_.local.z)
         return;
     previousCamera_ = camera;
+    previousRadius_ = demandRadius;
     previousRevision_ = revision;
     previousEnabled_ = enabled;
     initialized_ = true;
@@ -97,8 +104,7 @@ void VegetationResidency::demand(WorldPosition camera, uint64_t revision, uint64
             double dx = double(s.key.x - centre.x) * 4 + 2 - local.x;
             double dz = double(s.key.z - centre.z) * 4 + 2 - local.z;
             s.distanceSquared = float(dx * dx + dz * dz);
-            if (!enabled || s.revision != revision ||
-                s.distanceSquared > config_.retentionRadius * config_.retentionRadius)
+            if (!enabled || s.revision != revision || s.distanceSquared > retentionRadius * retentionRadius)
                 s.state = State::Retiring;
         }
         if (s.state == State::Retiring && s.lastUse <= completed) {
@@ -114,12 +120,12 @@ void VegetationResidency::demand(WorldPosition camera, uint64_t revision, uint64
     }
     if (!enabled)
         return;
-    int radius = int(std::ceil(config_.demandRadius / 4)) + 1;
+    int radius = int(std::ceil(demandRadius / 4)) + 1;
     for (int z = -radius; z <= radius; ++z)
         for (int x = -radius; x <= radius; ++x) {
             double dx = std::max(0.0, std::abs(x * 4 + 2 - local.x) - 2);
             double dz = std::max(0.0, std::abs(z * 4 + 2 - local.z) - 2);
-            if (dx * dx + dz * dz > config_.demandRadius * config_.demandRadius)
+            if (dx * dx + dz * dz > demandRadius * demandRadius)
                 continue;
             double cx = x * 4 + 2 - local.x, cz = z * 4 + 2 - local.z;
             wanted_.push_back({{centre.x + x, centre.z + z}, float(cx * cx + cz * cz)});

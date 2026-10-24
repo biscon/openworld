@@ -214,6 +214,8 @@ VulkanTerrainStream::VulkanTerrainStream(VulkanTerrain &g, TerrainStreamingConfi
         }
         initialize();
         preparedDraws_.reserve(ground_ ? ground_->capacity() : lod_->drawCapacity());
+        if (ground_)
+            vegetationPatches_.reserve(ground_->capacity());
         casterRecords_.reserve((ground_ ? ground_->capacity() : lod_->drawCapacity()) + lod_->drawCapacity());
         shadowDraws_.reserve(65536);
         if (config_.vertexDiagnostics) {
@@ -240,6 +242,7 @@ VulkanTerrainStream::VulkanTerrainStream(VulkanTerrain &g, TerrainStreamingConfi
             lod_->drawCapacity() *
             (sizeof(VisibilityBounds) + 2 * (sizeof(TerrainPatchDraw) + sizeof(VisibilityBounds)));
         stats_.hostBytes += shadowDraws_.capacity() * sizeof(ShadowDraw);
+        stats_.hostBytes += vegetationPatches_.capacity() * sizeof(TerrainPatchDraw);
         if (ground_)
             stats_.hostBytes += ground_->allocatedBytes();
         stats_.hostBytes += 128 * 1024 + layout_.boundsBytes; // bounded cache maintenance metadata
@@ -730,6 +733,7 @@ void VulkanTerrainStream::beginFrame(uint32_t frame, const Camera &camera, const
         missing(ax, z0, bx, az - 1);
         missing(ax, bz + 1, bx, z1);
     }
+    stream_->canonicalDemand(settings.terrainVisible ? vegetationDemandRadius_ : 0);
     stream_->shadowDemand(shadowDemand_.data(), shadowDemandCount_);
     stream_->demand(camera, radius, completed_, serial_, epoch_);
     stats_.requestedRadius =
@@ -1808,7 +1812,8 @@ void VulkanTerrainStream::prepareShadows(uint32_t frame, const Camera &camera, c
         ++stats_.shadowMissing;
     }
 
-    // Shadow coverage retains the detailed footprint even when visible terrain extends farther.
+    // Shadow coverage retains the detailed footprint even when visible terrain
+    // extends farther.
     if (config_.hierarchical)
         for (uint32_t slot = 0; slot < capacity_; ++slot) {
             auto &tile = stream_->slot(slot);

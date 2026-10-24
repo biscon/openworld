@@ -32,8 +32,7 @@ void horizon() {
         publish(stream);
         stream.advance(.25f);
     }
-    require(stream.outerRadius() == 16 && stream.radius() == 8,
-            "Independent detailed and outer coverage");
+    require(stream.outerRadius() == 16 && stream.radius() == 8, "Independent detailed and outer coverage");
     require(stream.topLevel() == terrainHierarchyLevel(8), "Horizon preserves shadow caster level");
     require(stream.pressureEvents() == 0, "Horizon fits reserved storage");
     uint32_t outer = 0;
@@ -44,8 +43,7 @@ void horizon() {
         ++outer;
         require(slot.level == stream.topLevel(), "Horizon requests only coarse tiles");
         require(i >= base && i < base + 48, "Horizon does not displace near or shadow slots");
-        require(slot.active && slot.drawMask == 15,
-                "Resident horizon provides full coarse coverage");
+        require(slot.active && slot.drawMask == 15, "Resident horizon provides full coarse coverage");
     }
     require(outer > 0, "Horizon extends terrain");
     const auto before = allocations.load();
@@ -76,8 +74,7 @@ void distantHierarchy() {
     const auto base = terrainHierarchyCapacity(128), distant = 48u * 6;
     TerrainStreamer stream(base + distant + 16, 128, grid, true, 16, distant, 8192);
     Camera camera;
-    require(stream.detailedLevel() == 7 && stream.topLevel() == 13,
-            "Independent shadow and distant levels");
+    require(stream.detailedLevel() == 7 && stream.topLevel() == 13, "Independent shadow and distant levels");
     for (int x : {-8193, -1, 0, 127, 8191}) {
         camera.chunk = {x, -x - 1};
         for (int frame = 0; frame < 80; ++frame) {
@@ -97,8 +94,7 @@ void distantHierarchy() {
                         "Distant pool cannot consume near or shadow slots");
         }
     }
-    TerrainStreamer small(terrainHierarchyCapacity(8) + 48 * 13, 8, {32, .5f}, true, 0, 48 * 13,
-                          65536);
+    TerrainStreamer small(terrainHierarchyCapacity(8) + 48 * 13, 8, {32, .5f}, true, 0, 48 * 13, 65536);
     for (int i = 0; i < 40; ++i) {
         small.demand(camera, 8, 100, 100, 1);
         publish(small);
@@ -126,8 +122,7 @@ void curvature() {
             for (int j = 0; j <= 8; ++j)
                 for (int k = 0; k <= 2; ++k) {
                     const auto q = curvePosition(
-                        glm::dvec3(glm::mix(lo, hi, glm::vec3(i / 8.f, k / 2.f, j / 8.f))),
-                        mapping);
+                        glm::dvec3(glm::mix(lo, hi, glm::vec3(i / 8.f, k / 2.f, j / 8.f))), mapping);
                     require(glm::all(glm::greaterThanEqual(q, glm::dvec3(a))) &&
                                 glm::all(glm::lessThanEqual(q, glm::dvec3(b))),
                             "Curved bounds contain interior and boundary samples");
@@ -160,7 +155,8 @@ void hierarchy() {
     for (int i = 0; i < 12; ++i)
         s.advance(.25f);
     int centre = s.find(camera.chunk);
-    require(centre >= 0 && s.slot(centre).active && s.slot(centre).heightFade == 1, "near terrain reaches finest tile");
+    require(centre >= 0 && s.slot(centre).active && s.slot(centre).heightFade == 1,
+            "near terrain reaches finest tile");
     for (uint32_t i = 0; i < s.capacity(); ++i) {
         const auto &slot = s.slot(i);
         if (!slot.active || slot.level == s.topLevel())
@@ -266,7 +262,8 @@ void selection() {
                 bool x = std::max(a.x, b.x) < std::min(a.endX, b.endX);
                 bool z = std::max(a.z, b.z) < std::min(a.endZ, b.endZ);
                 require(!(x && z), "parent/child selection never overlaps");
-                bool adjacent = (x && (a.z == b.endZ || b.z == a.endZ)) || (z && (a.x == b.endX || b.x == a.endX));
+                bool adjacent =
+                    (x && (a.z == b.endZ || b.z == a.endZ)) || (z && (a.x == b.endX || b.x == a.endX));
                 if (adjacent)
                     require(std::abs(int(a.level) - int(b.level)) <= 1,
                             "selection remains 2:1 balanced under delayed data");
@@ -284,9 +281,9 @@ void refinementFollowsCamera() {
     camera.local = {64, 200, 64};
     // Fully publish every request: lack of refinement here cannot be I/O latency.
     for (int radius : {64, 128, 8, 1, 0})
-        for (auto position : {ChunkCoord{0, 0}, ChunkCoord{0, 2}, ChunkCoord{2, -6},
-                              ChunkCoord{10, 10}, ChunkCoord{-13, 19}, ChunkCoord{127, -128},
-                              ChunkCoord{129, 255}, ChunkCoord{1000002, -1000006}}) {
+        for (auto position :
+             {ChunkCoord{0, 0}, ChunkCoord{0, 2}, ChunkCoord{2, -6}, ChunkCoord{10, 10}, ChunkCoord{-13, 19},
+              ChunkCoord{127, -128}, ChunkCoord{129, 255}, ChunkCoord{1000002, -1000006}}) {
             camera.chunk = position;
             for (int frame = 0; frame < 64; ++frame) {
                 stream.demand(camera, radius, 100, 100, 1);
@@ -296,7 +293,8 @@ void refinementFollowsCamera() {
             const int centre = stream.find(position);
             require(centre >= 0 && stream.slot(centre).active && stream.slot(centre).heightFade == 1 &&
                         stream.slot(centre).drawMask == 15,
-                    "near-camera tile reaches full refinement after movement at every radius");
+                    "near-camera tile reaches full refinement after movement at "
+                    "every radius");
             require(stream.pressureEvents() == 0, "refinement dependencies fit bounded storage");
             float weights[16];
             stream.heightWeights(uint32_t(centre), weights);
@@ -327,7 +325,8 @@ void budgets() {
     auto detail = [](uint32_t n) { return uint64_t(n) * 6000000 + 8192; };
     auto p = terrainHierarchyPoolCapacity(440 * terrainMiB, 1024, 128, true, coverage, detail);
     require(p.maximumRadius == 128 && p.detail >= 4, "16 km coverage and near normals fit default budget");
-    require(coverage(p.coverage) + detail(p.detail) <= 440 * terrainMiB, "actual padded pool costs respected");
+    require(coverage(p.coverage) + detail(p.detail) <= 440 * terrainMiB,
+            "actual padded pool costs respected");
     p = terrainHierarchyPoolCapacity(100 * terrainMiB, 1024, 128, true, coverage, detail);
     require(p.maximumRadius < 128, "insufficient budget reduces effective distance");
 }
@@ -368,12 +367,35 @@ void stationaryPublication() {
     require(parent >= 0 && (stream.slot(parent).drawMask & (1u << quadrant)),
             "Withdrawn child leaves complete parent coverage");
 }
+void canonicalReaders() {
+    const TerrainGrid grid{32, .5f};
+    TerrainStreamer stream(512, 8, grid, true);
+    Camera camera;
+    camera.local = {8, 20, 8};
+    stream.demand(camera, 8, 0, 0, 1);
+    require(stream.findTile({4, 0, 0}) < 0, "outer fine provider is not ordinary camera demand");
+    stream.canonicalDemand(80);
+    for (uint64_t frame = 1; frame < 40; ++frame) {
+        stream.demand(camera, 8, frame, frame, 1);
+        publish(stream);
+        stream.advance(.25f);
+    }
+    const int outer = stream.findTile({4, 0, 0});
+    require(outer >= 0 && stream.slot(outer).state == TerrainStreamer::State::Resident &&
+                !stream.slot(outer).active && !stream.slot(outer).refine,
+            "canonical readers obtain heights without forcing rendered refinement");
+    stream.canonicalDemand(0);
+    stream.demand(camera, 8, 40, 40, 1);
+    require(!stream.slot(outer).wanted, "disabling the consumer releases its extra demand");
+    rejects([&] { stream.canonicalDemand(217); }, "canonical demand is bounded");
+}
 void depth() {
     Camera c;
     c.pitch = c.yaw = 0;
     const auto p = c.viewProjection(1);
     auto near = p * glm::vec4(0, 0, -.5f, 1), far = p * glm::vec4(0, 0, -64000, 1);
-    require(std::abs(near.z / near.w - 1) < 1e-5f && std::abs(far.z / far.w) < 1e-5f, "reverse depth endpoints");
+    require(std::abs(near.z / near.w - 1) < 1e-5f && std::abs(far.z / far.w) < 1e-5f,
+            "reverse depth endpoints");
 }
 } // namespace
 int main() {
@@ -387,6 +409,7 @@ int main() {
         stationaryPublication();
         budgets();
         depth();
+        canonicalReaders();
         std::cout << "Terrain hierarchy CPU tests passed\n";
     } catch (const std::exception &e) {
         std::cerr << e.what() << '\n';

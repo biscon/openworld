@@ -22,7 +22,7 @@ Output main(Input i,uint id:SV_InstanceID) {
     uint index=visiblePlants[vegetation.lists[view].x+work[view*plantViewWords+bin*8+7]+id];
     Plant p=loadPlant(index);Cell cell=cells[p.assetCell>>3];Output o;
     float d=length(p.rootScale.xyz+cell.origin.xyz),oldD=length(p.rootScale.xyz+cell.previousOrigin.xyz);
-    uint asset=vegetation.geometry[bin].w,lod=plantLod(p,d,asset),oldAsset=plantAsset(p,vegetation.modes.y,oldD),oldLod=plantLod(p,oldD,oldAsset);
+    uint asset=vegetation.geometry[bin].w,lod=plantLod(p,d,asset),oldAsset=plantAsset(p,vegetation.modes.y,oldD),oldLod=plantLod(p,oldD,oldAsset,true);
     o.relative=plantPosition(p,cell,i.position,i.deformation,vegetation.cameraTime.w,vegetation.settings.y,vegetation.wind.xy,asset,lod,false);
     o.renderedPosition=curvePosition(o.relative,temporal.curvature);
     o.position=view==0?mul(lighting.viewProjection,float4(o.renderedPosition,1)):mul(vegetation.views[view],float4(o.renderedPosition,1));
@@ -36,9 +36,8 @@ Output main(Input i,uint id:SV_InstanceID) {
     o.normal.y-=dot(o.normal.xz,shear);tangent.xz+=shear*tangent.y;
     o.normal.xz-=plantSlope*o.normal.y;tangent.y+=dot(plantSlope,tangent.xz);
     o.tangent=float4(tangent,i.tangent.w);o.uv=i.uv;o.material=vegetation.geometry[bin].z;
-    float coverage=plantCoverage(p,d,asset,vegetation.settings,vegetation.cards);
+    float coverage=plantCoverage(p,d,asset,vegetation.settings,vegetation.cards,view);
     float oldCoverage=plantCoverage(p,oldD,oldAsset,vegetation.previousSettings,vegetation.previousCards);
-    if(view!=0) {float end=vegetation.profile.x!=0?vegetation.settings.w:vegetation.ranges[asset].w;coverage*=1-smoothstep(max(0,end-5),end,d);}
     bool valid=vegetation.modes.z!=0&&(vegetation.inspection.y==0||cell.previousOrigin.w!=0)&&oldAsset==asset&&oldLod==lod&&oldCoverage>0;
     float3 previous=plantPosition(p,cell,i.position,i.deformation,vegetation.previousCameraTime.w,vegetation.previousSettings.y,vegetation.previousWind.xy,asset,lod,true);
     o.previousClip=valid?mul(temporal.previous,float4(curvePosition(previous,temporal.previousCurvature),1)):0;

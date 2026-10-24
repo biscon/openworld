@@ -13,9 +13,7 @@ uint32_t hash(uint32_t x) {
     x *= 0x846ca68bu;
     return x ^ (x >> 16);
 }
-float random(uint32_t x) {
-    return (hash(x) >> 8) * (1.f / 16777216);
-}
+float random(uint32_t x) { return (hash(x) >> 8) * (1.f / 16777216); }
 void leaf(FoliagePart &p, glm::vec3 root, glm::vec3 direction, glm::vec3 right, float length, float width,
           uint32_t segments, float phase, bool masked, float height, bool stem = false) {
     uint32_t first = uint32_t(p.vertices.size());
@@ -282,7 +280,8 @@ void validate(const VegetationLibrary &l) {
                     require(v.deformation.x <= 1 && v.deformation.y <= 1 && v.deformation.z <= 1 &&
                                 std::isfinite(v.uv.x) && std::isfinite(v.uv.y),
                             "Invalid foliage weights/UV");
-                    float normalLength = glm::length(v.normal), tangentLength = glm::length(glm::vec3(v.tangent));
+                    float normalLength = glm::length(v.normal),
+                          tangentLength = glm::length(glm::vec3(v.tangent));
                     require(std::isfinite(normalLength) && normalLength > .001f &&
                                 std::isfinite(tangentLength) && tangentLength > .001f &&
                                 std::abs(std::abs(v.tangent.w) - 1) < .001f &&
@@ -297,7 +296,8 @@ void validate(const VegetationLibrary &l) {
     }
 }
 void validate(const VegetationPopulation &p, const VegetationLibrary &l) {
-    require(p.cells.size() <= 4096 && p.instances.size() <= 524288, "Vegetation population exceeds limits");
+    require(p.cells.size() <= vegetationCellLimit && p.instances.size() <= vegetationCellLimit * 128,
+            "Vegetation population exceeds limits");
     size_t first = 0;
     std::set<uint32_t> identities;
     for (uint32_t c = 0; c < p.cells.size(); ++c) {

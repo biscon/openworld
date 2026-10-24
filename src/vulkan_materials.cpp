@@ -1,4 +1,5 @@
 #include "vulkan_materials.hpp"
+#include "vegetation.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -105,9 +106,10 @@ struct MaterialUniform {
     MaterialCoordinates coordinates;
     glm::vec4 blend;
     glm::uvec4 features;
+    glm::vec4 habitat, clearing;
 };
 static_assert(sizeof(MaterialRecord) == 112);
-static_assert(sizeof(MaterialUniform) == 608);
+static_assert(sizeof(MaterialUniform) == 640);
 static_assert(offsetof(MaterialUniform, coordinates) == 544);
 static_assert(offsetof(MaterialUniform, blend) == 576);
 static_assert(offsetof(MaterialUniform, features) == 592);
@@ -130,8 +132,9 @@ MaterialCapabilities materialCapabilities(VkPhysicalDevice p, bool fixed, bool t
         !fixed && v12.runtimeDescriptorArray && v12.shaderSampledImageArrayNonUniformIndexing && limit >= 96;
     if (c.bindless) {
         c.arrays = 16;
-        // Reserve the terrain, clustered lighting, shadow, temporal, atmosphere and volumetric
-        // bindings across all sets, including the 16 array-image descriptors.
+        // Reserve the terrain, clustered lighting, shadow, temporal, atmosphere and
+        // volumetric bindings across all sets, including the 16 array-image
+        // descriptors.
         c.images = std::min(128u, limit - 80);
     }
     return c;
@@ -504,7 +507,7 @@ bool VulkanMaterials::load(const std::filesystem::path &root, bool rgba) {
 }
 void VulkanMaterials::prepare(uint32_t frame, const Camera &camera, TerrainGrid grid,
                               const TerrainSettings &terrain, const TerrainMaterialSettings &settings,
-                              bool terrainCoordinates) {
+                              bool terrainCoordinates, const VegetationSettings *vegetation) {
     auto &s = *impl_;
     auto &f = s.frames.at(frame);
     if (!std::isfinite(settings.repeatMetres) || !std::isfinite(settings.normalStrength) ||
@@ -527,6 +530,11 @@ void VulkanMaterials::prepare(uint32_t frame, const Camera &camera, TerrainGrid 
         for (auto &i : s.current->images)
             i->staging.reset();
     MaterialUniform u{};
+    if (vegetation && terrainCoordinates) {
+        u.habitat = {vegetation->habitat.weights, 1};
+        const auto clearing = relativePosition(vegetation->exclusion.centre, worldPosition(camera, grid));
+        u.clearing = {float(clearing.x), float(clearing.z), vegetation->exclusion.radius, 0};
+    }
     TerrainRequest request;
     request.chunk = terrainCoordinates ? camera.chunk : ChunkCoord{};
     request.settings = terrain;

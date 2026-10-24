@@ -54,12 +54,37 @@ int main() {
         require(tiny.ordered().size() == 2 && tiny.deferred() > 0, "bounded pressure with explicit deferral");
         bool rejected = false;
         try {
-            config.retentionRadius = 113;
+            config.retentionRadius = 233;
             VegetationResidency invalid(config);
         } catch (const std::invalid_argument &) {
             rejected = true;
         }
         require(rejected, "invalid bounded config rejected");
+        VegetationStreamConfig wide;
+        wide.cellCapacity = 12288;
+        wide.demandRadius = 216;
+        wide.retentionRadius = 232;
+        VegetationResidency live(wide);
+        live.demand(origin, 9, 0, true, 36);
+        std::vector<VegetationCellHandle> close;
+        for (auto i : live.ordered())
+            close.push_back({i, live.slot(i).generation});
+        const auto nearCount = close.size();
+        live.demand(origin, 9, 0, true, 216);
+        require(live.ordered().size() > nearCount && live.deferred() == 0,
+                "stationary range growth fills the maximum demand without pressure");
+        for (auto h : close)
+            require(live.valid(h), "range growth preserves nearby handles");
+        for (auto i : live.ordered())
+            live.used(i, 7);
+        live.demand(origin, 9, 6, true, 36);
+        require(live.ordered().size() == nearCount && live.retiring() > 0,
+                "range contraction retires submitted far cells without waiting");
+        for (auto h : close)
+            require(live.valid(h), "range contraction preserves nearby handles");
+        live.demand(origin, 9, 7, true, 216);
+        require(live.deferred() == 0, "maximum range recovers after retirement");
+        rejects([&] { live.demand(origin, 9, 7, true, 217); }, "range cannot exceed startup capacity");
         RendererOptions invalidRenderer;
         invalidRenderer.vegetation.streaming.enabled = true;
         rejects([&] { Renderer renderer(invalidRenderer); },

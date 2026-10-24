@@ -11,6 +11,7 @@ enum class UiWindow : size_t {
     BaseTerrain,
     TerrainMaterials,
     RenderingSettings,
+    Vegetation,
     Lighting,
     Atmosphere,
     Volumetrics,

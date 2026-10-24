@@ -1,11 +1,13 @@
 #ifndef OW_MATERIALS
 #define OW_MATERIALS
+#include "vegetation_habitat.hlsli"
 struct NoiseDomain {int4 lattice;float4 fractionFrequency;};
 struct MaterialGeography {uint4 dimensions;float4 shape;NoiseDomain domains[13];uint4 sampling;uint4 worldOrigin;float4 geography;};
 struct MaterialCoordinates {float4 microPhase,macroPhase;};
 struct MaterialUniform {
     MaterialGeography geography; float4 controls,tint; uint4 options;
     MaterialCoordinates coordinates; float4 blend; uint4 features;
+    float4 habitat,clearing;
 };
 struct MaterialRecord {uint4 maps;uint4 macro;float4 base,emission,factors;uint4 meshMaps;float4 alpha;};
 [[vk::binding(0,2)]] ConstantBuffer<MaterialUniform> materialInfo;
@@ -38,6 +40,15 @@ float4 terrainWeights(float2 relative){
     float soil=smoothstep(.48,.72,patch)*.65;
     float gravel=smoothstep(.2,.7,slope)*(.2+.4*(1-patch));
     float4 w=float4((1-soil)*(1-gravel),soil*(1-gravel),0,gravel)*(1-rock);w.z=rock;
+    if(materialInfo.habitat.w!=0) {
+        float cover=vegetationProbability(materialInfo.habitat.xyz,0);
+        if(vegetationExcluded(relative,materialInfo.clearing.xyz))cover=0;
+        // Rebalance existing grass/soil coverage, keeping rock and gravel intact.
+        // This is expected habitat coverage, never the currently visible population.
+        float ground=w.x+w.y;
+        float grass=ground*cover;
+        w.x=grass;w.y=ground-grass;
+    }
     return w/max(dot(w,1.0.xxxx),1e-6);
 }
 #include "material_sampling.hlsli"

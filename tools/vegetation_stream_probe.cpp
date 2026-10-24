@@ -1,4 +1,6 @@
+#include "mesh_primitives.hpp"
 #include "renderer.hpp"
+#include "review_view.hpp"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -8,8 +10,8 @@
 #include <new>
 #include <numeric>
 
-// Count render-thread C++ allocation calls in the render() interval. This is not a driver
-// malloc profiler.
+// Count render-thread C++ allocation calls in the render() interval. This is
+// not a driver malloc profiler.
 namespace {
 std::atomic<uint64_t> allocationCalls{0};
 thread_local uint64_t threadAllocationCalls = 0;
@@ -48,7 +50,7 @@ double percentile(std::vector<double> v, double q) {
     return v.empty() ? 0 : v[size_t(q * (v.size() - 1))];
 }
 struct Samples {
-    std::vector<double> cpu, gpu, prepare, update;
+    std::vector<double> cpu, gpu, prepare, update, selection, depth, colour, shadows;
     uint64_t bytes = 0, allocations = 0;
     uint32_t visible = 0, pending = 0, updates = 0, generated = 0;
     Samples() {
@@ -56,6 +58,10 @@ struct Samples {
         gpu.reserve(600);
         prepare.reserve(600);
         update.reserve(600);
+        selection.reserve(600);
+        depth.reserve(600);
+        colour.reserve(600);
+        shadows.reserve(600);
     }
     void add(Renderer &r, double ms, uint64_t calls) {
         const auto &v = r.vegetationStats();
@@ -64,6 +70,10 @@ struct Samples {
         gpu.push_back(r.renderingStats().frameMilliseconds);
         prepare.push_back(v.preparationMilliseconds);
         update.push_back(v.updateMilliseconds);
+        selection.push_back(v.selectionMilliseconds);
+        depth.push_back(v.depthMilliseconds);
+        colour.push_back(v.colourMilliseconds);
+        shadows.push_back(v.shadowMilliseconds);
         bytes = v.allocatedBytes;
         visible = v.visible;
         pending = v.pendingCells;
@@ -80,14 +90,37 @@ struct Samples {
                   << " ms; " << double(bytes) / (1024 * 1024) << " MiB; " << visible << " visible entries; "
                   << updates << " updates, " << generated << " generated, " << pending << " pending; "
                   << allocations << " render-thread C++ allocation calls\n";
+        std::cout << "  vegetation GPU medians: select " << percentile(selection, .5) << ", depth "
+                  << percentile(depth, .5) << ", colour " << percentile(colour, .5) << ", shadows "
+                  << percentile(shadows, .5) << " ms\n";
     }
 };
 } // namespace
 int main(int argc, char **argv) {
     try {
-        if (argc != 2 && (argc != 3 || std::string(argv[2]) != "--cpu-check"))
-            throw std::invalid_argument(
-                "Usage: vegetation_stream_probe OUTPUT_DIRECTORY (one short pair/route)");
+        if (argc < 2)
+            throw std::invalid_argument("Usage: vegetation_stream_probe OUTPUT [--cpu-check] "
+                                        "[--engine-scene] [--distance 20..200] [--occlusion-check] [--route-check]");
+        bool cpuOnly = false, routeOnly = false, engineScene = false, occlusionCheck = false;
+        float distance = 70;
+        for (int i = 2; i < argc; ++i) {
+            const std::string arg = argv[i];
+            if (arg == "--cpu-check")
+                cpuOnly = true;
+            else if (arg == "--route-check")
+                routeOnly = true;
+            else if (arg == "--engine-scene") {
+                engineScene = true;
+                distance = 80;
+            } else if (arg == "--occlusion-check")
+                occlusionCheck = true;
+            else if (arg == "--distance" && i + 1 < argc)
+                distance = std::stof(argv[++i]);
+            else
+                throw std::invalid_argument("Unknown probe option: " + arg);
+        }
+        if (!std::isfinite(distance) || distance < 20 || distance > 200)
+            throw std::invalid_argument("Distance must be 20..200 m");
         std::filesystem::path output = argv[1];
         std::filesystem::create_directories(output);
         RendererOptions o;
@@ -107,25 +140,45 @@ int main(int argc, char **argv) {
             std::make_shared<VegetationLibrary>(readVegetationLibrary(OPENWORLD_VEGETATION_LIBRARY_DIR));
         o.vegetation.streaming.enabled = true;
         o.shadowCapacity.resolution = 1024;
+        if (engineScene || distance > 80) {
+            o.vegetation.streaming.cellCapacity = 12288;
+            o.vegetation.streaming.demandRadius = 216;
+            o.vegetation.streaming.retentionRadius = 232;
+            o.vegetation.budgetBytes = 256ull << 20;
+        }
+        if (engineScene) {
+            o.streaming.maximumDistance = 16384;
+            o.streaming.horizonBytes = 128ull << 20;
+            o.streaming.shadowCasterBytes = 64ull << 20;
+            o.curvedHorizon = true;
+            o.materialDirectory = OPENWORLD_MATERIAL_DIR;
+            o.shadowCapacity.resolution = ShadowCapacity{}.resolution;
+        }
         Renderer r(o);
         TerrainRequest terrain;
-        terrain.settings.heightScale = 12;
+        if (!engineScene)
+            terrain.settings.heightScale = 12;
         terrain.settings.seed = 173;
         r.requestTerrain(terrain);
         Camera camera;
         camera.local = {32, 8, 32};
         camera.pitch = -.08f;
         SceneSettings scene;
-        scene.viewRadius = 1;
+        scene.viewRadius = engineScene ? 64 : 3;
+        scene.vegetation.distance = distance;
+        if (engineScene) {
+            scene.atmosphere.mode = AtmosphereMode::Physical;
+            scene.bloom.intensity = .05f;
+        }
         scene.taa.enabled = true;
         scene.opaqueDepthPrepass = true;
         scene.shadows.mode = ShadowMode::CSM;
         auto start = Clock::now();
-        const auto deadline = start + std::chrono::seconds(75);
+        const auto deadline = start + std::chrono::seconds(engineScene ? 180 : 90);
         uint64_t frameAllocations = 0;
         auto frame = [&]() {
             if (Clock::now() > deadline)
-                throw std::runtime_error("75-second probe cap; unfinished gates remain pending");
+                throw std::runtime_error("Probe time cap reached; unfinished gates remain pending");
             scene.vegetation.time += 1.f / 120;
             auto begin = Clock::now();
             auto calls = threadAllocationCalls;
@@ -134,13 +187,26 @@ int main(int argc, char **argv) {
             return std::chrono::duration<double, std::milli>(Clock::now() - begin).count();
         };
         Samples cold;
+        std::vector<glm::vec2> heights;
         uint32_t quiet = 0;
-        for (uint32_t i = 0; i < 2400; ++i) {
+        for (uint32_t i = 0; i < (engineScene ? 12000u : 2400u); ++i) {
             double ms = frame();
             if (i < 600)
                 cold.add(r, ms, frameAllocations);
             const auto &v = r.vegetationStats();
             const auto &t = r.terrainStreamingStats();
+            if (heights.empty() && i % 60 == 0) {
+                for (const auto &tile : r.readTerrainResidency())
+                    if (tile.key == TerrainTileKey{0, 0, 0} && tile.resident) {
+                        heights = r.readStreamedTileHeights({0, 0, 0});
+                        camera.local.y = heights[64 * 257 + 64].y + 1.7;
+                        break;
+                    }
+            }
+            if (i && i % 600 == 0)
+                std::cout << "Settling: " << i << " frames; vegetation ready/pending/missing "
+                          << v.residentCells << '/' << v.pendingCells << '/' << v.missingTerrainCells
+                          << "; terrain " << t.pending << " + detail " << t.detailPending << std::endl;
             quiet = v.residentCells > 0 && v.pendingCells == 0 && v.updatedCells == 0 && t.pending == 0 &&
                             t.detailPending == 0
                         ? quiet + 1
@@ -150,10 +216,17 @@ int main(int argc, char **argv) {
         }
         if (quiet < 8)
             throw std::runtime_error("Cold streaming did not settle within bounded frame count");
-        auto heights = r.readStreamedTileHeights({0, 0, 0});
+        if (heights.empty())
+            heights = r.readStreamedTileHeights({0, 0, 0});
         camera.local.y = heights[64 * 257 + 64].y + 1.7;
+        ReviewView bookmark;
+        bookmark.camera = camera;
+        bookmark.terrain = terrain.settings;
+        bookmark.scene = scene;
+        bookmark.startup = o;
+        saveReviewView(output / "close-view.json", bookmark);
         cold.print("cold");
-        if (argc == 3) {
+        if (cpuOnly) {
             Samples check;
             for (uint32_t i = 0; i < 240; ++i) {
                 double ms = frame();
@@ -163,34 +236,62 @@ int main(int argc, char **argv) {
             check.print("focused steady-state CPU check");
             return 0;
         }
-        std::array<Samples, 2> pair;
-        for (uint32_t enabled = 0; enabled < 2; ++enabled) {
-            scene.vegetation.enabled = enabled != 0;
-            // Re-populate after disabling, outside the fixed timed sample window.
-            if (enabled) {
-                quiet = 0;
-                for (uint32_t i = 0; i < 1600; ++i) {
-                    frame();
-                    const auto &v = r.vegetationStats();
-                    quiet = v.residentCells && v.pendingCells == 0 && v.updatedCells == 0 ? quiet + 1 : 0;
-                    if (quiet >= 4)
-                        break;
+        if (!routeOnly) {
+            std::array<Samples, 2> pair;
+            for (uint32_t enabled = 0; enabled < 2; ++enabled) {
+                scene.vegetation.enabled = enabled != 0;
+                // Re-populate after disabling, outside the fixed timed sample window.
+                if (enabled) {
+                    quiet = 0;
+                    for (uint32_t i = 0; i < 1600; ++i) {
+                        frame();
+                        const auto &v = r.vegetationStats();
+                        quiet = v.residentCells && v.pendingCells == 0 && v.updatedCells == 0 ? quiet + 1 : 0;
+                        if (quiet >= 4)
+                            break;
+                    }
                 }
+                for (uint32_t i = 0; i < 720; ++i) {
+                    double ms = frame();
+                    if (i >= 120)
+                        pair[enabled].add(r, ms, frameAllocations);
+                }
+                pair[enabled].print(enabled ? "on" : "off");
             }
-            for (uint32_t i = 0; i < 720; ++i) {
-                double ms = frame();
-                if (i >= 120)
-                    pair[enabled].add(r, ms, frameAllocations);
+            std::cout << "Incremental GPU median: "
+                      << percentile(pair[1].gpu, .5) - percentile(pair[0].gpu, .5) << " ms\n";
+            r.capture(output / "close.ppm");
+            if (occlusionCheck) {
+                MeshMaterial material;
+                material.doubleSided = true;
+                MeshInstance wall;
+                wall.mesh = r.uploadMesh(makeQuad());
+                wall.material = r.createMaterial(material);
+                wall.position = translated(worldPosition(camera, o.terrainGrid), {0, 0, -12});
+                wall.scale = {24, 16, 1};
+                auto handle = r.createInstance(wall);
+                for (bool enabled : {false, true}) {
+                    scene.vegetation.occlusion = enabled;
+                    Samples occlusion;
+                    for (uint32_t i = 0; i < 720; ++i) {
+                        double ms = frame();
+                        if (i >= 120)
+                            occlusion.add(r, ms, frameAllocations);
+                    }
+                    occlusion.print(enabled ? "occlusion on" : "occlusion off");
+                }
+                r.removeInstance(handle);
+                scene.vegetation.occlusion = false;
             }
-            pair[enabled].print(enabled ? "on" : "off");
         }
-        std::cout << "Incremental GPU median: " << percentile(pair[1].gpu, .5) - percentile(pair[0].gpu, .5)
-                  << " ms\n";
-        r.capture(output / "close.ppm");
         Samples route;
         for (uint32_t i = 0; i < 360; ++i) {
-            if (i < 180)
+            if (i < 180) {
                 camera.local.x += .15;
+                const auto ix = uint32_t(camera.local.x / .5);
+                const auto iz = uint32_t(camera.local.z / .5);
+                camera.local.y = heights[iz * 257 + ix].y + 1.7;
+            }
             if (i == 180)
                 camera.chunk = {8, -8};
             if (i == 188)
@@ -199,6 +300,19 @@ int main(int argc, char **argv) {
             route.add(r, ms, frameAllocations);
         }
         route.print("warm traversal / teleport / return");
+        // At 200 m the bounded 32-cell update queue cannot refill in the route's
+        // 172 post-return frames. Measure and verify recovery independently.
+        Samples recovery;
+        quiet = 0;
+        for (uint32_t i = 0; i < 1600 && quiet < 8; ++i) {
+            double ms = frame();
+            recovery.add(r, ms, frameAllocations);
+            const auto &v = r.vegetationStats();
+            quiet = v.residentCells && v.pendingCells == 0 && v.updatedCells == 0 ? quiet + 1 : 0;
+        }
+        recovery.print("post-return recovery");
+        if (quiet < 8)
+            throw std::runtime_error("Vegetation did not recover within the bounded return interval");
         scene.taa.enabled = false;
         for (int i = 0; i < 8; ++i)
             frame();

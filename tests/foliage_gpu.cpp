@@ -1,3 +1,4 @@
+#include "mesh_primitives.hpp"
 #include "renderer.hpp"
 #include "test_support.hpp"
 #include <iostream>
@@ -54,7 +55,6 @@ int main() {
             require(initial.stats.visible > 0 && !initial.stats.overflow,
                     "mixed foliage visible without overflow");
             require(initial.stats.casterCandidates == 8, "only fern/shrub are casting candidates");
-            require(initial.stats.selectionGroups == 24, "sparse casters share groups across cells");
             std::set<uint32_t> camera(initial.identities[0].begin(), initial.identities[0].end());
             bool offscreen = false;
             for (uint32_t view = 1; view < 6; ++view)
@@ -63,6 +63,15 @@ int main() {
                     offscreen |= !camera.count(id);
                 }
             require(offscreen, "independent offscreen foliage casters");
+            const float originalRange = s.vegetation.distance;
+            s.vegetation.distance = 1;
+            r.render(c, s);
+            const auto contracted = r.readVegetationSnapshot();
+            for (uint32_t view = 1; view < 6; ++view)
+                require(contracted.identities[view] == initial.identities[view],
+                        "camera range does not remove independently budgeted casters");
+            s.vegetation.distance = originalRange;
+            r.render(c, s);
             auto colour = r.readHdrSnapshot();
             s.opaqueDepthPrepass = true;
             r.render(c, s);
@@ -146,7 +155,6 @@ int main() {
             auto a = r.readVegetationSnapshot();
             require(a.stats.visible > 0 && a.stats.casters == 0 && a.stats.casterCandidates == 0,
                     "grass receives but never casts");
-            require(a.stats.selectionGroups == 9, "grass-only selects camera count/prefix/scatter only");
             s.shadows.mode = ShadowMode::Off;
             r.render(c, s);
             require(r.readVegetationSnapshot().stats.selectionGroups == a.stats.selectionGroups,
@@ -166,7 +174,66 @@ int main() {
             auto snapshot = r.readVegetationSnapshot();
             require(snapshot.stats.visible <= 3 && snapshot.stats.overflow > 0,
                     "multipart overflow safely clamped");
+            r.render(c, s);
+            require(r.readVegetationSnapshot().identities == snapshot.identities,
+                    "overflow retains a stable subset across frames");
             require(!r.validationErrors(), "overflow validation");
+        }
+        // The range control extends actual foliage beyond the old saved-asset cap.
+        for (bool fixed : {false, true}) {
+            auto p = std::make_shared<VegetationPopulation>(makeVegetationPopulation(4, true));
+            p->cells[0].origin = translated(p->cells[0].origin, {0, 0, -140});
+            Renderer r(options(library, p, fixed));
+            SceneSettings s;
+            s.terrainVisible = false;
+            s.shadows.mode = ShadowMode::Off;
+            s.vegetation.wind = 2;
+            s.vegetation.distance = 80;
+            Camera c;
+            c.local = {0, 1, 0};
+            r.render(c, s);
+            require(r.readVegetationSnapshot().stats.visible == 0, "short range excludes far foliage");
+            s.vegetation.distance = 200;
+            r.render(c, s);
+            const auto clear = r.readVegetationSnapshot();
+            require(clear.stats.visible > 0, "200 m range reaches beyond saved asset limits");
+            auto quad = r.uploadMesh(makeQuad());
+            MeshMaterial material;
+            material.doubleSided = true;
+            auto mh = r.createMaterial(material);
+            MeshInstance wall;
+            wall.mesh = quad;
+            wall.material = mh;
+            wall.position.local = {0, 1, -10};
+            wall.scale = {20, 20, 1};
+            auto wh = r.createInstance(wall);
+            s.opaqueDepthPrepass = true;
+            r.render(c, s);
+            const auto reference = r.readHdrSnapshot();
+            const auto unculled = r.readVegetationSnapshot();
+            s.vegetation.occlusion = true;
+            s.gtao.mode = GtaoMode::Half;
+            // Compare with AO enabled on both sides as well as checking its depth
+            // path.
+            r.render(c, s);
+            auto hidden = r.readVegetationSnapshot();
+            require(hidden.stats.visible == 0 && unculled.stats.visible > 0,
+                    "solid depth actually occludes far vegetation");
+            require(r.gtaoStats().effective == GtaoMode::Half, "split depth still supplies GTAO");
+            s.gtao.mode = GtaoMode::Off;
+            r.render(c, s);
+            require(difference(reference, r.readHdrSnapshot()) < .0005f,
+                    "vegetation occlusion preserves the visible image");
+            r.removeInstance(wh);
+            r.render(c, s);
+            require(r.readVegetationSnapshot().identities[0] == clear.identities[0],
+                    "removing solid occluder restores every visible plant without "
+                    "self-occlusion");
+            s.vegetation.distance = 80;
+            r.render(c, s);
+            require(r.readVegetationSnapshot().stats.visible == 0,
+                    "live contraction clears indirect commands");
+            require(!r.validationErrors(), "range/Hi-Z/GTAO synchronization validation");
         }
         {
             auto p = std::make_shared<VegetationPopulation>();

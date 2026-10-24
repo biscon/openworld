@@ -32,7 +32,11 @@ SurfaceMaterial meshSurface(MeshSurface i,MaterialRecord r,float4 base,float2 dx
     float3 n=safeNormal(i.normal),t=safeNormal(i.tangent.xyz-n*dot(n,i.tangent.xyz));
     float3 b=cross(n,t)*i.tangent.w;
     float2 xy=0;
-    if(r.meshMaps.y!=1 && r.factors.w>0)xy=(meshTexture(r.meshMaps.y,i.uv,dx,dy).xy*2-1)*r.factors.w;
+    float normalDetail=1;
+    #ifdef OW_VEGETATION
+    normalDetail=1-smoothstep(35,65,length(i.relative));
+    #endif
+    if(r.meshMaps.y!=1 && r.factors.w>0 && normalDetail>0)xy=(meshTexture(r.meshMaps.y,i.uv,dx,dy).xy*2-1)*r.factors.w*normalDetail;
     float3 tn=float3(xy,sqrt(saturate(1-dot(xy,xy))));
     m.normal=safeNormal(t*tn.x+b*tn.y+n*tn.z);if(r.alpha.z!=0&&!front)m.normal=-m.normal;
     float3 orm=meshTexture(r.meshMaps.z,i.uv,dx,dy).rgb;

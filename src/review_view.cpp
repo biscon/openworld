@@ -91,12 +91,18 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ShadowSettings, mode, nearDistance, farDistan
                                    normalBiasTexels, diagnostic)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(TaaSettings, enabled, historyWeight)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(BloomSettings, intensity, threshold, knee, radius)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WorldPosition, x, z, local)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(VegetationHabitatInput, revision, weights, minimumElevation,
+                                   maximumElevation, minimumUp)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(VegetationExclusionInput, revision, centre, radius)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(VegetationSettings, enabled, habitat, exclusion, density, time, wind,
+                                   windDirection, distance, transmission, depthPrepass, occlusion)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SceneSettings, shading, atmosphere, taa, bloom, gtao, shadows,
                                    terrainVisible, localLights, clusterDiagnostic, material, terrainMaterial,
                                    lighting, output, viewRadius, lod, lodColours, freezeLod, visibility,
                                    opaqueDepthPrepass, terrainLodQuality, terrainLodErrorView,
                                    terrainLodPixelError, frustumCulling, eroded, normalView, wireframe,
-                                   chunkBorders, filteredNormals, background)
+                                   chunkBorders, filteredNormals, background, vegetation)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(RendererOptions, materialDirectory, terrainGrid, normalSubdivisions,
                                    terrainCapacity, terrainChunkCapacity, lod, streaming, curvedHorizon,
                                    shadowCapacity, width, height, renderHeight, forceFixedMaterials,
@@ -131,7 +137,7 @@ void cameraValid(const Camera &c) {
 }
 } // namespace
 void validateReviewView(const ReviewView &v) {
-    check(v.version == 1 || v.version == 2, "Unsupported review view version");
+    check(v.version == 1 || v.version == 2 || v.version == 3, "Unsupported review view version");
     finite(json(v));
     cameraValid(v.camera);
     cameraValid(v.lod.observer);
@@ -181,6 +187,7 @@ void validateReviewView(const ReviewView &v) {
     validateGtao(s.gtao);
     validatePost(s.taa, s.bloom);
     validate(s.shadows);
+    validate(s.vegetation);
     check(uint32_t(s.shading) <= 1 && uint32_t(s.visibility) <= 2 && uint32_t(s.localLights) <= 2 &&
               uint32_t(s.output.toneMapper) <= 1 && s.clusterDiagnostic <= 2 && s.viewRadius >= 0 &&
               s.viewRadius <= terrainMaximumRadius(o.terrainGrid) && s.terrainLodPixelError >= .5f &&
@@ -202,6 +209,11 @@ ReviewView loadReviewView(const std::filesystem::path &path) {
         throw std::runtime_error("Cannot open review view: " + path.string());
     auto j = json::parse(f);
     finite(j);
+    if (j.value("version", 0) < 3 && !j.at("scene").contains("vegetation")) {
+        VegetationSettings defaults;
+        defaults.distance = 80;
+        j["scene"]["vegetation"] = defaults;
+    }
     auto v = j.get<ReviewView>();
     validateReviewView(v);
     return v;
@@ -216,7 +228,8 @@ void saveReviewView(const std::filesystem::path &path, const ReviewView &v) {
         std::ofstream f(temp, std::ios::trunc);
         f.exceptions(std::ios::failbit | std::ios::badbit);
         auto document = json(v);
-        document["version"] = 2; // Loading v1 remains supported; every new save uses the current format.
+        document["version"] = 3; // Loading v1/v2 remains supported; every new save
+                                 // uses the current format.
         const auto bytes = document.dump(2);
         check(bytes.size() + 1 <= 1024 * 1024, "Review file exceeds 1 MiB");
         f << bytes << '\n';

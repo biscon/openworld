@@ -223,8 +223,8 @@ struct Renderer::Impl {
             (!options.streaming.enabled || !options.streaming.hierarchical ||
              options.terrainGrid.spacing != .5f || options.terrainGrid.extent() < 4 ||
              std::fmod(options.terrainGrid.extent(), 4.0) != 0))
-            throw std::invalid_argument(
-                "Streamed vegetation requires stationary hierarchical terrain with a 4 m aligned extent");
+            throw std::invalid_argument("Streamed vegetation requires stationary hierarchical terrain with a "
+                                        "4 m aligned extent");
         if (!options.width || !options.height || options.width > 16384 || options.height > 16384)
             throw std::invalid_argument("Offscreen extent must be in 1..16384");
         extent = {options.width, options.height};
@@ -280,9 +280,11 @@ struct Renderer::Impl {
             gtao->initialize(cmd);
             endImmediate(cmd);
         }
-        shadows =
-            std::make_unique<VulkanShadows>(physical, device, queueFamily, shadowCaps, options.shadowCapacity,
-                                            (options.vegetation.fixture || options.vegetation.library) ? 4096 : 0);
+        shadows = std::make_unique<VulkanShadows>(
+            physical, device, queueFamily, shadowCaps, options.shadowCapacity,
+            options.vegetation.streaming.enabled ? options.vegetation.streaming.cellCapacity
+            : (options.vegetation.fixture || options.vegetation.library) ? vegetationCellLimit
+                                                                         : 0);
         {
             auto cmd = beginImmediate();
             shadows->initialize(cmd);
@@ -1681,13 +1683,16 @@ struct Renderer::Impl {
         post->bindLighting(frame.lightingSet);
         static_cast<LightingUniform *>(frame.lightingMapped)->viewProjection = post->view().raster;
         materials->prepare(frameIndex, camera, options.terrainGrid, materialTerrainSettings,
-                           settings.terrainMaterial, settings.terrainVisible);
+                           settings.terrainMaterial, settings.terrainVisible,
+                           options.vegetation.streaming.enabled ? &settings.vegetation : nullptr);
         clusters->prepare(frameIndex, camera, options.terrainGrid, frame.lightingSet, settings.localLights,
                           settings.clusterDiagnostic);
         meshes->prepare(frameIndex, camera, options.terrainGrid, post->previousCamera(),
                         post->stats().historyValid, post->stats().taa);
         if (vegetation)
             vegetation->prepare(frameIndex, camera, options.terrainGrid, post->view(), settings.vegetation);
+        if (streaming)
+            streaming->vegetationDemandRadius(vegetation ? vegetation->streamingRadius() : 0);
         uint32_t imageIndex = frameIndex;
         if (surface) {
             const auto acquired = vkAcquireNextImageKHR(device, swapchain, forever, frame.acquired,
@@ -1879,8 +1884,12 @@ struct Renderer::Impl {
         // Finalize all borrowed terrain descriptors before any command binds
         // this lighting set, including clustered-light compute.
         clusters->record(cmd, frameIndex, frame.lightingSet);
-        if (vegetation)
-            vegetation->select(cmd, shadows->uniform(), shadows->active() ? shadows->cascadeCount() : 0);
+        if (vegetation) {
+            if (settings.vegetation.occlusion && visibilityCaps.hiZ && !settings.wireframe)
+                vegetation->preparePyramid(visibility->pyramidView());
+            vegetation->updateAndSelectCasters(cmd, shadows->uniform(),
+                                               shadows->active() ? shadows->cascadeCount() : 0);
+        }
         clusters->timestamp(cmd, frameIndex, 2);
         if (shadows->active()) {
             for (uint32_t cascade = 0; cascade < shadows->cascadeCount(); ++cascade) {
@@ -1916,9 +1925,17 @@ struct Renderer::Impl {
         volumetrics->record(cmd);
         visibility->beginGpu(cmd);
         visibility->cull(cmd, false);
+        const bool vegetationActive = vegetation && settings.vegetation.enabled &&
+                                      (!options.vegetation.streaming.enabled || settings.terrainVisible);
+        const bool vegetationOcclusion =
+            vegetationActive && settings.vegetation.occlusion && visibilityCaps.hiZ && !settings.wireframe;
+        const bool buildPyramid = visibility->hiZ() || vegetationOcclusion;
+        const bool separateVegetationDepth = vegetationActive && buildPyramid;
+        if (vegetation && !vegetationOcclusion)
+            vegetation->selectCamera(cmd);
         const bool depthPrepass = settings.opaqueDepthPrepass ||
-                                  (options.vegetation.library && settings.vegetation.depthPrepass) ||
-                                  visibility->hiZ() || gtao->active();
+                                  (vegetationActive && settings.vegetation.depthPrepass) || buildPyramid ||
+                                  gtao->active();
         VkRenderingAttachmentInfo depth{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
         depth.imageView = frame.depthView;
         depth.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
@@ -1986,40 +2003,54 @@ struct Renderer::Impl {
         if (depthPrepass) {
             drawTerrain(false);
             meshes->draw(cmd, frameIndex, frame.lightingSet, 2, visibility.get());
-            if (vegetation)
+            if (vegetation && !separateVegetationDepth)
                 vegetation->draw(cmd, frame.lightingSet, 2);
             vkCmdEndRendering(cmd);
             visibility->stamp(cmd, 3);
-            if (visibility->hiZ() || gtao->active()) {
+            const auto depthStages =
+                VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+            if (buildPyramid) {
                 imageBarrier(cmd, frame.depth, VK_IMAGE_ASPECT_DEPTH_BIT,
                              VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-                             VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL,
-                             VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
-                                 VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                             VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL, depthStages,
                              VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
                              VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
-                if (visibility->hiZ()) {
-                    visibility->pyramid(cmd, frame.depth, frame.depthView);
+                visibility->pyramid(cmd, frame.depth, frame.depthView);
+                if (visibility->hiZ())
                     visibility->cull(cmd, true);
+                if (vegetationOcclusion)
+                    vegetation->selectCamera(cmd, visibility->pyramidView());
+                imageBarrier(cmd, frame.depth, VK_IMAGE_ASPECT_DEPTH_BIT,
+                             VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL,
+                             VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                             VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, depthStages,
+                             VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+                                 VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
+                if (separateVegetationDepth) {
+                    depth.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+                    vkCmdBeginRendering(cmd, &rendering);
+                    vegetation->draw(cmd, frame.lightingSet, 2);
+                    vkCmdEndRendering(cmd);
                 }
+            }
+            if (gtao->active()) {
+                imageBarrier(cmd, frame.depth, VK_IMAGE_ASPECT_DEPTH_BIT,
+                             VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                             VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL, depthStages,
+                             VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                             VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
                 gtao->record(cmd, frame.depthView, glm::vec2(post->view().pixels.z, post->view().pixels.w),
                              post->stats().taa ? post->stats().sequence : 0, camera.renderFar);
                 imageBarrier(cmd, frame.depth, VK_IMAGE_ASPECT_DEPTH_BIT,
                              VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL,
                              VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                             VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
-                             VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
-                                 VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                             VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, depthStages,
                              VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT);
             } else {
                 imageBarrier(cmd, frame.depth, VK_IMAGE_ASPECT_DEPTH_BIT,
                              VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-                             VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-                             VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
-                                 VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-                             VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-                             VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
-                                 VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                             VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, depthStages,
+                             VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, depthStages,
                              VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT);
             }
             rendering.colorAttachmentCount = post->stats().taa ? 3 : 1;
@@ -2424,9 +2455,10 @@ void Renderer::setTerrainLodObserver(const Camera &camera) {
 }
 TerrainLodReviewState Renderer::terrainLodReviewState() const {
     TerrainLodReviewState state{impl_->lodObserver, 1, 0, impl_->observerInitialized};
-    if (impl_->streaming)
-        { impl_->streaming->reviewQuality(state.qualityScale, state.focalPixels);
-          state.patches=impl_->streaming->reviewPatches(); }
+    if (impl_->streaming) {
+        impl_->streaming->reviewQuality(state.qualityScale, state.focalPixels);
+        state.patches = impl_->streaming->reviewPatches();
+    }
     return state;
 }
 void Renderer::setTerrainLodReviewState(const TerrainLodReviewState &state) {
@@ -2435,7 +2467,8 @@ void Renderer::setTerrainLodReviewState(const TerrainLodReviewState &state) {
         state.focalPixels < 0)
         throw std::invalid_argument("Invalid review LOD range");
     if (impl_->streaming) {
-        // Partition validation can fail; leave the observer/range unchanged until it succeeds.
+        // Partition validation can fail; leave the observer/range unchanged until
+        // it succeeds.
         impl_->streaming->restoreReviewPatches(state.patches);
         impl_->streaming->restoreReviewQuality(state.qualityScale, state.focalPixels);
     }
@@ -2512,8 +2545,8 @@ std::vector<TerrainSample> Renderer::sampleTerrainNormalFixture(TerrainGrid grid
 std::vector<TerrainSample> Renderer::normalsForFixture(const std::vector<glm::vec2> &h) {
     return impl_->terrain->normalsForFixture(h);
 }
-std::vector<TerrainSample> Renderer::sampleCurvatureFixture(const std::vector<TerrainSample> &p,
-                                                          glm::vec4 c, bool reduced) {
+std::vector<TerrainSample> Renderer::sampleCurvatureFixture(const std::vector<TerrainSample> &p, glm::vec4 c,
+                                                            bool reduced) {
     if (impl_->streaming)
         throw std::invalid_argument("Curvature fixture is non-streamed only");
     return impl_->terrain->sampleCurvatureFixture(p, c, reduced);

@@ -179,6 +179,20 @@ int main() {
             auto first = settle(r, c, s);
             checkGround(r, first);
             require(first.stats.visible > 0, "streamed plants rendered");
+            s.vegetation.distance = 200;
+            r.render(c, s);
+            auto extended = r.readVegetationSnapshot();
+            samePopulation(first, extended);
+            require(extended.identities[0] == first.identities[0],
+                    "longer range does not thin nearby vegetation");
+            s.vegetation.occlusion = true;
+            s.gtao.mode = GtaoMode::Half;
+            r.render(c, s);
+            require(r.readVegetationSnapshot().stats.visible <= extended.stats.visible,
+                    "streamed occlusion only rejects existing candidates");
+            s.vegetation.occlusion = false;
+            s.gtao.mode = GtaoMode::Off;
+            s.vegetation.distance = 70;
             const auto fineReview = r.terrainLodReviewState();
             for (uint32_t quadrant = 0; quadrant < 4; ++quadrant) {
                 auto review = fineReview;
@@ -195,8 +209,8 @@ int main() {
                 review.patches.clear();
                 for (auto [x, z, level] : leaves)
                     review.patches.push_back({x, z, level});
-                review.observer.local.x +=
-                    128; // move the protected-ground demand away from the owned partition
+                review.observer.local.x += 128; // move the protected-ground demand away
+                                                // from the owned partition
                 r.setTerrainLodReviewState(review);
                 s.freezeLod = true;
                 r.render(c, s);

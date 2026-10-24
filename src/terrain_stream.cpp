@@ -104,7 +104,8 @@ bool TerrainPayloadLayout::valid(TerrainProduct product, const uint8_t *data, si
                 return false;
         }
         if (filteredHeights) {
-            for (uint64_t i = boundsOffset + errorOffset; i < coarseOffset; i += sizeof(TerrainPatchMetadata)) {
+            for (uint64_t i = boundsOffset + errorOffset; i < coarseOffset;
+                 i += sizeof(TerrainPatchMetadata)) {
                 float v[8];
                 std::memcpy(v, data + i, sizeof(v));
                 if (v[0] > v[1] || std::any_of(v + 2, v + 8, [](float x) { return x < 0; }))
@@ -143,9 +144,8 @@ int64_t distance(ChunkCoord a, ChunkCoord b) {
     return std::max(std::llabs(a.x - b.x), std::llabs(a.z - b.z));
 }
 } // namespace
-TerrainStreamer::TerrainStreamer(uint32_t capacity, int maximumRadius, TerrainGrid grid,
-                                 bool hierarchical, uint32_t shadowSlots, uint32_t horizonSlots,
-                                 int horizonRadius)
+TerrainStreamer::TerrainStreamer(uint32_t capacity, int maximumRadius, TerrainGrid grid, bool hierarchical,
+                                 uint32_t shadowSlots, uint32_t horizonSlots, int horizonRadius)
     : slots_(capacity), cameraCapacity_(capacity - shadowSlots),
       baseCapacity_(capacity - shadowSlots - horizonSlots), horizonSlots_(horizonSlots),
       maximumRadius_(maximumRadius), grid_(grid), hierarchical_(hierarchical) {
@@ -200,6 +200,11 @@ void TerrainStreamer::shadowDemand(const TerrainTileKey *keys, uint32_t count) {
     shadowCount_ = count;
     if (count)
         std::copy_n(keys, count, shadowWanted_.begin());
+}
+void TerrainStreamer::canonicalDemand(float metres) {
+    if (!std::isfinite(metres) || metres < 0 || metres > 216)
+        throw std::invalid_argument("Invalid canonical terrain demand radius");
+    canonicalRadius_ = metres;
 }
 void TerrainStreamer::demand(const Camera &camera, int radius, uint64_t completed, uint64_t submitted,
                              uint64_t epoch) {
@@ -269,13 +274,12 @@ TerrainHandle TerrainStreamer::next(State state) const {
         if (slots_[i].state == state && slots_[i].wanted) {
             const auto &s = slots_[i];
             // Coarse ancestors first; within a level prefer nearby visible data.
-            const auto value = hierarchical_
-                                   ? int64_t((s.shadowOnly                       ? 100000000
-                                              : s.horizonOnly && !horizonRadius_ ? 50000000
-                                                                                 : 0) +
-                                             (topLevel_ - s.level) * 1000000 +
-                                             (s.refine ? 0 : 500000) + tileDistance(s.tile()) * 100)
-                                   : distance(s.chunk, centre_);
+            const auto value = hierarchical_ ? int64_t((s.shadowOnly                       ? 100000000
+                                                        : s.horizonOnly && !horizonRadius_ ? 50000000
+                                                                                           : 0) +
+                                                       (topLevel_ - s.level) * 1000000 +
+                                                       (s.refine ? 0 : 500000) + tileDistance(s.tile()) * 100)
+                                             : distance(s.chunk, centre_);
             if (value < d) {
                 d = value;
                 best = i;
@@ -393,9 +397,8 @@ void TerrainStreamer::requestTree(TerrainTileKey t) {
     const int64_t x = t.x * scale - centre_.x, z = t.z * scale - centre_.z;
     // Clip to the requested square plus one base chunk. Descendant rings are
     // bounded to six tiles per axis, independent of the number of base chunks.
-    const int clip = (t.level == topLevel_ || (horizonRadius_ && t.level > detailedLevel_))
-                         ? outerRadius_
-                         : radius_;
+    const int clip =
+        (t.level == topLevel_ || (horizonRadius_ && t.level > detailedLevel_)) ? outerRadius_ : radius_;
     if (x > clip + 1 || z > clip + 1 || x + scale < -clip || z + scale < -clip)
         return;
     const double d = tileDistance(t);
@@ -448,6 +451,35 @@ void TerrainStreamer::demandHierarchy(const Camera &camera, int radius, uint64_t
                         ++pressureEvents_;
                 }
         }
+    if (canonicalRadius_ > 0) {
+        // Request missing providers near-first after closing rendered dependencies.
+        // These are data readers, not new rendering patches or an unbounded fine
+        // ring.
+        const double extent = grid_.extent();
+        const int reach = int(std::ceil(canonicalRadius_ / extent)) + 1;
+        bool full = false;
+        for (int ring = 0; ring <= reach && !full; ++ring)
+            for (int z = -ring; z <= ring && !full; ++z)
+                for (int x = -ring; x <= ring; ++x) {
+                    if (std::max(std::abs(x), std::abs(z)) != ring)
+                        continue;
+                    const double loX = x * extent - camera.local.x, loZ = z * extent - camera.local.z;
+                    const double dx = std::max({0., loX, -loX - extent});
+                    const double dz = std::max({0., loZ, -loZ - extent});
+                    if (dx * dx + dz * dz > canonicalRadius_ * canonicalRadius_)
+                        continue;
+                    const TerrainTileKey key{centre_.x + x, centre_.z + z, 0};
+                    if (std::any_of(wanted_.begin(), wanted_.end(),
+                                    [&](const auto &w) { return w.key == key; }))
+                        continue;
+                    if (wanted_.size() == wanted_.capacity()) {
+                        ++pressureEvents_;
+                        full = true;
+                        break;
+                    }
+                    wanted_.push_back({key, false});
+                }
+    }
     for (auto &s : slots_) {
         if (s.state == State::Retiring && s.retireAfter <= completed) {
             auto generation = s.generation;
@@ -471,10 +503,10 @@ void TerrainStreamer::demandHierarchy(const Camera &camera, int radius, uint64_t
                 continue;
             const int64_t span = int64_t(1) << w.key.level;
             const int64_t x = w.key.x * span - centre_.x, z = w.key.z * span - centre_.z;
-            const bool horizon =
-                horizonRadius_ ? w.key.level > detailedLevel_
-                               : horizonSlots_ && (x > radius_ + 1 || z > radius_ + 1 ||
-                                                   x + span < -radius_ || z + span < -radius_);
+            const bool horizon = horizonRadius_
+                                     ? w.key.level > detailedLevel_
+                                     : horizonSlots_ && (x > radius_ + 1 || z > radius_ + 1 ||
+                                                         x + span < -radius_ || z + span < -radius_);
             int at = findTile(w.key);
             if (at < 0) {
                 for (uint32_t i = horizon ? baseCapacity_ : 0;

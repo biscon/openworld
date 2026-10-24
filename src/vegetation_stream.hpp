@@ -43,7 +43,7 @@ class VegetationResidency {
         float distanceSquared = 0;
     };
     explicit VegetationResidency(VegetationStreamConfig);
-    void demand(WorldPosition, uint64_t revision, uint64_t completed, bool enabled);
+    void demand(WorldPosition, uint64_t revision, uint64_t completed, bool enabled, float radius = 0);
     bool valid(VegetationCellHandle) const;
     void used(uint32_t slot, uint64_t serial);
     Slot &slot(uint32_t i) { return slots_[i]; }
@@ -64,6 +64,7 @@ class VegetationResidency {
     std::vector<uint32_t> ordered_;
     uint32_t deferred_ = 0, retiring_ = 0;
     WorldPosition previousCamera_;
+    float previousRadius_ = 0;
     uint64_t previousRevision_ = 0;
     bool previousEnabled_ = false, initialized_ = false;
     int find(VegetationCellKey) const;

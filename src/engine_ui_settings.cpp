@@ -1,4 +1,5 @@
 #include "engine_ui.hpp"
+#include <cmath>
 #include <cstdio>
 #include <imgui.h>
 
@@ -64,25 +65,44 @@ void EngineUi::drawSettings(UiWindow window, UiContext &context, UiActions &acti
                            "terrain in Terrain Settings to compare.");
         break;
     }
-    case UiWindow::RenderingSettings: {
-        if (options.vegetation.streaming.enabled) {
-            ImGui::SeparatorText("Vegetation");
-            ImGui::Checkbox("Enable vegetation", &scene.vegetation.enabled);
-            int preset = scene.vegetation.habitat.weights.z > .5f   ? 2
-                         : scene.vegetation.habitat.weights.y > .5f ? 1
-                                                                    : 0;
-            if (ImGui::Combo("Habitat preset", &preset, "Meadow\0Moor\0Understory\0"))
-                scene.vegetation.habitat = vegetationHabitat(VegetationHabitat(preset));
-            ImGui::SliderFloat("Vegetation density", &scene.vegetation.density, 0, 1);
+    case UiWindow::Vegetation: {
+        if (!options.vegetation.streaming.enabled) {
+            ImGui::TextWrapped("Streamed vegetation requires hierarchical terrain.");
+            break;
+        }
+        auto &settings = scene.vegetation;
+        ImGui::Checkbox("Enable vegetation", &settings.enabled);
+        ImGui::SliderFloat("Render distance (m)", &settings.distance, 20, 200, "%.0f",
+                           ImGuiSliderFlags_AlwaysClamp);
+        ImGui::SliderFloat("Density", &settings.density, 0, 1, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+        int preset = settings.habitat.weights.z > .5f ? 2 : settings.habitat.weights.y > .5f ? 1 : 0;
+        if (ImGui::Combo("Habitat preset", &preset, "Meadow\0Moor\0Understory\0"))
+            settings.habitat = vegetationHabitat(VegetationHabitat(preset));
+        ImGui::SliderFloat("Wind strength", &settings.wind, 0, 2, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+        float angle = std::atan2(settings.windDirection.y, settings.windDirection.x);
+        if (ImGui::SliderAngle("Wind direction", &angle, -180, 180))
+            settings.windDirection = {std::cos(angle), std::sin(angle)};
+        ImGui::Checkbox("Foliage transmission", &settings.transmission);
+        ImGui::Checkbox("Vegetation occlusion (Hi-Z)", &settings.occlusion);
+        ImGui::TextWrapped("Range increases stream in progressively. Nearby density is preserved; "
+                           "distant plants use cheaper detail and stable thinning.");
+        if (ImGui::CollapsingHeader("Diagnostics")) {
             const auto &v = renderer.vegetationStats();
             ImGui::Text("Cells: %u ready, %u pending, %u retiring", v.residentCells, v.pendingCells,
                         v.retiringCells);
             ImGui::Text("Updates: %u (%u new), missing terrain: %u", v.updatedCells, v.generatedCells,
                         v.missingTerrainCells);
-            ImGui::Text("Capacity-deferred cells: %u", v.deferredCells);
-            ImGui::Text("GPU %.3f ms updates, %.1f MiB; CPU %.3f ms", v.updateMilliseconds,
-                        double(v.allocatedBytes) / (1024 * 1024), v.preparationMilliseconds);
+            ImGui::Text("Capacity-deferred cells: %u; overflow: %u", v.deferredCells, v.overflow);
+            ImGui::Text("Visible entries: %u; casters: %u", v.visible, v.casters);
+            ImGui::Text("GPU: %.3f ms select, %.3f depth, %.3f colour", v.selectionMilliseconds,
+                        v.depthMilliseconds, v.colourMilliseconds);
+            ImGui::Text("GPU: %.3f ms shadows, %.3f updates", v.shadowMilliseconds, v.updateMilliseconds);
+            ImGui::Text("%.1f MiB allocated; CPU %.3f ms", double(v.allocatedBytes) / (1024 * 1024),
+                        v.preparationMilliseconds);
         }
+        break;
+    }
+    case UiWindow::RenderingSettings: {
         ImGui::SeparatorText("Geometry & visibility");
         char renderHeightLabel[32];
         std::snprintf(renderHeightLabel, sizeof(renderHeightLabel), "%u pixels", options.renderHeight);

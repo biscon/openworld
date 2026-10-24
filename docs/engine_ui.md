@@ -30,7 +30,9 @@ hides all panels. There is no docking or separate platform-window support.
 - Terrain: Terrain Settings (radius, erosion and base/eroded comparison), Base
   Terrain Generation, Terrain Materials (presets and material tuning).
 - Rendering: Rendering Settings (resolution, LOD/refinement, visibility, depth,
-  shadows and GTAO), Lighting & Materials, Atmosphere, Local Volumetrics, Output.
+  shadows and GTAO), Vegetation (enabled state, 20–200 m range, density, habitat,
+  wind, transmission, optional occlusion and collapsible diagnostics), Lighting &
+  Materials, Atmosphere, Local Volumetrics, Output.
 - View: Camera & Review, Background, Close All Windows.
 - Diagnostics: Frame & Device; Terrain Streaming & Generation; Terrain LOD;
   Rendering & Visibility; Shadows; GTAO; Lighting & Clusters; Terrain Materials;

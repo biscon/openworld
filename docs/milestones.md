@@ -183,7 +183,9 @@ and isolated interactive review. [V2 measurements and validation](measurements/v
 record the current budgets and remaining quality limits. The [V3 streamed population
 and terrain attachment](rendering_vegetation_streaming.md) adds bounded GPU placement,
 terrain reader retention, stitched-triangle attachment, and opt-in main-demo controls.
-V4–V6 remain proposed; the [short native report](measurements/vegetation_5j_v3/README.md)
+[V4 engine integration](rendering_vegetation_visibility.md) enables vegetation in the
+ordinary engine with a dedicated settings window, live 20–200 m distance, bounded
+visibility and shared depth/coverage. [V4 native verification and full-scene measurements](measurements/vegetation_5j_v4/README.md) record completed integration and remaining moving CPU/art tuning gates. V5 interaction/habitat variety and V6 final tuning remain proposed. The [short native report](measurements/vegetation_5j_v3/README.md)
 distinguishes measured V3 costs from remaining full-scene acceptance.
 
 ### Scope

@@ -100,6 +100,7 @@ void roundTrip(Fixture &fixture) {
     const auto initial = std::string(ImGui::SaveIniSettingsToMemory(&length));
     for (const auto &window : uiWindows)
         require(initial.find(window.id) == std::string::npos, "Menu-only startup creates no engine panels");
+    fixture.state.visible(UiWindow::Vegetation) = true;
     fixture.setLayout(UiWindow::BaseTerrain, {345, 165}, {570, 390}, true);
     fixture.setLayout(UiWindow::ShadowDiagnostics, {65, 200}, {610, 410});
     fixture.state.visible(UiWindow::ShadowDiagnostics) = false;
@@ -111,6 +112,7 @@ void roundTrip(Fixture &fixture) {
             "Only UI state is persisted");
     fixture.resetContext();
     loadUiState(path, fixture.state);
+    require(fixture.state.visible(UiWindow::Vegetation), "Vegetation panel persists independently");
     require(fixture.state.visible(UiWindow::BaseTerrain) &&
                 !fixture.state.visible(UiWindow::ShadowDiagnostics),
             "Fresh context restores independent open/closed flags");
@@ -199,7 +201,8 @@ void inputAndBounds(Fixture &fixture) {
     fixture.resetContext();
     fixture.frame();
     fixture.click({30, ImGui::GetFrameHeight() / 2});
-    // Locate the actual displayed menu, rather than hard-coding font-dependent row bounds.
+    // Locate the actual displayed menu, rather than hard-coding font-dependent
+    // row bounds.
     auto *popup = GImGui->OpenPopupStack.empty() ? nullptr : GImGui->OpenPopupStack.back().Window;
     require(popup && popup->Active, "Terrain menu opens through input");
     const ImVec2 firstItem(popup->Pos.x + popup->WindowPadding.x + 30,

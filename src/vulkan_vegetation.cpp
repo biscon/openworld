@@ -1,4 +1,5 @@
 #include "vulkan_vegetation.hpp"
+#include "horizon.hpp"
 #include "render_resources.hpp"
 #include "vulkan_vegetation_stream.hpp"
 #include <chrono>
@@ -7,7 +8,7 @@ namespace ow {
 using namespace render_detail;
 namespace {
 constexpr uint32_t viewWords = vegetationBinLimit * 8 + 1, workWords = viewWords * vegetationViews,
-                   queryCount = 18;
+                   queryCount = 20;
 struct Uniform {
     std::array<glm::mat4, 6> views{};
     glm::vec4 cameraTime{}, previousCameraTime{}, settings{}, previousSettings{}, cards{}, previousCards{};
@@ -18,8 +19,11 @@ struct Uniform {
     std::array<glm::vec4, 48> foliage{};
     std::array<glm::vec4, 8> ranges{}, deformation{}, envelope{};
     std::array<glm::uvec4, 24> lods{};
+    glm::vec4 curvature{}, detail{};
+    glm::mat4 raster{1};
+    glm::uvec4 pyramidSize{};
 };
-static_assert(sizeof(Uniform) == 2976);
+static_assert(sizeof(Uniform) == 3088);
 using Cell = VegetationGpuCell;
 } // namespace
 struct VulkanVegetation::Impl {
@@ -29,11 +33,11 @@ struct VulkanVegetation::Impl {
     VkDescriptorSetLayout setLayout{};
     VkDescriptorPool pool{};
     VkPipelineLayout layout{};
-    VkPipeline compute{};
+    VkPipeline compute{}, computeOcclusion{};
     std::array<VkPipeline, 6> pipelines{};
     VkQueryPool queries{};
     bool temporalAttachments = false, uploaded = false, history = false;
-    Buffer instances, geometry, groups, casters, staging, diagnostic;
+    Buffer instances, geometry, casters, staging, diagnostic;
     uint64_t indexOffset = 0, bytes = 0, budget = 0, serial = 0;
     uint32_t count = 0, cellCount = 0, listCapacity = 0, frame = 0, lastFrame = 0, timestampBits = 0;
     double timestampPeriod = 0;
@@ -52,7 +56,7 @@ struct VulkanVegetation::Impl {
     std::vector<MaterialHandle> materialHandles;
     std::vector<Cell> cellBounds;
     struct Frame {
-        Buffer uniform, lists, work, readback, cells;
+        Buffer uniform, lists, work, readback, cells, prefixes, choices, groups;
         VkDescriptorSet set{};
         VegetationStats stats;
         uint32_t stamped = 0;
@@ -69,6 +73,8 @@ struct VulkanVegetation::Impl {
                 vkDestroyPipeline(device, p, nullptr);
         if (compute)
             vkDestroyPipeline(device, compute, nullptr);
+        if (computeOcclusion)
+            vkDestroyPipeline(device, computeOcclusion, nullptr);
         if (queries)
             vkDestroyQueryPool(device, queries, nullptr);
         if (layout)
@@ -136,8 +142,8 @@ struct VulkanVegetation::Impl {
                     continue;
                 }
                 double ms = double((t[(q + 1) * 2] - t[q * 2]) & mask) * timestampPeriod / 1e6;
-                if (q == 0)
-                    result.selectionMilliseconds = ms;
+                if (q == 0 || q == 18)
+                    result.selectionMilliseconds += ms;
                 else if (q == 2)
                     result.depthMilliseconds = ms;
                 else if (q == 4)
@@ -149,6 +155,28 @@ struct VulkanVegetation::Impl {
             }
         }
         return result;
+    }
+    void selectView(VkCommandBuffer cmd, uint32_t view, bool occlusion = false) {
+        auto &f = frames[frame];
+        if (!current.lists[view].w)
+            return;
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, occlusion ? computeOcclusion : compute);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, layout, 0, 1, &f.set, 0, nullptr);
+        for (uint32_t phase = 0; phase < 4; ++phase) {
+            uint32_t push[] = {view, 0, phase, 0};
+            vkCmdPushConstants(cmd, layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT, 0, 16,
+                               push);
+            const uint32_t n = phase == 1 || phase == 2 ? 1 : current.lists[view].w;
+            vkCmdDispatch(cmd, n, 1, 1);
+            f.stats.selectionGroups += n;
+            barrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                    VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                    VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                    VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+        }
+        barrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
+                VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
     }
     void pipeline(uint32_t pass, VkShaderModule vs, VkShaderModule fs, bool temporal = false) {
         VkPipelineShaderStageCreateInfo stages[2]{};
@@ -451,31 +479,31 @@ VulkanVegetation::VulkanVegetation(VkPhysicalDevice p, VkDevice d, uint32_t fami
     s.allocate(s.geometry, geometryBytes,
                VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
                    VK_BUFFER_USAGE_TRANSFER_DST_BIT);
-    s.allocate(s.groups, workGroups.size() * 16, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
     s.allocate(s.casters, casterIndices.size() * 4, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
-    if (!workGroups.empty())
-        std::memcpy(s.groups.mapped, workGroups.data(), workGroups.size() * 16);
     if (!casterIndices.empty())
         std::memcpy(s.casters.mapped, casterIndices.data(), casterIndices.size() * 4);
-    s.allocate(s.staging, geometryBytes + instanceBytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true);
+    s.allocate(s.staging, geometryBytes + (options.streaming.enabled ? 0 : instanceBytes),
+               VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true);
     auto *data = static_cast<char *>(s.staging.mapped);
     std::memcpy(data, vertices.data(), s.indexOffset);
     std::memcpy(data + s.indexOffset, indices.data(), indices.size() * 4);
-    if (instanceBytes)
+    if (instanceBytes && !options.streaming.enabled)
         std::memcpy(data + geometryBytes, s.population.instances.data(), instanceBytes);
-    VkDescriptorSetLayoutBinding bindings[8]{};
-    for (uint32_t i = 0; i < 8; ++i)
+    VkDescriptorSetLayoutBinding bindings[11]{};
+    for (uint32_t i = 0; i < 10; ++i)
         bindings[i] = {i, i == 1 ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
                        VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT, nullptr};
     VkDescriptorSetLayoutCreateInfo li{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-    li.bindingCount = 8;
+    bindings[10] = {10, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr};
+    li.bindingCount = 11;
     li.pBindings = bindings;
     check(vkCreateDescriptorSetLayout(d, &li, nullptr, &s.setLayout));
-    VkDescriptorPoolSize sizes[] = {{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 14},
-                                    {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2}};
+    VkDescriptorPoolSize sizes[] = {{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 18},
+                                    {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2},
+                                    {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 2}};
     VkDescriptorPoolCreateInfo pi{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
     pi.maxSets = 2;
-    pi.poolSizeCount = 2;
+    pi.poolSizeCount = 3;
     pi.pPoolSizes = sizes;
     check(vkCreateDescriptorPool(d, &pi, nullptr, &s.pool));
     if (options.streaming.enabled) {
@@ -485,6 +513,12 @@ VulkanVegetation::VulkanVegetation(VkPhysicalDevice p, VkDevice d, uint32_t fami
     } else
         s.allocate(s.emptyAttachment, 16, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
     for (auto &f : s.frames) {
+        const auto groups = std::max(s.cameraGroups, s.casterGroups);
+        s.allocate(f.prefixes, uint64_t(groups) * 48 * 4, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+        s.allocate(f.choices, uint64_t(groups) * 128 * 4, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+        s.allocate(f.groups, workGroups.size() * 16, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
+        if (!workGroups.empty())
+            std::memcpy(f.groups.mapped, workGroups.data(), workGroups.size() * 16);
         s.allocate(f.uniform, sizeof(Uniform), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true);
         s.allocate(f.cells, s.cellCount * sizeof(Cell), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
         s.allocate(f.lists, uint64_t(s.listEntries) * 4,
@@ -503,13 +537,16 @@ VulkanVegetation::VulkanVegetation(VkPhysicalDevice p, VkDevice d, uint32_t fami
         descriptor(d, f.set, 2, f.lists);
         descriptor(d, f.set, 3, f.work);
         descriptor(d, f.set, 4, f.cells);
-        descriptor(d, f.set, 5, s.groups);
+        descriptor(d, f.set, 5, f.groups);
         descriptor(d, f.set, 6, s.casters);
+        descriptor(d, f.set, 8, f.prefixes);
+        descriptor(d, f.set, 9, f.choices);
         descriptor(d, f.set, 7,
                    s.streaming ? s.streaming->attachments(uint32_t(&f - s.frames.data()))
                                : s.emptyAttachment);
     }
-    s.allocate(s.diagnostic, uint64_t(s.listEntries) * 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT, true);
+    if (!options.streaming.enabled || options.streaming.diagnostics)
+        s.allocate(s.diagnostic, uint64_t(s.listEntries) * 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT, true);
     VkDescriptorSetLayout layouts[] = {s.setLayout, lighting, m.layout()};
     VkPushConstantRange push{VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT, 0, 16};
     VkPipelineLayoutCreateInfo pl{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
@@ -529,6 +566,9 @@ VulkanVegetation::VulkanVegetation(VkPhysicalDevice p, VkDevice d, uint32_t fami
                 "main",
                 nullptr};
     check(vkCreateComputePipelines(d, {}, 1, &ci, nullptr, &s.compute));
+    ShaderModule occlusion(d, shaders / "vegetation_select_hiz.comp.spv");
+    ci.stage.module = occlusion.handle;
+    check(vkCreateComputePipelines(d, {}, 1, &ci, nullptr, &s.computeOcclusion));
     ShaderModule vs(d, shaders / "vegetation.vert.spv"),
         fs(d, shaders / (bindless ? "vegetation_bindless.frag.spv" : "vegetation.frag.spv")),
         depth(d, shaders / (bindless ? "vegetation_depth_bindless.frag.spv" : "vegetation_depth.frag.spv"));
@@ -557,6 +597,10 @@ VulkanVegetation::VulkanVegetation(VkPhysicalDevice p, VkDevice d, uint32_t fami
     s.current.limits = {s.listCapacity, 1, s.bins, 0};
     s.current.profile = {s.legacy ? 1u : 0u, ~0u, ~0u, 1};
     s.last.allocatedBytes = s.bytes;
+    if (s.streaming) {
+        s.population.instances.clear();
+        s.population.instances.shrink_to_fit();
+    }
 }
 VulkanVegetation::~VulkanVegetation() = default;
 void VulkanVegetation::prepare(uint32_t frame, const Camera &camera, TerrainGrid grid,
@@ -587,6 +631,13 @@ void VulkanVegetation::prepare(uint32_t frame, const Camera &camera, TerrainGrid
                          settings.transmission ? 1u : 0u};
     s.current.inspection = {settings.inspectIdentity, s.streaming ? 1u : 0u, 0, 0};
     s.current.previousWind = s.previous.wind;
+    s.current.curvature = temporal.curvature;
+    s.current.raster = temporal.raster;
+    const float focal =
+        .5f * temporal.pixels.y *
+        glm::length(glm::vec3(temporal.current[0][1], temporal.current[1][1], temporal.current[2][1]));
+    s.current.detail = {focal / 935.3074f, s.previous.detail.x, 0, 0};
+    s.current.pyramidSize = {};
     s.currentCamera = worldPosition(camera, grid);
     auto *cellData = static_cast<Cell *>(f.cells.mapped);
     for (uint32_t c = 0; !s.streaming && c < s.cellCount; ++c) {
@@ -615,6 +666,10 @@ void VulkanVegetation::prepare(uint32_t frame, const Camera &camera, TerrainGrid
     f.stats.preparationMilliseconds =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
 }
+float VulkanVegetation::streamingRadius() const {
+    const auto &s = *impl_;
+    return s.streaming && s.current.limits.w ? s.streaming->demandRadius(s.current.settings.z) : 0;
+}
 void VulkanVegetation::prepareStream(VulkanTerrainStream *terrain, const VegetationSettings &settings,
                                      double terrainPreparationMilliseconds) {
     auto &s = *impl_;
@@ -634,8 +689,18 @@ void VulkanVegetation::budgetStream(double remaining) {
         return;
     auto start = std::chrono::steady_clock::now();
     auto &f = s.frames[s.frame];
+    if (!f.stats.enabled) {
+        s.current.lists[0].w = 0;
+        return;
+    }
     s.streaming->restrictPopulation(remaining, s.cellBounds.data(), f.stats);
     std::memcpy(f.cells.mapped, s.cellBounds.data(), s.cellCount * sizeof(Cell));
+    auto *groups = static_cast<glm::uvec4 *>(f.groups.mapped);
+    uint32_t active = 0;
+    for (uint32_t cell : s.streaming->orderedCells())
+        if (s.cellBounds[cell].origin.w != 0)
+            groups[active++] = {cell * 128, 128, cell, 0};
+    s.current.lists[0].w = active;
     f.stats.preparationMilliseconds +=
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
 }
@@ -655,12 +720,14 @@ void VulkanVegetation::bounds(VulkanShadows &shadows) {
         auto nearest = glm::max(glm::max(lo, -hi), glm::vec3(0));
         if (glm::length(nearest) > (s.legacy ? s.current.settings.w : s.casterRange[i]))
             continue;
+        curveBounds(lo, hi, s.current.curvature);
         shadows.includeCasterBounds({lo, hi, true});
     }
     s.frames[s.frame].stats.preparationMilliseconds +=
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
 }
-void VulkanVegetation::select(VkCommandBuffer cmd, const ShadowUniform &shadows, uint32_t cascades) {
+void VulkanVegetation::updateAndSelectCasters(VkCommandBuffer cmd, const ShadowUniform &shadows,
+                                              uint32_t cascades) {
     auto start = std::chrono::steady_clock::now();
     auto &s = *impl_;
     auto &f = s.frames[s.frame];
@@ -676,7 +743,7 @@ void VulkanVegetation::select(VkCommandBuffer cmd, const ShadowUniform &shadows,
         uint64_t geometryBytes = s.geometry.size, instanceBytes = uint64_t(s.count) * 32;
         VkBufferCopy copy{0, 0, geometryBytes};
         vkCmdCopyBuffer(cmd, s.staging.buffer, s.geometry.buffer, 1, &copy);
-        if (instanceBytes) {
+        if (instanceBytes && !s.streaming) {
             copy = {geometryBytes, 0, instanceBytes};
             vkCmdCopyBuffer(cmd, s.staging.buffer, s.instances.buffer, 1, &copy);
         }
@@ -693,26 +760,41 @@ void VulkanVegetation::select(VkCommandBuffer cmd, const ShadowUniform &shadows,
         s.streaming->record(cmd);
         s.stamp(cmd, 17);
     }
-    s.stamp(cmd, 0);
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, s.compute);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, s.layout, 0, 1, &f.set, 0, nullptr);
-    for (uint32_t phase = 0; phase < 3; ++phase) {
-        for (uint32_t view = 0; view < s.current.limits.y; ++view) {
-            uint32_t push[] = {view, 0, phase, 0};
-            vkCmdPushConstants(cmd, s.layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT, 0, 16,
-                               push);
-            uint32_t groups = phase == 1 ? 1 : s.current.lists[view].w;
-            if (groups)
-                vkCmdDispatch(cmd, groups, 1, 1);
-            f.stats.selectionGroups += groups;
-        }
-        barrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-                VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+    s.stamp(cmd, 18);
+    for (uint32_t view = 1; view < s.current.limits.y; ++view)
+        s.selectView(cmd, view);
+    s.stamp(cmd, 19);
+    f.stats.preparationMilliseconds +=
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+}
+void VulkanVegetation::preparePyramid(VisibilityPyramidView pyramid) {
+    auto &s = *impl_;
+    auto &f = s.frames[s.frame];
+    if (pyramid.image) {
+        VkDescriptorImageInfo info{{}, pyramid.image, VK_IMAGE_LAYOUT_GENERAL};
+        VkWriteDescriptorSet w{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+        w.dstSet = f.set;
+        w.dstBinding = 10;
+        w.descriptorCount = 1;
+        w.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        w.pImageInfo = &info;
+        vkUpdateDescriptorSets(s.device, 1, &w, 0, nullptr);
+        s.current.pyramidSize = {pyramid.width, pyramid.height, pyramid.levels, 0};
     }
-    barrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-            VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
-            VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
+}
+void VulkanVegetation::selectCamera(VkCommandBuffer cmd, VisibilityPyramidView pyramid) {
+    const auto start = std::chrono::steady_clock::now();
+    auto &s = *impl_;
+    auto &f = s.frames[s.frame];
+    if (!f.stats.enabled)
+        return;
+    // Scratch was also read by the preceding caster scatter dispatches.
+    barrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+            VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+            VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+    s.stamp(cmd, 0);
+    s.selectView(cmd, 0, pyramid.image != VK_NULL_HANDLE);
     s.stamp(cmd, 1);
     f.stats.preparationMilliseconds +=
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
@@ -767,11 +849,11 @@ void VulkanVegetation::submitted() {
     s.lastFrame = s.frame;
     ++s.serial;
 }
-const VegetationStats &VulkanVegetation::stats() const {
-    return impl_->last;
-}
+const VegetationStats &VulkanVegetation::stats() const { return impl_->last; }
 void VulkanVegetation::copySnapshot(VkCommandBuffer cmd) {
     auto &s = *impl_;
+    if (!s.diagnostic.buffer)
+        throw std::logic_error("Vegetation snapshot requires startup diagnostics");
     if (!s.frames[s.lastFrame].stats.enabled)
         return;
     barrier(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,

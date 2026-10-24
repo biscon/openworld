@@ -27,6 +27,10 @@ int main() {
         v.terrain.wavelength = 1772;
         v.terrain.heightScale = 2000;
         v.scene.freezeLod = true;
+        v.scene.vegetation.distance = 193;
+        v.scene.vegetation.density = .83f;
+        v.scene.vegetation.occlusion = true;
+        v.scene.vegetation.habitat = vegetationHabitat(VegetationHabitat::Moor);
         v.scene.shadows.biasTexels = 1.75f;
         v.scene.visibility = VisibilityMode::HiZ;
         v.scene.terrainMaterial.macroRepeatMetres = 128;
@@ -48,6 +52,9 @@ int main() {
                     loaded.scene.terrainMaterial.macroRepeatMetres == 128 &&
                     loaded.scene.atmosphere.aerosolDensity == 1.554f,
                 "scene and frozen observer round trip");
+        require(loaded.scene.vegetation.distance == 193 && loaded.scene.vegetation.density == .83f &&
+                    loaded.scene.vegetation.occlusion && loaded.scene.vegetation.habitat.weights.y == 1,
+                "vegetation settings survive explicit review bookmarks");
         RendererOptions applied;
         applied.shaderDirectory = "retained";
         applied.streaming.diskCache = false;
@@ -64,21 +71,24 @@ int main() {
         auto invalid = v;
         invalid.version = 99;
         rejects([&] { saveReviewView(path, invalid); }, "unsupported version rejected before replacing file");
-        require(loadReviewView(path).version == 2, "invalid save leaves existing view intact");
+        require(loadReviewView(path).version == 3, "invalid save leaves existing view intact");
         nlohmann::json legacy;
         {
             std::ifstream input(path);
             input >> legacy;
         }
         legacy["version"] = 1;
+        legacy["scene"].erase("vegetation");
         legacy["lod"].erase("patches");
         legacy["startup"]["lod"].erase("triangleBudget");
         std::ofstream(dir / "legacy.json") << legacy;
         const auto old = loadReviewView(dir / "legacy.json");
         require(old.version == 1 && old.lod.patches.empty() && old.startup.lod.triangleBudget == 2097152,
                 "v1 bookmarks retain original settings with current resource defaults");
+        require(old.scene.vegetation.enabled && old.scene.vegetation.distance == 80,
+                "old bookmarks acquire engine vegetation defaults");
         saveReviewView(dir / "legacy.json", old);
-        require(loadReviewView(dir / "legacy.json").version == 2, "new saves upgrade v1 bookmarks");
+        require(loadReviewView(dir / "legacy.json").version == 3, "new saves upgrade v1 bookmarks");
         for (auto keys : {std::vector<TerrainPatchKey>{{0, 0, 32}},
                           {{1, 0, 0}},
                           {{0, 0, 0}, {0, 0, 1}},

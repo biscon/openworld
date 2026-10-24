@@ -21,6 +21,10 @@ class VulkanVegetationStream {
     void observe(double milliseconds, uint32_t updates);
     const render_detail::Buffer &attachments(uint32_t frame) const { return frames_[frame].attachments; }
     uint64_t bytes() const { return bytes_; }
+    float demandRadius(float distance) const {
+        return std::min(config_.demandRadius, std::max(distance, shadowDistance_) + 16);
+    }
+    const auto &orderedCells() const { return residency_.ordered(); }
     uint32_t updates() const { return updateCount_; }
     uint32_t identity(uint32_t index) const;
     void copySnapshot(VkCommandBuffer);
@@ -66,7 +70,7 @@ class VulkanVegetationStream {
     std::vector<uint8_t> diagnosticHistory_;
     uint32_t frame_ = 0, updateCount_ = 0, seed_ = 0;
     glm::uvec4 assets_{~0u};
-    float envelope_ = 3;
+    float envelope_ = 3, shadowDistance_ = 0;
     double cellCost_ = .5 / 4;
     std::vector<uint64_t> previousSignatures_, currentSignatures_;
     std::vector<uint32_t> previousGenerations_, currentGenerations_;

@@ -3,7 +3,7 @@
 #include <array>
 #include <filesystem>
 namespace ow {
-constexpr uint32_t vegetationAssetLimit = 8, vegetationBinLimit = 48, vegetationCellLimit = 4096;
+constexpr uint32_t vegetationAssetLimit = 8, vegetationBinLimit = 48, vegetationCellLimit = 12288;
 struct VegetationAssetId {
     uint32_t value = ~0u;
 };

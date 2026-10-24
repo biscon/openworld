@@ -16,6 +16,7 @@ VulkanVegetationStream::VulkanVegetationStream(VkPhysicalDevice physical, VkDevi
     : physical_(physical), device_(device), residency_(config), config_(config), budget_(budget) {
     for (uint32_t i = 0; i < library.assets.size(); ++i) {
         const auto &asset = library.assets[i];
+        shadowDistance_ = std::max(shadowDistance_, asset.ranges.w);
         if (asset.category == FoliageCategory::Grass) {
             if (assets_.x == ~0u)
                 assets_.x = i;
@@ -134,7 +135,8 @@ void VulkanVegetationStream::prepare(uint32_t frame, WorldPosition camera, World
     uint64_t revision = terrain ? terrain->vegetationRevision() : 0;
     revision = revision * 1099511628211ull ^ settings.habitat.revision;
     revision = revision * 1099511628211ull ^ settings.exclusion.revision;
-    // Include values as well as caller revisions, so interactive edits cannot leave stale populations.
+    // Include values as well as caller revisions, so interactive edits cannot
+    // leave stale populations.
     auto mix = [&](const void *ptr, size_t size) {
         auto p = static_cast<const unsigned char *>(ptr);
         for (size_t i = 0; i < size; ++i)
@@ -146,16 +148,21 @@ void VulkanVegetationStream::prepare(uint32_t frame, WorldPosition camera, World
     mix(&settings.exclusion.centre.z, 8);
     mix(&settings.exclusion.centre.local, sizeof(glm::dvec3));
     mix(&settings.exclusion.radius, 4);
-    residency_.demand(camera, revision, completed_, settings.enabled && terrain);
+    residency_.demand(camera, revision, completed_, settings.enabled && terrain,
+                      demandRadius(settings.distance));
     seed_ = terrain ? terrain->vegetationSeed() : 0;
     std::fill(currentSignatures_.begin(), currentSignatures_.end(), 0);
     std::fill(currentGenerations_.begin(), currentGenerations_.end(), 0);
-    for (uint32_t i = 0; i < config_.cellCapacity; ++i)
-        cells[i] = {};
     stats.retiringCells = residency_.retiring();
     stats.deferredCells = residency_.deferred();
-    if (!terrain || !settings.enabled)
+    if (!terrain || !settings.enabled) {
+        // Disabled frames do not consume these records. A missing visible terrain
+        // provider still needs empty records so selection cannot reuse old roots.
+        if (settings.enabled)
+            std::fill_n(cells, config_.cellCapacity, VegetationGpuCell{});
         return;
+    }
+    std::fill_n(cells, config_.cellCapacity, VegetationGpuCell{});
     if (f.heightBuffer != terrain->vegetationHeights()) {
         VkDescriptorBufferInfo info{terrain->vegetationHeights(), 0, VK_WHOLE_SIZE};
         VkWriteDescriptorSet w{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};

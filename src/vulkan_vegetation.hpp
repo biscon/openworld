@@ -3,6 +3,7 @@
 #include "vegetation.hpp"
 #include "vulkan_materials.hpp"
 #include "vulkan_shadows.hpp"
+#include "vulkan_visibility.hpp"
 namespace ow {
 class VulkanTerrainStream;
 class VulkanVegetation {
@@ -11,11 +12,15 @@ class VulkanVegetation {
                      const std::filesystem::path &, bool, bool, const VegetationOptions &);
     ~VulkanVegetation();
     void prepare(uint32_t, const Camera &, TerrainGrid, const TemporalView &, const VegetationSettings &);
+    float streamingRadius() const;
     void prepareStream(VulkanTerrainStream *, const VegetationSettings &,
                        double terrainPreparationMilliseconds = 0);
     void budgetStream(double remaining);
     void bounds(VulkanShadows &);
-    void select(VkCommandBuffer, const ShadowUniform &, uint32_t);
+    void preparePyramid(VisibilityPyramidView); // Before any command binds this
+                                                // frame's descriptors.
+    void updateAndSelectCasters(VkCommandBuffer, const ShadowUniform &, uint32_t);
+    void selectCamera(VkCommandBuffer, VisibilityPyramidView = {});
     void draw(VkCommandBuffer, VkDescriptorSet, uint32_t pass, uint32_t view = 0);
     void finish(VkCommandBuffer);
     void submitted();

@@ -30,6 +30,7 @@ class VulkanTerrainStream {
     VkDescriptorSetLayout descriptorLayout() const { return descriptorLayout_; }
     void submitted(uint32_t frame);
     void prepareVegetation(const Camera &, bool eroded);
+    void vegetationDemandRadius(float radius) { vegetationDemandRadius_ = radius; }
     bool vegetationSurface(VegetationCellKey, VegetationTerrainCell &, bool retain = true);
     VkBuffer vegetationHeights() const { return heights_.handle; }
     uint64_t vegetationRevision() const { return epoch_ * 2 + (vegetationEroded_ ? 1 : 0); }
@@ -221,10 +222,14 @@ class VulkanTerrainStream {
         std::array<uint32_t, 16> indices{};
         uint32_t count = 0;
     };
-    std::array<VegetationBucket, 51 * 51> vegetationBuckets_{};
+    static constexpr int vegetationIndexRadius = 55, vegetationIndexSide = 111;
+    std::array<VegetationBucket, vegetationIndexSide * vegetationIndexSide> vegetationBuckets_{};
+    // Owned records keep bucket indices valid when the renderer changes traversal order.
+    std::vector<TerrainPatchDraw> vegetationPatches_;
     VegetationCellKey vegetationCentre_;
     uint64_t vegetationPartition_ = 0;
     bool vegetationEroded_ = true, vegetationReady_ = false;
+    float vegetationDemandRadius_ = 0;
     bool imagesInitialized_ = false, generatorImagesInitialized_ = false;
     uint64_t imageBytes_ = 0, ioBackoffUntil_ = 0;
     TerrainCacheKey key(TerrainHandle, TerrainProduct) const;

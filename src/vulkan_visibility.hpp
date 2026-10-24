@@ -5,11 +5,17 @@
 #include <memory>
 #include <vulkan/vulkan.h>
 namespace ow {
+// Borrowed for the current frame; the owner initializes and builds the pyramid.
+struct VisibilityPyramidView {
+    VkImageView image{};
+    uint32_t width = 0, height = 0, levels = 0;
+};
 struct VisibilityCapabilities {
     bool firstInstance = false, multiDraw = false, count = false, hiZ = false;
     uint32_t maxDraws = 1;
 };
-// Query only. The renderer enables the returned optional features at device creation.
+// Query only. The renderer enables the returned optional features at device
+// creation.
 VisibilityCapabilities visibilityCapabilities(VkPhysicalDevice);
 class VulkanVisibility {
   public:
@@ -24,6 +30,7 @@ class VulkanVisibility {
                     const void *terrainRecord, size_t recordBytes, bool newGroup);
     bool indirect() const;
     bool hiZ() const;
+    VisibilityPyramidView pyramidView() const;
     void bindRecords(VkCommandBuffer, VkPipelineLayout) const;
     void beginGpu(VkCommandBuffer);
     void cull(VkCommandBuffer, bool occlusion);

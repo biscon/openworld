@@ -1,0 +1,68 @@
+/tmp/ow-v4-80-main.log
+Vulkan device: NVIDIA GeForce RTX 3060
+Validation: disabled
+Settling: 600 frames; vegetation ready/pending/missing 0/1892/1892; terrain 248 + detail 0
+Settling: 1200 frames; vegetation ready/pending/missing 0/1892/1892; terrain 177 + detail 0
+Settling: 1800 frames; vegetation ready/pending/missing 0/1892/1892; terrain 110 + detail 0
+Settling: 2400 frames; vegetation ready/pending/missing 0/1892/1892; terrain 42 + detail 4
+cold: CPU median/p95 5.69836 / 7.1926 ms; GPU 1.8839 / 4.19638 ms; vegetation CPU 0.361127 / 0.576697 ms; update GPU p95/max 0 / 0 ms; 151.955 MiB; 0 visible entries; 0 updates, 0 generated, 1892 pending; 4 render-thread C++ allocation calls
+  vegetation GPU medians: select 0.163968, depth 0, colour 0, shadows 0 ms
+off: CPU median/p95 8.19448 / 9.20038 ms; GPU 5.96845 / 6.89821 ms; vegetation CPU 0.002113 / 0.004489 ms; update GPU p95/max 0 / 0 ms; 151.955 MiB; 0 visible entries; 0 updates, 0 generated, 0 pending; 0 render-thread C++ allocation calls
+  vegetation GPU medians: select 0, depth 0, colour 0, shadows 0 ms
+on: CPU median/p95 8.5136 / 9.39606 ms; GPU 7.10557 / 8.64586 ms; vegetation CPU 0.225661 / 0.288246 ms; update GPU p95/max 0 / 0 ms; 151.955 MiB; 23044 visible entries; 0 updates, 0 generated, 0 pending; 0 render-thread C++ allocation calls
+  vegetation GPU medians: select 0.60288, depth 0.364544, colour 1.05165, shadows 0.006144 ms
+Incremental GPU median: 1.13712 ms
+Captured "/tmp/ow-v4-80-main/close.ppm"
+occlusion off: CPU median/p95 8.42687 / 9.2559 ms; GPU 5.71098 / 6.8145 ms; vegetation CPU 0.222653 / 0.274624 ms; update GPU p95/max 0 / 0 ms; 151.955 MiB; 23044 visible entries; 0 updates, 0 generated, 0 pending; 0 render-thread C++ allocation calls
+  vegetation GPU medians: select 0.601792, depth 0.323584, colour 0.86528, shadows 0.004096 ms
+occlusion on: CPU median/p95 8.40139 / 9.20833 ms; GPU 5.1976 / 6.49267 ms; vegetation CPU 0.216924 / 0.267329 ms; update GPU p95/max 0 / 0 ms; 151.955 MiB; 1765 visible entries; 0 updates, 0 generated, 0 pending; 0 render-thread C++ allocation calls
+  vegetation GPU medians: select 0.598848, depth 0.17408, colour 0.628736, shadows 0.00512 ms
+warm traversal / teleport / return: CPU median/p95 9.81126 / 10.8063 ms; GPU 7.11088 / 8.47965 ms; vegetation CPU 1.46217 / 1.72756 ms; update GPU p95/max 0.045056 / 0.048128 ms; 151.955 MiB; 22928 visible entries; 8701 updates, 2234 generated, 0 pending; 0 render-thread C++ allocation calls
+  vegetation GPU medians: select 0.586592, depth 0.366592, colour 1.01478, shadows 0.006144 ms
+Captured "/tmp/ow-v4-80-main/taa-off.ppm"
+Total seconds: 52.3738
+
+
+/tmp/ow-v4-200-main.log
+Vulkan device: NVIDIA GeForce RTX 3060
+Validation: disabled
+Settling: 600 frames; vegetation ready/pending/missing 2826/6538/0; terrain 0 + detail 0
+cold: CPU median/p95 8.32441 / 10.1851 ms; GPU 3.95814 / 7.68054 ms; vegetation CPU 0.827495 / 1.41909 ms; update GPU p95/max 0.04096 / 0.050176 ms; 151.955 MiB; 43479 visible entries; 8872 updates, 2806 generated, 6558 pending; 4 render-thread C++ allocation calls
+  vegetation GPU medians: select 0.189312, depth 0, colour 0.001024, shadows 0.001024 ms
+off: CPU median/p95 8.14635 / 8.97156 ms; GPU 6.06013 / 6.59043 ms; vegetation CPU 0.002013 / 0.003536 ms; update GPU p95/max 0 / 0 ms; 151.955 MiB; 0 visible entries; 0 updates, 0 generated, 0 pending; 0 render-thread C++ allocation calls
+  vegetation GPU medians: select 0, depth 0, colour 0, shadows 0 ms
+on: CPU median/p95 9.79806 / 11.0622 ms; GPU 9.57683 / 10.9273 ms; vegetation CPU 0.419794 / 0.52932 ms; update GPU p95/max 0 / 0 ms; 151.955 MiB; 77939 visible entries; 0 updates, 0 generated, 0 pending; 0 render-thread C++ allocation calls
+  vegetation GPU medians: select 2.62458, depth 0.468992, colour 1.29843, shadows 0.00512 ms
+Incremental GPU median: 3.5167 ms
+Captured "/tmp/ow-v4-200-main/close.ppm"
+warm traversal / teleport / return: CPU median/p95 9.95046 / 11.6431 ms; GPU 8.45526 / 10.7204 ms; vegetation CPU 1.38921 / 2.21242 ms; update GPU p95/max 0.044672 / 0.050176 ms; 151.955 MiB; 42195 visible entries; 10740 updates, 2876 generated, 6652 pending; 0 render-thread C++ allocation calls
+  vegetation GPU medians: select 1.45562, depth 0.44032, colour 1.29946, shadows 0.00512 ms
+Captured "/tmp/ow-v4-200-main/taa-off.ppm"
+Total seconds: 31.6297
+
+
+/tmp/ow-v4-80-route-final.log
+Vulkan device: NVIDIA GeForce RTX 3060
+Validation: disabled
+cold: CPU median/p95 8.61725 / 10.3825 ms; GPU 3.38816 / 7.99725 ms; vegetation CPU 0.507346 / 1.07668 ms; update GPU p95/max 0.039936 / 0.050464 ms; 151.955 MiB; 23044 visible entries; 7625 updates, 1892 generated, 0 pending; 4 render-thread C++ allocation calls
+  vegetation GPU medians: select 0.16592, depth 0, colour 0, shadows 0 ms
+warm traversal / teleport / return: CPU median/p95 9.52261 / 11.1221 ms; GPU 7.59619 / 9.6751 ms; vegetation CPU 0.492752 / 1.67048 ms; update GPU p95/max 0.044032 / 0.712128 ms; 151.955 MiB; 22928 visible entries; 8579 updates, 2236 generated, 0 pending; 0 render-thread C++ allocation calls
+  vegetation GPU medians: select 0.608384, depth 0.366592, colour 1.01888, shadows 0.006144 ms
+post-return recovery: CPU median/p95 9.15295 / 9.48981 ms; GPU 7.64 / 8.03392 ms; vegetation CPU 0.252041 / 0.258142 ms; update GPU p95/max 0 / 0 ms; 151.955 MiB; 22928 visible entries; 0 updates, 0 generated, 0 pending; 0 render-thread C++ allocation calls
+  vegetation GPU medians: select 0.620512, depth 0.367616, colour 1.01274, shadows 0.00512 ms
+Captured "/tmp/ow-v4-80-main/taa-off.ppm"
+Total seconds: 8.59538
+
+
+/tmp/ow-v4-200-route-final.log
+Vulkan device: NVIDIA GeForce RTX 3060
+Validation: disabled
+Settling: 600 frames; vegetation ready/pending/missing 3285/6079/0; terrain 0 + detail 0
+cold: CPU median/p95 8.46181 / 10.7657 ms; GPU 4.87149 / 9.66077 ms; vegetation CPU 1.39937 / 2.05704 ms; update GPU p95/max 0.04096 / 0.178176 ms; 151.955 MiB; 48535 visible entries; 9369 updates, 3264 generated, 6100 pending; 4 render-thread C++ allocation calls
+  vegetation GPU medians: select 0.187008, depth 0.001024, colour 0.001024, shadows 0.001024 ms
+warm traversal / teleport / return: CPU median/p95 10.0123 / 12.583 ms; GPU 8.15072 / 10.3174 ms; vegetation CPU 1.36199 / 3.12766 ms; update GPU p95/max 0.044032 / 0.050176 ms; 151.955 MiB; 42195 visible entries; 10742 updates, 2876 generated, 6652 pending; 0 render-thread C++ allocation calls
+  vegetation GPU medians: select 1.42214, depth 0.442368, colour 1.14586, shadows 0.006144 ms
+post-return recovery: CPU median/p95 8.96575 / 10.27 ms; GPU 8.74742 / 9.93082 ms; vegetation CPU 0.378155 / 0.493421 ms; update GPU p95/max 0.04096 / 0.273408 ms; 151.955 MiB; 77737 visible entries; 13304 updates, 6652 generated, 0 pending; 0 render-thread C++ allocation calls
+  vegetation GPU medians: select 1.81232, depth 0.46592, colour 1.20627, shadows 0.00512 ms
+Captured "/tmp/ow-v4-200-main/taa-off.ppm"
+Total seconds: 16.8533

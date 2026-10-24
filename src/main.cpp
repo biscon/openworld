@@ -43,7 +43,8 @@ void help() {
                  "follows aspect\n"
                  "  --capture FILE.ppm    Save final offscreen frame (requires "
                  "--headless)\n"
-                 "  --review-view PATH    Replay a saved camera and rendering settings\n"
+                 "  --review-view PATH    Replay a saved camera and rendering "
+                 "settings\n"
                  "  --save-review-view PATH  Save the final view on exit\n"
                  "  --shader-dir PATH     Override compiled shader directory\n"
                  "  --validation          Enable validation when available\n"
@@ -56,7 +57,9 @@ void help() {
                  "  --view-radius N       Render radius in base chunks (default ~8 km, "
                  "max ~16 km)\n"
                  "  --cache-dir PATH      Override per-user terrain cache directory\n"
-                 "  --vegetation          Enable streamed vegetation (default off)\n"
+                 "  --vegetation          Enable streamed vegetation (default on)\n"
+                 "  --no-vegetation       Disable vegetation\n"
+                 "  --vegetation-distance M  Render distance, 20..200 m (default 80)\n"
                  "  --no-cache            Disable disk caching, retain streaming\n"
                  "  --terrain-gpu-mib N   GPU terrain budget (default 512)\n"
                  "  --terrain-host-mib N  Host terrain budget (default 256)\n"
@@ -69,12 +72,15 @@ void help() {
                  "  --lod-colours         Colour patches by selected LOD\n"
                  "  --vertex-normals      Compare legacy vertex-normal interpolation\n"
                  "  --base                Show uneroded terrain\n"
-                 "  --atmosphere MODE     off, analytic or physical (default physical)\n"
-                 "  --no-horizon          Disable distant coverage and visual curvature\n"
+                 "  --atmosphere MODE     off, analytic or physical (default "
+                 "physical)\n"
+                 "  --no-horizon          Disable distant coverage and visual "
+                 "curvature\n"
                  "  --fog PRESET          off, mist or shafts (default off)\n"
                  "  --lighting-demo       Enable generated lights and mesh fixtures\n"
                  "  --material-dir PATH   Override imported terrain palette directory\n"
-                 "  --no-material-assets  Use the constant fallback without loading assets\n"
+                 "  --no-material-assets  Use the constant fallback without loading "
+                 "assets\n"
                  "  --fixed-materials     Force fixed-binding material fallback\n"
                  "  --rgba-materials      Force uncompressed material textures\n"
                  "  --constant-material   Disable textured terrain for comparison\n"
@@ -100,7 +106,10 @@ int main(int argc, char **argv) {
         uint32_t fogPreset = 0;
         uint64_t frameLimit = 0;
         ow::SceneSettings scene;
-        scene.vegetation.enabled = false;
+        scene.vegetation.enabled = true;
+        scene.vegetation.distance = 80;
+        std::optional<bool> vegetationEnabled;
+        std::optional<float> vegetationDistance;
         scene.taa.enabled = true;
         scene.opaqueDepthPrepass = true;
         scene.bloom.intensity = .05f;
@@ -140,8 +149,15 @@ int main(int argc, char **argv) {
                 return 0;
             }
             if (arg == "--vegetation")
-                scene.vegetation.enabled = true;
-            else if (arg == "--review-view")
+                vegetationEnabled = true;
+            else if (arg == "--no-vegetation")
+                vegetationEnabled = false;
+            else if (arg == "--vegetation-distance") {
+                vegetationDistance = std::stof(value());
+                if (!std::isfinite(*vegetationDistance) || *vegetationDistance < 20 ||
+                    *vegetationDistance > 200)
+                    throw std::invalid_argument("Vegetation distance must be 20..200 m");
+            } else if (arg == "--review-view")
                 reviewPath = value();
             else if (arg == "--save-review-view")
                 reviewSavePath = value();
@@ -311,17 +327,25 @@ int main(int argc, char **argv) {
         if (!reviewPath.empty()) {
             review = ow::loadReviewView(reviewPath);
             ow::applyReviewStartup(options, *review);
-            const auto vegetationSettings = scene.vegetation;
             scene = review->scene;
-            scene.vegetation = vegetationSettings;
             terrain = {review->terrainOrigin, review->terrain};
             singleChunk = !options.streaming.enabled;
         }
+        if (vegetationEnabled)
+            scene.vegetation.enabled = *vegetationEnabled;
+        if (vegetationDistance)
+            scene.vegetation.distance = *vegetationDistance;
         if (options.streaming.enabled && options.streaming.hierarchical) {
             options.vegetation.library = std::make_shared<ow::VegetationLibrary>(
                 ow::readVegetationLibrary(OPENWORLD_VEGETATION_LIBRARY_DIR));
             options.vegetation.streaming.enabled = true;
+            options.vegetation.streaming.cellCapacity = 12288;
+            options.vegetation.streaming.demandRadius = 216;
+            options.vegetation.streaming.retentionRadius = 232;
+            options.vegetation.budgetBytes = 256ull << 20;
         }
+        if (!options.vegetation.streaming.enabled)
+            scene.vegetation.enabled = false;
         std::string terrainError;
         if (options.requireValidation)
             options.validation = true;
@@ -554,9 +578,7 @@ int main(int argc, char **argv) {
                             ow::terrainNeighbourhood({saved.terrainOrigin, saved.terrain}, singleChunk));
                         camera = saved.camera;
                         terrain = {saved.terrainOrigin, saved.terrain};
-                        const auto vegetationSettings = scene.vegetation;
                         scene = saved.scene;
-                        scene.vegetation = vegetationSettings;
                         fitSingleChunkCamera = false;
                         renderer.setTerrainLodReviewState(saved.lod);
                         options.renderHeight = saved.startup.renderHeight;

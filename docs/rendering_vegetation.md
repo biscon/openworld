@@ -2,7 +2,7 @@
 
 Status: architecture agreed on 2026-10-24. V1 experiment implemented with software
 Vulkan verification and native RTX 3060 measurements. Final density/appearance
-acceptance remains open. The V2 asset/foliage foundation and V3 streaming/attachment are implemented; V4–V6 remain proposed. This expands
+acceptance remains open. The V2 asset/foliage foundation and V3 streaming/attachment are implemented; V4 engine integration is implemented and natively verified; V5–V6 remain proposed. This expands
 the vegetation part of [rendering roadmap slice 5J](rendering_roadmap.md#5j--representative-scene-content-and-reflections).
 It records the direction, implementation sequence, and acceptance gates. Each slice
 needs its own focused implementation plan before coding; exact layouts, capacities,
@@ -217,7 +217,7 @@ terrain generation, and other effects need explicit remaining headroom.
 | --- | --- |
 | At most approximately 1.5 ms incremental steady-state GPU time | Vegetation culling, attachment work, animation/interaction, depth, colour and shadows; confirm with total-frame on/off comparisons |
 | Approximately 0.25 ms steady-state CPU preparation | Population management and submission, with spikes reported separately |
-| 128 MiB total vegetation GPU budget | Assets, resident instances, frame lists, scratch, interaction, pending uploads and retirement; count actual allocation requirements |
+| 256 MiB total vegetation GPU budget for V4 | Raised from 128 MiB to support 200 m without reducing nearby density; includes assets, resident instances, frame lists, scratch, pending uploads and retirement using actual allocation requirements |
 | Bounded incremental population work | Measure separately and coordinate with terrain generation rather than adding an unrestricted compute allowance |
 
 These are engineering targets to validate, not measured performance claims. Record
@@ -247,7 +247,7 @@ paths and define bounded feature fallbacks in the relevant implementation plans.
 Use IDs **5J-V1 through 5J-V6** so these do not imply dependencies on the other 5J
 content projects. The sequence is intentional: establish the representation and
 cost before broad content production. Tests and profiling accompany each slice;
-V6 is the final integration gate, not the first opportunity to find regressions.
+V4 delivers ordinary-engine integration; V6 is final tuning and extended acceptance.
 
 ### 5J-V1 — Representation and budget experiment
 
@@ -319,7 +319,7 @@ Saved grass/fern/shrub assets, compact instancing, leaf transmission, submitted 
 history and the isolated viewer/probe share one rendering backend. Production grass
 casting defaults to zero and does not enter caster work. The V1 probe retains its
 historical 25 m comparison. Streaming and terrain attachment updates are implemented in V3 below; production
-visibility, interactions and full-scene acceptance remain V4–V6 work.
+visibility and ordinary-engine integration are delivered in V4; interaction and final acceptance remain V5–V6 work.
 
 - Build the saved asset/LOD pipeline and a small representative asset set, including
   masked plants; add opacity-aware texture import and deformation metadata.
@@ -331,7 +331,7 @@ visibility, interactions and full-scene acceptance remain V4–V6 work.
 
 ### 5J-V3 — Streamed placement and terrain attachment
 
-Status: implemented. Detailed design and validation: [streaming and attachment](rendering_vegetation_streaming.md). The main demo provides an opt-in toggle; production visibility/coverage, interactions and final full-scene acceptance remain V4–V6.
+Status: implemented. Detailed design and validation: [streaming and attachment](rendering_vegetation_streaming.md). V3 introduced an opt-in main-demo toggle. V4 supersedes it with default-on engine integration and production visibility/coverage; interaction and final acceptance remain V5–V6.
 
 - Add stable cell identities, bounded incremental GPU population, residency, and
   terrain reader retention. Define the small terrain/habitat/exclusion input boundary.
@@ -340,7 +340,12 @@ Status: implemented. Detailed design and validation: [streaming and attachment](
 - Accept seamless deterministic placement, grounded plants through surface/provider
   changes, safe eviction/teleport recovery, and bounded cold/warm streaming behaviour.
 
-### 5J-V4 — Production visibility and LOD
+### 5J-V4 — Engine integration, production visibility and LOD
+
+Detailed design: [engine integration, visibility and range](rendering_vegetation_visibility.md).
+Status: implemented and natively verified; [measurements and remaining tuning gates](measurements/vegetation_5j_v4/README.md). Vegetation is enabled in the ordinary engine with a
+Rendering / Vegetation settings window and live 20–200 m range (80 m default).
+Close density is preserved with 256 MiB bounded GPU storage. No new standalone viewer is part of this slice.
 
 - Productionize GPU cell/instance selection, asset/LOD/material batching, stable
   density reduction, fades, and independent shading/animation/shadow limits.
@@ -360,7 +365,7 @@ Status: implemented. Detailed design and validation: [streaming and attachment](
   disturbance/recovery, and correct behaviour when the player and camera separate.
   Validate scrolling and teleports without trails from stale field contents.
 
-### 5J-V6 — Integration and acceptance
+### 5J-V6 — Final tuning and extended acceptance
 
 - Finalize quality presets, diagnostics, review views, and repeatable performance
   probes. Keep vegetation independently toggleable for paired measurements.

@@ -1,4 +1,5 @@
 #include "terrain_stationary.hlsli"
+#include "vegetation_habitat.hlsli"
 struct Plant {float4 rootScale;float yaw;float variation;uint identity;uint assetCell;};
 struct Patch {float4 rectangle;uint4 geometry,heights,topology;};
 struct Job {
@@ -68,7 +69,7 @@ void main(uint3 group:SV_GroupID,uint lane:SV_GroupIndex) {
         p.yaw=random(h+4)*6.2831853;p.variation=random(h+5);
         uint asset=species==0?(random(h+6)<.5?job.assets.x:job.assets.y):species==1?job.assets.z:job.assets.w;
         p.assetCell=job.config.x*8+(asset&7);
-        float probability=dot(job.habitat.xyz,species==0?float3(1,.65,.35):species==1?float3(.15,.25,1):float3(.15,.75,.4));
+        float probability=vegetationProbability(job.habitat.xyz,species);
         float2 grid=(p.rootScale.xz-job.canonicalGrid.xy)/job.canonicalGrid.z;
         uint2 a=min(uint2(grid),job.canonical.y-2);float2 f=grid-a;
         uint2 b=f.x>=f.y?a+uint2(1,0):a+1,c=f.x>=f.y?a+1:a+uint2(0,1);
@@ -78,7 +79,7 @@ void main(uint3 group:SV_GroupID,uint lane:SV_GroupIndex) {
         float height;float2 slope;bool valid=sampleTriangle(grid*job.canonicalGrid.z,v0,v1,v2,height,slope);
         float up=rsqrt(1+dot(slope,slope));
         if(!valid||asset==0xffffffff||random(h+7)>probability||up<job.habitat.w||height<job.elevation.x||height>job.elevation.y||
-           (job.clearing.z>0&&distance(p.rootScale.xz,job.clearing.xy)<job.clearing.z))p.rootScale.w=0;
+           vegetationExcluded(p.rootScale.xz,job.clearing.xyz))p.rootScale.w=0;
         population[index]=p;
     } else p=population[index];
     float height;float2 slope;

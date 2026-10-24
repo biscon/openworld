@@ -415,6 +415,10 @@ uint32_t VulkanVisibility::append(VisibilityBounds b, uint32_t count, uint32_t f
     return f.b - 1;
 }
 bool VulkanVisibility::indirect() const { return impl_->stats.effective != VisibilityMode::Direct; }
+VisibilityPyramidView VulkanVisibility::pyramidView() const {
+    const auto &s = *impl_;
+    return {s.frames[s.current].view, s.width, s.height, s.levels};
+}
 bool VulkanVisibility::hiZ() const { return impl_->stats.effective == VisibilityMode::HiZ; }
 void VulkanVisibility::bindRecords(VkCommandBuffer cmd, VkPipelineLayout layout) const {
     const auto &s = *impl_;

@@ -4,6 +4,7 @@
 #include <memory>
 #include <vulkan/vulkan.h>
 namespace ow {
+struct VegetationSettings;
 struct MaterialCapabilities {
     bool bindless = false, anisotropy = false;
     uint32_t images = 0, arrays = 4;
@@ -27,7 +28,8 @@ class VulkanMaterials {
     const MeshMaterial &meshMaterial(MaterialHandle) const;
     bool load(const std::filesystem::path &, bool forceRgba = false);
     void prepare(uint32_t frame, const Camera &, TerrainGrid, const TerrainSettings &,
-                 const TerrainMaterialSettings &, bool terrainCoordinates = true);
+                 const TerrainMaterialSettings &, bool terrainCoordinates = true,
+                 const VegetationSettings *vegetation = nullptr);
     void recordUploads(VkCommandBuffer);
 
   private:

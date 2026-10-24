@@ -25,6 +25,16 @@ int main(int argc, char **argv) {
         options.renderHeight = 120;
         options.terrainGrid = {8, .5f};
         options.terrainCapacity = 8;
+        options.lod = {true, 8, 64};
+        options.streaming.enabled = options.streaming.hierarchical = true;
+        options.streaming.diskCache = false;
+        options.streaming.maximumDistance = 16;
+        options.streaming.shadowCasterBytes = 0;
+        options.vegetation.library = std::make_shared<VegetationLibrary>(buildVegetationLibrary());
+        options.vegetation.streaming.enabled = true;
+        options.vegetation.streaming.cellCapacity = 16;
+        options.vegetation.streaming.demandRadius = 4;
+        options.vegetation.streaming.retentionRadius = 8;
         Renderer renderer(options);
         Camera camera;
         camera.reset(options.terrainGrid, {}, 30);

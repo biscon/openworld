@@ -1,6 +1,7 @@
 #include "vulkan_terrain_stream.hpp"
 #include <cmath>
 #include <cstring>
+#include <tuple>
 namespace ow {
 void VulkanTerrainStream::prepareVegetation(const Camera &camera, bool eroded) {
     if (!ground_) {
@@ -17,19 +18,49 @@ void VulkanTerrainStream::prepareVegetation(const Camera &camera, bool eroded) {
     auto mix = [&](uint64_t word) { partition = (partition ^ word) * 1099511628211ull; };
     mix(epoch_);
     mix(eroded);
+    // Data-only canonical providers need to invalidate missing-provider caches
+    // too, even when they are not referenced by the rendered partition.
     for (const auto &slot : stream_->slots()) {
         mix(slot.generation);
         mix(uint32_t(slot.state));
     }
+    // Heap traversal order changes with camera motion even when the physical
+    // partition is unchanged. Hash the set, and retain our own patch records.
+    uint64_t patchSum = 0, patchXor = 0;
     for (const auto &p : ground_->casters()) {
-        mix(p.slot);
-        mix((uint64_t(p.x) << 32) | p.z);
-        mix((uint64_t(p.step) << 32) | p.cells);
-        mix((uint64_t(p.edges) << 32) | p.corners);
-        mix(p.level);
+        const auto &slot = stream_->slot(p.slot);
+        uint64_t h = 1469598103934665603ull;
+        for (uint64_t word :
+             {uint64_t(p.slot), (uint64_t(p.x) << 32) | p.z, (uint64_t(p.step) << 32) | p.cells,
+              (uint64_t(p.edges) << 32) | p.corners, uint64_t(p.level), uint64_t(slot.generation),
+              uint64_t(slot.state), uint64_t(slot.epoch)})
+            h = (h ^ word) * 1099511628211ull;
+        h ^= h >> 30;
+        h *= 0xbf58476d1ce4e5b9ull;
+        h ^= h >> 27;
+        h *= 0x94d049bb133111ebull;
+        h ^= h >> 31;
+        patchSum += h;
+        patchXor ^= h;
     }
+    mix(patchSum);
+    mix(patchXor);
+    mix(ground_->casters().size());
     if (vegetationReady_ && partition == vegetationPartition_ && centre == vegetationCentre_)
         return;
+    if (ground_->casters().size() > vegetationPatches_.capacity()) {
+        vegetationReady_ = false;
+        return;
+    }
+    if (!vegetationReady_ || partition != vegetationPartition_) {
+        vegetationPatches_.assign(ground_->casters().begin(), ground_->casters().end());
+        // A changed distant patch must not reorder an unchanged cell's surface
+        // signature and schedule needless attachment work for its plants.
+        std::sort(vegetationPatches_.begin(), vegetationPatches_.end(), [](const auto &a, const auto &b) {
+            return std::tie(a.slot, a.x, a.z, a.step, a.cells, a.edges, a.corners, a.level) <
+                   std::tie(b.slot, b.x, b.z, b.step, b.cells, b.edges, b.corners, b.level);
+        });
+    }
     vegetationReady_ = true;
     vegetationEroded_ = eroded;
     vegetationCentre_ = centre;
@@ -37,7 +68,7 @@ void VulkanTerrainStream::prepareVegetation(const Camera &camera, bool eroded) {
     for (auto &b : vegetationBuckets_)
         b.count = 0;
     const auto origin = vegetationCellOrigin(vegetationCentre_);
-    const auto &patches = ground_->casters();
+    const auto &patches = vegetationPatches_;
     for (uint32_t i = 0; i < patches.size(); ++i) {
         const auto &p = patches[i];
         const auto &slot = stream_->slot(p.slot);
@@ -48,14 +79,16 @@ void VulkanTerrainStream::prepareVegetation(const Camera &camera, bool eroded) {
         const double spacing = layout_.grid.spacing * stream_->scale(p.slot);
         const double x = offset.x + p.x * spacing, z = offset.z + p.z * spacing;
         const double side = p.cells * p.step * spacing;
-        // Expanded for footprint samples; only nearby cells enter this bounded index.
-        int x0 = int(std::clamp(std::floor((x - 1.5) / 4), -25.0, 26.0));
-        int z0 = int(std::clamp(std::floor((z - 1.5) / 4), -25.0, 26.0));
-        int x1 = int(std::clamp(std::floor((x + side + 1.5) / 4), -26.0, 25.0));
-        int z1 = int(std::clamp(std::floor((z + side + 1.5) / 4), -26.0, 25.0));
+        // Expanded for footprint samples; only nearby cells enter this bounded
+        // index.
+        int x0 = int(std::clamp(std::floor((x - 1.5) / 4), -55.0, 56.0));
+        int z0 = int(std::clamp(std::floor((z - 1.5) / 4), -55.0, 56.0));
+        int x1 = int(std::clamp(std::floor((x + side + 1.5) / 4), -56.0, 55.0));
+        int z1 = int(std::clamp(std::floor((z + side + 1.5) / 4), -56.0, 55.0));
         for (int iz = z0; iz <= z1; ++iz)
             for (int ix = x0; ix <= x1; ++ix) {
-                auto &b = vegetationBuckets_[(iz + 25) * 51 + ix + 25];
+                auto &b = vegetationBuckets_[(iz + vegetationIndexRadius) * vegetationIndexSide + ix +
+                                             vegetationIndexRadius];
                 if (b.count < b.indices.size())
                     b.indices[b.count] = i;
                 ++b.count; // overflow is explicit; never silently truncate a surface
@@ -67,9 +100,10 @@ bool VulkanTerrainStream::vegetationSurface(VegetationCellKey key, VegetationTer
     if (!vegetationReady_)
         return false;
     int64_t x = key.x - vegetationCentre_.x, z = key.z - vegetationCentre_.z;
-    if (std::abs(x) > 25 || std::abs(z) > 25)
+    if (std::abs(x) > vegetationIndexRadius || std::abs(z) > vegetationIndexRadius)
         return false;
-    const auto &bucket = vegetationBuckets_[size_t(z + 25) * 51 + size_t(x + 25)];
+    const auto &bucket = vegetationBuckets_[size_t(z + vegetationIndexRadius) * vegetationIndexSide +
+                                            size_t(x + vegetationIndexRadius)];
     if (!bucket.count || bucket.count > out.maximumPatches)
         return false;
     out.bounds = {INFINITY, -INFINITY};
@@ -80,7 +114,7 @@ bool VulkanTerrainStream::vegetationSurface(VegetationCellKey key, VegetationTer
     mix(epoch_);
     mix(vegetationEroded_);
     const auto origin = vegetationCellOrigin(key);
-    const auto &patches = ground_->casters();
+    const auto &patches = vegetationPatches_;
     for (uint32_t i = 0; i < bucket.count; ++i) {
         const auto &p = patches[bucket.indices[i]];
         auto &slot = stream_->slot(p.slot);

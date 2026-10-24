@@ -15,9 +15,9 @@ struct TerrainStreamingConfig {
     bool vertexDiagnostics = false;               // Owned GPU fixtures only; disabled in the application.
     double diagnosticFrameSeconds = 0;            // Inject elapsed time in deterministic tests/probes only.
     uint64_t shadowCasterBytes = 64 * terrainMiB; // Additional coarse coverage; never displaces camera slots.
-    uint64_t horizonBytes =
-        0; // Opt-in coarse outer ring; camera/detail and shadow reservations remain protected.
-    double horizonMaximumDistance = 1048576; // Startup cap for distant coverage.
+    uint64_t horizonBytes = 0;                    // Opt-in coarse outer ring; camera/detail and
+                                                  // shadow reservations remain protected.
+    double horizonMaximumDistance = 1048576;      // Startup cap for distant coverage.
     double maximumDistance = 16384; // Startup cap; small owned fixtures use smaller hierarchies.
     uint64_t transferBytesPerFrame =
         8 * terrainMiB; // Smaller limits also exercise sliced transfers in tests.
@@ -82,7 +82,8 @@ struct TerrainStreamStats {
     int requestedRadius{}, effectiveRadius{}, maximumRadius{};
     uint32_t coverage{}, detail{}, pending{}, detailPending{}, ioJobs{}, desired{}, capacity{},
         detailCapacity{};
-    float detailFirstRange{}; // Base-tile normal demand range, before normal-level scaling.
+    float detailFirstRange{};                                   // Base-tile normal demand range, before
+                                                                // normal-level scaling.
     uint32_t detailEligible{}, detailSelected{}, detailReady{}; // Ready counts selected detail only.
     uint64_t hits{}, misses{}, errors{}, generations{}, gpuBytes{}, hostBytes{}, transferBytes{};
     uint32_t dispatches{}, generationGroups{}, generationGroupBudget{};
@@ -128,14 +129,15 @@ class TerrainStreamer {
         float fade = 0;
         uint32_t level = 0, drawMask = 15;
         float heightFade = 0;
-        bool refine = false, active = false, support = false, shadowOnly = false,
-             horizonOnly = false;
+        bool refine = false, active = false, support = false, shadowOnly = false, horizonOnly = false;
         TerrainTileKey tile() const { return {chunk.x, chunk.z, level}; }
     };
-    TerrainStreamer(uint32_t capacity, int maximumRadius, TerrainGrid grid = {},
-                    bool hierarchical = false, uint32_t shadowSlots = 0, uint32_t horizonSlots = 0,
-                    int horizonRadius = 0);
+    TerrainStreamer(uint32_t capacity, int maximumRadius, TerrainGrid grid = {}, bool hierarchical = false,
+                    uint32_t shadowSlots = 0, uint32_t horizonSlots = 0, int horizonRadius = 0);
     void shadowDemand(const TerrainTileKey *keys, uint32_t count);
+    // Bounded read-only level-zero consumers; does not force rendered LOD
+    // refinement.
+    void canonicalDemand(float metres);
     void demand(const Camera &, int radius, uint64_t completed, uint64_t submitted, uint64_t epoch);
     TerrainHandle next(State) const;
     bool valid(TerrainHandle h) const;
@@ -172,6 +174,7 @@ class TerrainStreamer {
     uint32_t topLevel_ = 0, detailedLevel_ = 0;
     int horizonRadius_ = 0;
     uint64_t pressureEvents_ = 0;
+    float canonicalRadius_ = 0;
     struct Wanted {
         TerrainTileKey key;
         bool refine;

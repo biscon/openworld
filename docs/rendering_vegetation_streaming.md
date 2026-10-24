@@ -1,6 +1,8 @@
 # 5J-V3: streamed population and terrain attachment
 
-Status: implemented. V1/V2 remain supported. This design implements
+Status: implemented. V1/V2 remain supported. The [V4 integration](rendering_vegetation_visibility.md)
+supersedes the startup defaults, fixed range and capacity described below; this
+document records the V3 implementation and its historical measurements. This design implements
 the V3 slice of [the vegetation roadmap](rendering_vegetation.md).
 
 ## Ownership and identity

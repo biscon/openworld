@@ -17,6 +17,7 @@ const std::array<UiWindowInfo, uiWindowCount> uiWindows{{
      550},
     {"rendering_settings", "Rendering Settings", "Rendering Settings###rendering_settings", UiMenu::Rendering,
      460, 590},
+    {"vegetation", "Vegetation", "Vegetation###vegetation", UiMenu::Rendering, 480, 470},
     {"lighting", "Lighting & Materials", "Lighting & Materials###lighting", UiMenu::Rendering, 460, 520},
     {"atmosphere", "Atmosphere", "Atmosphere###atmosphere", UiMenu::Rendering, 440, 310},
     {"volumetrics", "Local Volumetrics", "Local Volumetrics###volumetrics", UiMenu::Rendering, 520, 590},

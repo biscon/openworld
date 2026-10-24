@@ -90,7 +90,7 @@ int main() {
         }
         require(failed, "truncated fixture rejected");
         auto maximum = makeVegetationFixture({}, 256);
-        require(maximum.instances.size() == vegetationMaximum, "maximum fixed capacity");
+        require(maximum.instances.size() == 64 * 64 * 128, "maximum fixed capacity");
         std::cout << "vegetation CPU checks passed\n";
         return 0;
     } catch (const std::exception &e) {

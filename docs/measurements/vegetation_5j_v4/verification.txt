@@ -1,0 +1,148 @@
+/tmp/ow-v4-final-debug-gpu.log
+Test project /home/bison/Projects/openworld/cmake-build-debug
+    Start 47: foliage_gpu
+1/2 Test #47: foliage_gpu ......................   Passed    3.62 sec
+    Start 51: vegetation_stream_gpu
+2/2 Test #51: vegetation_stream_gpu ............   Passed   19.81 sec
+
+100% tests passed out of 2
+
+Label Time Summary:
+gpu    =  23.42 sec*proc (2 tests)
+
+Total Test time (real) =  23.43 sec
+
+
+/tmp/ow-v4-final-release-gpu.log
+Test project /home/bison/Projects/openworld/cmake-build-release
+    Start 47: foliage_gpu
+1/2 Test #47: foliage_gpu ......................   Passed    2.43 sec
+    Start 51: vegetation_stream_gpu
+2/2 Test #51: vegetation_stream_gpu ............   Passed    7.10 sec
+
+100% tests passed out of 2
+
+Label Time Summary:
+gpu    =   9.53 sec*proc (2 tests)
+
+Total Test time (real) =   9.53 sec
+
+
+/tmp/ow-v4-engine-review/ui.log
+Vulkan device: NVIDIA GeForce RTX 3060
+Validation: enabled
+Captured "/tmp/ow-v4-engine-review/ui/menu-only.ppm"
+Captured "/tmp/ow-v4-engine-review/ui/terrain_settings.ppm"
+Captured "/tmp/ow-v4-engine-review/ui/base_terrain.ppm"
+Captured "/tmp/ow-v4-engine-review/ui/terrain_materials.ppm"
+Captured "/tmp/ow-v4-engine-review/ui/rendering_settings.ppm"
+Captured "/tmp/ow-v4-engine-review/ui/vegetation.ppm"
+Captured "/tmp/ow-v4-engine-review/ui/lighting.ppm"
+Captured "/tmp/ow-v4-engine-review/ui/atmosphere.ppm"
+Captured "/tmp/ow-v4-engine-review/ui/volumetrics.ppm"
+Captured "/tmp/ow-v4-engine-review/ui/output.ppm"
+Captured "/tmp/ow-v4-engine-review/ui/camera.ppm"
+Captured "/tmp/ow-v4-engine-review/ui/background.ppm"
+Captured "/tmp/ow-v4-engine-review/ui/frame_diagnostics.ppm"
+Captured "/tmp/ow-v4-engine-review/ui/streaming_diagnostics.ppm"
+Captured "/tmp/ow-v4-engine-review/ui/lod_diagnostics.ppm"
+Captured "/tmp/ow-v4-engine-review/ui/visibility_diagnostics.ppm"
+Captured "/tmp/ow-v4-engine-review/ui/shadow_diagnostics.ppm"
+Captured "/tmp/ow-v4-engine-review/ui/gtao_diagnostics.ppm"
+Captured "/tmp/ow-v4-engine-review/ui/cluster_diagnostics.ppm"
+Captured "/tmp/ow-v4-engine-review/ui/material_diagnostics.ppm"
+Captured "/tmp/ow-v4-engine-review/ui/post_diagnostics.ppm"
+Captured "/tmp/ow-v4-engine-review/ui/atmosphere_diagnostics.ppm"
+Captured "/tmp/ow-v4-engine-review/ui/volumetric_diagnostics.ppm"
+Captured "/tmp/ow-v4-engine-review/ui/imgui_demo.ppm"
+Every UI panel rendered with Vulkan validation
+
+
+/tmp/ow-v4-engine-review/close.log
+Vulkan device: NVIDIA GeForce RTX 3060
+Validation: enabled
+Captured "/tmp/ow-v4-engine-review/close.ppm"
+Terrain: 128 m square, 0.5 m spacing, 256 cells/side
+Chunks: 316; triangles: 455272; terrain allocation: 587.523 MiB
+Selected patches: 895; culled: 3201; first LOD range: 64 m
+Streaming: coverage 316, detail 13, pending 0, cache hits 326, misses 12, errors 0
+HDR: 33.75 MiB; lighting: 0.383545 MiB; scene: 7.29872 ms; output + UI: 0.088608 ms; lighting startup: 185.369 ms
+Terrain generations: 7
+Rendered 1200 frames; validation errors: 0
+
+
+/tmp/ow-v4-engine-review/grazing.log
+Vulkan device: NVIDIA GeForce RTX 3060
+Validation: enabled
+Captured "/tmp/ow-v4-engine-review/grazing.ppm"
+Terrain: 128 m square, 0.5 m spacing, 256 cells/side
+Chunks: 316; triangles: 455272; terrain allocation: 587.523 MiB
+Selected patches: 895; culled: 3201; first LOD range: 64 m
+Streaming: coverage 316, detail 13, pending 0, cache hits 327, misses 12, errors 0
+HDR: 33.75 MiB; lighting: 0.383545 MiB; scene: 6.24842 ms; output + UI: 0.518368 ms; lighting startup: 152.691 ms
+Terrain generations: 9
+Rendered 1200 frames; validation errors: 0
+
+
+/tmp/ow-v4-engine-review/aerial.log
+Vulkan device: NVIDIA GeForce RTX 3060
+Validation: enabled
+Captured "/tmp/ow-v4-engine-review/aerial.ppm"
+Terrain: 128 m square, 0.5 m spacing, 256 cells/side
+Chunks: 316; triangles: 401832; terrain allocation: 587.523 MiB
+Selected patches: 790; culled: 3306; first LOD range: 64 m
+Streaming: coverage 316, detail 13, pending 0, cache hits 328, misses 10, errors 0
+HDR: 33.75 MiB; lighting: 0.383545 MiB; scene: 11.8739 ms; output + UI: 0.088896 ms; lighting startup: 156.49 ms
+Terrain generations: 6
+Rendered 1600 frames; validation errors: 0
+
+
+/tmp/ow-v4-engine-review/wind-low-sun.log
+Vulkan device: NVIDIA GeForce RTX 3060
+Validation: enabled
+Captured "/tmp/ow-v4-engine-review/wind-low-sun.ppm"
+Terrain: 128 m square, 0.5 m spacing, 256 cells/side
+Chunks: 316; triangles: 455272; terrain allocation: 587.523 MiB
+Selected patches: 895; culled: 3201; first LOD range: 64 m
+Streaming: coverage 316, detail 13, pending 0, cache hits 329, misses 25, errors 0
+HDR: 33.75 MiB; lighting: 0.383545 MiB; scene: 6.74554 ms; output + UI: 0.087392 ms; lighting startup: 151.618 ms
+Terrain generations: 9
+Rendered 1200 frames; validation errors: 0
+
+
+/tmp/ow-v4-material-recheck.log
+Vulkan device: NVIDIA GeForce RTX 3060
+Validation: enabled
+Projection step=0.105134 at x=36
+Vulkan device: NVIDIA GeForce RTX 3060
+Validation: enabled
+Projection step=0.105134 at x=36
+Vulkan device: NVIDIA GeForce RTX 3060
+Validation: enabled
+Captured "/tmp/ow-material-gpu-33846160079031/diagnostic.ppm"
+Captured "/tmp/ow-material-gpu-33846160079031/diagnostic.ppm"
+Materials: Missing texture: /tmp/ow-material-gpu-33846160079031/missing/colour_rgba.dds
+Materials: Unsupported or malformed DDS DX10: /tmp/ow-material-gpu-33846160079031/macro_rgba.dds
+Mountain coverage max adjacent step=0.00683594, range=0.0844727
+Vulkan device: NVIDIA GeForce RTX 3060
+Validation: enabled
+Captured "/tmp/ow-material-gpu-33846160079031/diagnostic.ppm"
+Captured "/tmp/ow-material-gpu-33846160079031/diagnostic.ppm"
+Materials: Missing texture: /tmp/ow-material-gpu-33846160079031/missing/colour_rgba.dds
+Materials: Unsupported or malformed DDS DX10: /tmp/ow-material-gpu-33846160079031/macro_rgba.dds
+Mountain coverage max adjacent step=0.00683594, range=0.0844727
+Vulkan device: NVIDIA GeForce RTX 3060
+Validation: enabled
+Vulkan device: NVIDIA GeForce RTX 3060
+Validation: enabled
+Materials: Material budget exhausted; retaining palette
+Vulkan device: NVIDIA GeForce RTX 3060
+Validation: enabled
+Material GPU invariants passed
+
+
+/tmp/ow-v4-baseline-gtao.log
+Vulkan device: NVIDIA GeForce RTX 3060
+Validation: enabled
+Ray AO MAE=0.0365156 Half/Full MAE=0.00804424 samples=39
+Tiled filter preserves edge-aware 5x5 visibility: 0.976471 != 0.978487
