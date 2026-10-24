@@ -104,6 +104,43 @@ std::pair<TextureData, TextureData> importMap(Image im, bool normal, float cutof
     }
     return {std::move(bc), std::move(rgba)};
 }
+// Tile-local mip chains never share filter footprints. Stop at 4x4 per tile
+// so even BC blocks remain independent; image-view LOD clamping handles the tail.
+std::pair<TextureData, TextureData> importAtlas(std::array<Image, 4> tiles, bool normal) {
+    std::array<std::pair<TextureData, TextureData>, 4> maps;
+    for (uint32_t i = 0; i < 4; ++i)
+        maps[i] = importMap(std::move(tiles[i]), normal, .5f);
+    TextureData bc = maps[0].first, rgba = maps[0].second;
+    bc.bytes.clear();
+    rgba.bytes.clear();
+    bc.width *= 2;
+    bc.height *= 2;
+    rgba.width *= 2;
+    rgba.height *= 2;
+    bc.levels -= 2;
+    rgba.levels -= 2;
+    size_t bcOffset = 0, rgbaOffset = 0;
+    for (uint32_t n = bc.width / 2; n >= 4; n >>= 1) {
+        uint32_t blocks = n / 4;
+        for (uint32_t y = 0; y < blocks * 2; ++y)
+            for (uint32_t x = 0; x < blocks * 2; ++x) {
+                uint32_t tile = (y / blocks) * 2 + x / blocks;
+                size_t off = bcOffset + ((y % blocks) * blocks + x % blocks) * 16;
+                const auto &b = maps[tile].first.bytes;
+                bc.bytes.insert(bc.bytes.end(), b.begin() + off, b.begin() + off + 16);
+            }
+        for (uint32_t y = 0; y < n * 2; ++y)
+            for (uint32_t x = 0; x < n * 2; ++x) {
+                uint32_t tile = (y / n) * 2 + x / n;
+                size_t off = rgbaOffset + ((y % n) * n + x % n) * 4;
+                const auto &b = maps[tile].second.bytes;
+                rgba.bytes.insert(rgba.bytes.end(), b.begin() + off, b.begin() + off + 4);
+            }
+        bcOffset += blocks * blocks * 16;
+        rgbaOffset += n * n * 4;
+    }
+    return {std::move(bc), std::move(rgba)};
+}
 int main(int argc, char **argv) {
     try {
         if (argc != 3)
@@ -112,7 +149,7 @@ int main(int argc, char **argv) {
         std::ifstream in(recipe);
         nlohmann::json j;
         in >> j;
-        if (j.at("version") != 1)
+        if (j.at("version") != 1 && j.at("version") != 2)
             throw std::runtime_error("Unsupported vegetation recipe");
         VegetationRecipe r;
         r.blades = j.at("grass").at("blades");
@@ -123,10 +160,12 @@ int main(int argc, char **argv) {
         uint32_t size = j.value("size", 1024u);
         if (size < 16 || size > 2048 || (size & (size - 1)))
             throw std::runtime_error("Invalid vegetation texture size");
-        if (j.at("leaves").size() != 2)
-            throw std::runtime_error("Two leaf sources required");
+        const bool atlas = j.at("version") == 2;
+        if (j.at("leaves").size() != (atlas ? 4u : 2u) || (atlas && size > 1024))
+            throw std::runtime_error("Invalid foliage source count/atlas size");
+        std::array<Image, 4> colours, normals;
         bc7enc_compress_block_init();
-        for (uint32_t k = 0; k < 2; ++k) {
+        for (uint32_t k = 0; k < (atlas ? 4u : 2u); ++k) {
             auto &entry = j.at("leaves").at(k);
             auto source = padded(load(recipe.parent_path() / entry.at("colour").get<std::string>(), true));
             Image colour = padded(resize(source, size)), normal{size, {}};
@@ -140,11 +179,45 @@ int main(int argc, char **argv) {
                         glm::vec4(glm::normalize(glm::vec3(((x + .5f) / size - .5f) * dome,
                                                            ((y + .5f) / size - .5f) * dome, 1)),
                                   1);
+            if (atlas) {
+                // An explicit transparent gutter separates silhouettes at every usable mip.
+                uint32_t pad = std::max(1u, size / 64), inside = size - pad * 2;
+                auto smaller = resize(source, inside);
+                Image inset{size, {}};
+                inset.p.resize(size * size);
+                for (uint32_t y = 0; y < inside; ++y)
+                    for (uint32_t x = 0; x < inside; ++x)
+                        inset.p[(y + pad) * size + x + pad] = smaller.p[y * inside + x];
+                colours[k] = padded(std::move(inset));
+                normals[k] = std::move(normal);
+                continue;
+            }
             auto c = importMap(std::move(colour), false, .5f), n = importMap(std::move(normal), true, .5f);
             library.textures[k * 2] = std::move(c.first);
             rgba.textures[k * 2] = std::move(c.second);
             library.textures[k * 2 + 1] = std::move(n.first);
             rgba.textures[k * 2 + 1] = std::move(n.second);
+        }
+        if (atlas) {
+            auto c = importAtlas(std::move(colours), false), n = importAtlas(std::move(normals), true);
+            library.textures = {std::move(c.first), std::move(n.first)};
+            rgba.textures = {std::move(c.second), std::move(n.second)};
+            for (auto *l : {&library, &rgba}) {
+                for (uint32_t material : {2u, 4u, 6u, 7u}) {
+                    l->materials[material].colourTexture = 0;
+                    l->materials[material].normalTexture = 1;
+                    uint32_t tile = material == 2 ? 0 : material == 4 ? 1 : material == 6 ? 2 : 3;
+                    float pad = float(std::max(1u, size / 64)) / size;
+                    for (auto &a : l->assets)
+                        for (auto &lod : a.lods)
+                            for (auto &part : lod)
+                                if (part.material == material)
+                                    for (auto &v : part.vertices)
+                                        v.uv = (glm::vec2(tile % 2, tile / 2) + glm::vec2(pad) +
+                                                v.uv * (1 - 2 * pad)) *
+                                               .5f;
+                }
+            }
         }
         // Revision fingerprints actual geometry, recipe and imported texture bytes.
         uint32_t revision = 2166136261u;
@@ -160,6 +233,10 @@ int main(int argc, char **argv) {
         for (const auto &t : library.textures)
             hashBytes(t.bytes.data(), t.bytes.size());
         for (const auto &a : library.assets) {
+            hashBytes(&a.species, sizeof(a.species));
+            for (auto v : {a.habitat, a.placement, a.interaction})
+                for (int k = 0; k < 4; ++k)
+                    hashBytes(&v[k], 4);
             for (int k = 0; k < 4; ++k) {
                 hashBytes(&a.grass.counts[k], sizeof(uint32_t));
                 hashBytes(&a.grass.bands[k], sizeof(float));

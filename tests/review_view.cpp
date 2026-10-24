@@ -31,6 +31,9 @@ int main() {
         v.scene.vegetation.distance = 193;
         v.scene.vegetation.density = .83f;
         v.scene.vegetation.occlusion = true;
+        v.scene.vegetation.proxy.active = true;
+        v.scene.vegetation.proxy.position.local = {13, 0, -17};
+        v.scene.vegetation.interaction.recoveryHalfLife = 2.3f;
         v.scene.vegetation.habitat = vegetationHabitat(VegetationHabitat::Moor);
         v.scene.shadows.biasTexels = 1.75f;
         v.scene.visibility = VisibilityMode::HiZ;
@@ -72,6 +75,21 @@ int main() {
                 require(old.startup.spatialAaBudgetBytes == RendererOptions{}.spatialAaBudgetBytes,
                         "Legacy spatial budget defaults");
             }
+        {
+            std::ifstream input(path);
+            auto legacy = nlohmann::json::parse(input);
+            legacy["version"] = 4;
+            auto &vegetation = legacy["scene"]["vegetation"];
+            vegetation["habitat"].erase("mode");
+            vegetation.erase("interaction");
+            vegetation.erase("proxy");
+            auto oldPath = dir / "legacy-v4.json";
+            std::ofstream(oldPath) << legacy;
+            auto old = loadReviewView(oldPath);
+            require(old.scene.vegetation.habitat.mode == VegetationHabitatMode::Uniform &&
+                        !old.scene.vegetation.contacts.active,
+                    "v4 habitat and fresh interaction migration");
+        }
         const auto loaded = loadReviewView(path);
         require(!loaded.startup.lod.enabled, "Terrain LOD enable state survives AA bookmark migration");
         require(!loaded.scene.taa.thinGeometry, "Thin-geometry comparison setting round trips");
@@ -85,6 +103,11 @@ int main() {
                     loaded.scene.terrainMaterial.macroRepeatMetres == 128 &&
                     loaded.scene.atmosphere.aerosolDensity == 1.554f,
                 "scene and frozen observer round trip");
+        require(loaded.scene.vegetation.proxy.active &&
+                    loaded.scene.vegetation.proxy.position.local.x == 13 &&
+                    loaded.scene.vegetation.interaction.recoveryHalfLife == 2.3f &&
+                    !loaded.scene.vegetation.contacts.active,
+                "proxy settings persist without trail");
         require(loaded.scene.vegetation.distance == 193 && loaded.scene.vegetation.density == .83f &&
                     loaded.scene.vegetation.occlusion && loaded.scene.vegetation.habitat.weights.y == 1,
                 "vegetation settings survive explicit review bookmarks");
@@ -104,7 +127,7 @@ int main() {
         auto invalid = v;
         invalid.version = 99;
         rejects([&] { saveReviewView(path, invalid); }, "unsupported version rejected before replacing file");
-        require(loadReviewView(path).version == 4, "invalid save leaves existing view intact");
+        require(loadReviewView(path).version == 5, "invalid save leaves existing view intact");
         nlohmann::json legacy;
         {
             std::ifstream input(path);
@@ -121,7 +144,7 @@ int main() {
         require(old.scene.vegetation.enabled && old.scene.vegetation.distance == 80,
                 "old bookmarks acquire engine vegetation defaults");
         saveReviewView(dir / "legacy.json", old);
-        require(loadReviewView(dir / "legacy.json").version == 4, "new saves upgrade v1 bookmarks");
+        require(loadReviewView(dir / "legacy.json").version == 5, "new saves upgrade v1 bookmarks");
         for (auto keys : {std::vector<TerrainPatchKey>{{0, 0, 32}},
                           {{1, 0, 0}},
                           {{0, 0, 0}, {0, 0, 1}},

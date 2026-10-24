@@ -16,7 +16,7 @@ template <class F> void rejects(F f) {
     require(rejected, "invalid asset/population rejected");
 }
 // Independent version-2 encoder: compatibility fixtures own their geometry/textures.
-void writeVersion2(const std::filesystem::path &path, const VegetationLibrary &l) {
+void writeVersion2(const std::filesystem::path &path, const VegetationLibrary &l, uint32_t version = 2) {
     std::ofstream f(path, std::ios::binary | std::ios::trunc);
     auto u = [&](uint32_t x) {
         for (int k = 0; k < 4; ++k)
@@ -32,7 +32,7 @@ void writeVersion2(const std::filesystem::path &path, const VegetationLibrary &l
             scalar(v[k]);
     };
     u(0x3256474f);
-    u(2);
+    u(version);
     u(l.revision);
     u(uint32_t(l.assets.size()));
     u(uint32_t(l.materials.size()));
@@ -53,6 +53,12 @@ void writeVersion2(const std::filesystem::path &path, const VegetationLibrary &l
         vec(a.ranges);
         scalar(a.stiffness);
         scalar(a.displacement);
+        if (version == 3) {
+            for (int k = 0; k < 4; ++k)
+                u(a.grass.counts[k]);
+            vec(a.grass.bands);
+            vec(a.grass.shading);
+        }
         for (auto &lod : a.lods) {
             u(uint32_t(lod.size()));
             for (auto &p : lod) {
@@ -68,6 +74,15 @@ void writeVersion2(const std::filesystem::path &path, const VegetationLibrary &l
                 }
                 for (auto index : p.indices)
                     u(index);
+                if (version == 3) {
+                    u(uint32_t(p.grassMorph.size()));
+                    for (auto m : p.grassMorph) {
+                        vec(m.centreBlade);
+                        vec(m.nextCentreWidth);
+                        vec(m.nextNormal);
+                        vec(m.nextDeformation);
+                    }
+                }
             }
         }
     }
@@ -115,9 +130,9 @@ void checkGrass(const VegetationLibrary &library, uint32_t blades) {
 int main() {
     try {
         auto library = buildVegetationLibrary();
-        require(library.assets.size() == 4, "representative asset set");
+        require(library.assets.size() == 6, "representative asset set");
         auto second = buildVegetationLibrary();
-        for (uint32_t a = 0; a < 4; ++a)
+        for (uint32_t a = 0; a < 6; ++a)
             for (uint32_t lod = 0; lod < 3; ++lod) {
                 const auto &part = library.assets[a].lods[lod][0];
                 require(part.indices == second.assets[a].lods[lod][0].indices, "deterministic topology");
@@ -198,6 +213,16 @@ int main() {
         for (size_t i = 0; i < a.vertices.size(); ++i)
             near(glm::length(a.vertices[i].deformation - b.vertices[i].deformation), 0, 0,
                  "saved deformation metadata");
+        for (uint32_t i = 0; i < 6; ++i) {
+            require(loaded.assets[i].species == library.assets[i].species &&
+                        loaded.assets[i].interaction == library.assets[i].interaction &&
+                        loaded.assets[i].habitat == library.assets[i].habitat,
+                    "species and interaction round trip");
+        }
+        writeVersion2(dir / "library.bin", library, 3);
+        auto v3 = readVegetationLibrary(dir);
+        checkGrass(v3, 24);
+        require(v3.assets[0].interaction == glm::vec4(0), "v3 remains non-interactive");
         writeVersion2(dir / "library.bin", library);
         auto legacy = readVegetationLibrary(dir);
         require(legacy.assets[0].grass.counts.x == 0 && legacy.assets[0].lods[0][0].grassMorph.empty(),

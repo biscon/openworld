@@ -1,0 +1,239 @@
+/tmp/v5-debug-cpu.log
+Test project /home/bison/Projects/openworld/cmake-build-debug
+    Start 29: ui_state
+1/8 Test #29: ui_state .........................   Passed    0.06 sec
+    Start 31: material_cpu
+2/8 Test #31: material_cpu .....................   Passed    0.00 sec
+    Start 44: review_view
+3/8 Test #44: review_view ......................   Passed    0.04 sec
+    Start 45: vegetation_cpu
+4/8 Test #45: vegetation_cpu ...................   Passed    0.16 sec
+    Start 47: vegetation_library
+5/8 Test #47: vegetation_library ...............   Passed    0.04 sec
+    Start 49: vegetation_asset_build
+6/8 Test #49: vegetation_asset_build ...........   Passed    4.53 sec
+    Start 51: vegetation_stream
+7/8 Test #51: vegetation_stream ................   Passed    0.02 sec
+    Start 53: vegetation_interaction
+8/8 Test #53: vegetation_interaction ...........   Passed    0.00 sec
+
+100% tests passed out of 8
+
+Total Test time (real) =   4.85 sec
+
+
+/tmp/v5-check3.log
+Test project /home/bison/Projects/openworld/cmake-build-debug
+    Start 31: material_cpu
+1/4 Test #31: material_cpu .....................   Passed    0.00 sec
+    Start 44: review_view
+2/4 Test #44: review_view ......................   Passed    0.04 sec
+    Start 47: vegetation_library
+3/4 Test #47: vegetation_library ...............   Passed    0.04 sec
+    Start 52: vegetation_stream_gpu
+4/4 Test #52: vegetation_stream_gpu ............   Passed   42.80 sec
+
+100% tests passed out of 4
+
+Label Time Summary:
+gpu    =  42.80 sec*proc (1 test)
+
+Total Test time (real) =  42.88 sec
+
+
+/tmp/v5-release-checks.log
+Test project /home/bison/Projects/openworld/cmake-build-release
+      Start 18: temporal_gpu
+ 1/12 Test #18: temporal_gpu .....................   Passed   13.35 sec
+      Start 30: engine_ui_gpu
+ 2/12 Test #30: engine_ui_gpu ....................   Passed    7.57 sec
+      Start 34: material_gpu
+ 3/12 Test #34: material_gpu .....................   Passed   20.79 sec
+      Start 42: shadows_gpu
+ 4/12 Test #42: shadows_gpu ......................   Passed   63.52 sec
+      Start 44: review_view
+ 5/12 Test #44: review_view ......................   Passed    0.01 sec
+      Start 47: vegetation_library
+ 6/12 Test #47: vegetation_library ...............   Passed    0.01 sec
+      Start 48: foliage_gpu
+ 7/12 Test #48: foliage_gpu ......................   Passed    3.91 sec
+      Start 49: vegetation_asset_build
+ 8/12 Test #49: vegetation_asset_build ...........   Passed    4.40 sec
+      Start 50: foliage_import_gpu
+ 9/12 Test #50: foliage_import_gpu ...............   Passed   16.89 sec
+      Start 52: vegetation_stream_gpu
+10/12 Test #52: vegetation_stream_gpu ............   Passed   19.29 sec
+      Start 53: vegetation_interaction
+11/12 Test #53: vegetation_interaction ...........   Passed    0.01 sec
+      Start 54: vegetation_interaction_gpu
+12/12 Test #54: vegetation_interaction_gpu .......   Passed    4.98 sec
+
+100% tests passed out of 12
+
+Label Time Summary:
+gpu    = 150.28 sec*proc (8 tests)
+
+Total Test time (real) = 154.73 sec
+
+
+/tmp/v5-last-stream-validation.log
+Vulkan device: NVIDIA GeForce RTX 3060
+Validation: enabled
+Rock fixture: 1198 bare, 1322 mixed, 0 non-rock, 602 grass retained
+Vulkan device: NVIDIA GeForce RTX 3060
+Validation: enabled
+Vulkan device: NVIDIA GeForce RTX 3060
+Validation: enabled
+Vulkan device: NVIDIA GeForce RTX 3060
+Validation: enabled
+Vegetation streamed GPU checks passed
+
+Final proxy validation and recovery checks: cmake-build-debug
+Test project /home/bison/Projects/openworld/cmake-build-debug
+    Start 53: vegetation_interaction
+1/1 Test #53: vegetation_interaction ...........   Passed    0.00 sec
+
+100% tests passed out of 1
+
+Total Test time (real) =   0.00 sec
+103 SPIR-V modules validated for Vulkan 1.3
+
+Final proxy validation and recovery checks: cmake-build-release
+Test project /home/bison/Projects/openworld/cmake-build-release
+    Start 53: vegetation_interaction
+1/1 Test #53: vegetation_interaction ...........   Passed    0.00 sec
+
+100% tests passed out of 1
+
+Total Test time (real) =   0.00 sec
+103 SPIR-V modules validated for Vulkan 1.3
+
+close native visual check
+Vulkan device: NVIDIA GeForce RTX 3060
+Validation: enabled
+Captured "/tmp/ow-v5-engine/close.ppm"
+Terrain: 128 m square, 0.5 m spacing, 256 cells/side
+Chunks: 316; triangles: 455272; terrain allocation: 587.523 MiB
+Selected patches: 895; culled: 3201; first LOD range: 64 m
+Streaming: coverage 316, detail 13, pending 0, cache hits 338, misses 2, errors 0
+HDR: 33.75 MiB; lighting: 0.383545 MiB; scene: 8.09354 ms; output + UI: 0.08992 ms; lighting startup: 153.612 ms
+Terrain generations: 0
+Rendered 1200 frames; validation errors: 0
+
+grazing native visual check
+Vulkan device: NVIDIA GeForce RTX 3060
+Validation: enabled
+Captured "/tmp/ow-v5-engine/grazing.ppm"
+Terrain: 128 m square, 0.5 m spacing, 256 cells/side
+Chunks: 316; triangles: 455272; terrain allocation: 587.523 MiB
+Selected patches: 895; culled: 3201; first LOD range: 64 m
+Streaming: coverage 316, detail 13, pending 0, cache hits 341, misses 3, errors 0
+HDR: 33.75 MiB; lighting: 0.383545 MiB; scene: 6.73846 ms; output + UI: 0.089568 ms; lighting startup: 137.891 ms
+Terrain generations: 1
+Rendered 1200 frames; validation errors: 0
+
+aerial native visual check
+Vulkan device: NVIDIA GeForce RTX 3060
+Validation: enabled
+Captured "/tmp/ow-v5-engine/aerial.ppm"
+Terrain: 128 m square, 0.5 m spacing, 256 cells/side
+Chunks: 316; triangles: 89496; terrain allocation: 587.523 MiB
+Selected patches: 176; culled: 3920; first LOD range: 64 m
+Streaming: coverage 316, detail 13, pending 0, cache hits 334, misses 3, errors 0
+HDR: 33.75 MiB; lighting: 0.383545 MiB; scene: 12.0313 ms; output + UI: 0.495136 ms; lighting startup: 141.42 ms
+Terrain generations: 0
+Rendered 1200 frames; validation errors: 0
+
+daisy native visual check
+Vulkan device: NVIDIA GeForce RTX 3060
+Validation: enabled
+asset blades count default repeat 0 enabled 0
+asset blades count default repeat 0 enabled 1
+asset blades count shadows_off repeat 0 enabled 0
+asset blades count shadows_off repeat 0 enabled 1
+asset blades count taa_off repeat 0 enabled 0
+asset blades count taa_off repeat 0 enabled 1
+asset blades count strong_wind repeat 0 enabled 0
+asset blades count strong_wind repeat 0 enabled 1
+asset blades count low_sun repeat 0 enabled 0
+asset blades count low_sun repeat 0 enabled 1
+asset blades count no_prepass repeat 0 enabled 0
+asset blades count no_prepass repeat 0 enabled 1
+asset blades count gtao repeat 0 enabled 0
+asset blades count gtao repeat 0 enabled 1
+Captured "/tmp/ow-v5-final-daisy/asset_blades_count.png.ppm"
+
+heather native visual check
+Vulkan device: NVIDIA GeForce RTX 3060
+Validation: enabled
+asset blades count default repeat 0 enabled 0
+asset blades count default repeat 0 enabled 1
+asset blades count shadows_off repeat 0 enabled 0
+asset blades count shadows_off repeat 0 enabled 1
+asset blades count taa_off repeat 0 enabled 0
+asset blades count taa_off repeat 0 enabled 1
+asset blades count strong_wind repeat 0 enabled 0
+asset blades count strong_wind repeat 0 enabled 1
+asset blades count low_sun repeat 0 enabled 0
+asset blades count low_sun repeat 0 enabled 1
+asset blades count no_prepass repeat 0 enabled 0
+asset blades count no_prepass repeat 0 enabled 1
+asset blades count gtao repeat 0 enabled 0
+asset blades count gtao repeat 0 enabled 1
+Captured "/tmp/ow-v5-final-heather/asset_blades_count.png.ppm"
+
+fern native visual check
+Vulkan device: NVIDIA GeForce RTX 3060
+Validation: enabled
+asset blades count default repeat 0 enabled 0
+asset blades count default repeat 0 enabled 1
+asset blades count shadows_off repeat 0 enabled 0
+asset blades count shadows_off repeat 0 enabled 1
+asset blades count taa_off repeat 0 enabled 0
+asset blades count taa_off repeat 0 enabled 1
+asset blades count strong_wind repeat 0 enabled 0
+asset blades count strong_wind repeat 0 enabled 1
+asset blades count low_sun repeat 0 enabled 0
+asset blades count low_sun repeat 0 enabled 1
+asset blades count no_prepass repeat 0 enabled 0
+asset blades count no_prepass repeat 0 enabled 1
+asset blades count gtao repeat 0 enabled 0
+asset blades count gtao repeat 0 enabled 1
+Captured "/tmp/ow-v5-final-fern/asset_blades_count.png.ppm"
+
+shrub native visual check
+Vulkan device: NVIDIA GeForce RTX 3060
+Validation: enabled
+asset blades count default repeat 0 enabled 0
+asset blades count default repeat 0 enabled 1
+asset blades count shadows_off repeat 0 enabled 0
+asset blades count shadows_off repeat 0 enabled 1
+asset blades count taa_off repeat 0 enabled 0
+asset blades count taa_off repeat 0 enabled 1
+asset blades count strong_wind repeat 0 enabled 0
+asset blades count strong_wind repeat 0 enabled 1
+asset blades count low_sun repeat 0 enabled 0
+asset blades count low_sun repeat 0 enabled 1
+asset blades count no_prepass repeat 0 enabled 0
+asset blades count no_prepass repeat 0 enabled 1
+asset blades count gtao repeat 0 enabled 0
+asset blades count gtao repeat 0 enabled 1
+Captured "/tmp/ow-v5-final-shrub/asset_blades_count.png.ppm"
+
+Final route-stop recovery regression: cmake-build-debug
+Test project /home/bison/Projects/openworld/cmake-build-debug
+    Start 53: vegetation_interaction
+1/1 Test #53: vegetation_interaction ...........   Passed    0.00 sec
+
+100% tests passed out of 1
+
+Total Test time (real) =   0.00 sec
+
+Final route-stop recovery regression: cmake-build-release
+Test project /home/bison/Projects/openworld/cmake-build-release
+    Start 53: vegetation_interaction
+1/1 Test #53: vegetation_interaction ...........   Passed    0.00 sec
+
+100% tests passed out of 1
+
+Total Test time (real) =   0.00 sec

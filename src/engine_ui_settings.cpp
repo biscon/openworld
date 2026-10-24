@@ -75,6 +75,9 @@ void EngineUi::drawSettings(UiWindow window, UiContext &context, UiActions &acti
         ImGui::SliderFloat("Render distance (m)", &settings.distance, 20, 200, "%.0f",
                            ImGuiSliderFlags_AlwaysClamp);
         ImGui::SliderFloat("Density", &settings.density, 0, 1, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+        bool blended = settings.habitat.mode == VegetationHabitatMode::Blended;
+        if (ImGui::Checkbox("Blended habitats", &blended))
+            settings.habitat.mode = blended ? VegetationHabitatMode::Blended : VegetationHabitatMode::Uniform;
         int preset = settings.habitat.weights.z > .5f ? 2 : settings.habitat.weights.y > .5f ? 1 : 0;
         if (ImGui::Combo("Habitat preset", &preset, "Meadow\0Moor\0Understory\0"))
             settings.habitat = vegetationHabitat(VegetationHabitat(preset));
@@ -82,12 +85,41 @@ void EngineUi::drawSettings(UiWindow window, UiContext &context, UiActions &acti
         float angle = std::atan2(settings.windDirection.y, settings.windDirection.x);
         if (ImGui::SliderAngle("Wind direction", &angle, -180, 180))
             settings.windDirection = {std::cos(angle), std::sin(angle)};
+        int inspected = settings.isolateAsset < 0 ? 0 : settings.isolateAsset + 1;
+        if (ImGui::Combo("Inspect species", &inspected,
+                         "All species\0Grass A\0Grass B\0Fern\0Shrub\0Daisy\0Heather\0"))
+            settings.isolateAsset = inspected - 1;
         ImGui::Checkbox("Foliage transmission", &settings.transmission);
         ImGui::Checkbox("Vegetation occlusion (Hi-Z)", &settings.occlusion);
         ImGui::TextWrapped("Range increases stream in progressively. Nearby density is preserved; "
                            "distant plants use cheaper detail and stable thinning.");
+        if (ImGui::CollapsingHeader("Player footprint")) {
+            auto &p = settings.proxy;
+            ImGui::Checkbox("Bending enabled", &settings.interaction.enabled);
+            if (ImGui::Button("Place near camera")) {
+                auto forward = camera.forward();
+                p.position = translated(worldPosition(camera, options.terrainGrid),
+                                        glm::dvec3(forward.x, 0, forward.z) * 5.);
+                p.active = true;
+                actions.vegetationReset = true;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Reset trail"))
+                actions.vegetationReset = true;
+            ImGui::Checkbox("Proxy active", &p.active);
+            ImGui::Checkbox("Ground marker", &p.marker);
+            ImGui::Checkbox("Circular route", &p.route);
+            ImGui::SliderFloat("Footprint radius", &p.radius, .1f, 4, "%.2f m", ImGuiSliderFlags_AlwaysClamp);
+            ImGui::SliderFloat("Bend strength", &p.strength, 0, 1, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+            ImGui::SliderFloat("Recovery half-life", &settings.interaction.recoveryHalfLife, .1f, 10,
+                               "%.2f s", ImGuiSliderFlags_AlwaysClamp);
+            ImGui::TextWrapped("Arrow keys move the ground footprint independently of the camera. Shift "
+                               "doubles speed. No character or collision simulation.");
+        }
         if (ImGui::CollapsingHeader("Diagnostics")) {
             const auto &v = renderer.vegetationStats();
+            ImGui::Text("Interaction %.3f ms; shapes %u; rejected %u; reset %u", v.interactionMilliseconds,
+                        v.interactionShapes, v.interactionRejected, v.interactionResets);
             ImGui::Text("Cells: %u ready, %u pending, %u retiring", v.residentCells, v.pendingCells,
                         v.retiringCells);
             ImGui::Text("Updates: %u (%u new), missing terrain: %u", v.updatedCells, v.generatedCells,

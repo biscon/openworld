@@ -15,6 +15,8 @@ Milestone 4 adds [hierarchical terrain residency](terrain_hierarchy.md): coarse 
 
 ## System design index
 
+- [Vegetation interaction and habitat variety](rendering_vegetation_interaction.md) — implemented 5J-V5; [native verification and remaining tuning gates](measurements/vegetation_5j_v5/README.md): bounded submitted bend history, blended habitats and expanded foliage assets.
+
 - [Grass rock exclusion](rendering_vegetation_streaming.md#rock-exclusion-for-grass) — implemented and natively verified: shared terrain rock classification and stable soft-edge grass suppression.
 
 - [Grass LOD and shading stability](rendering_vegetation_visibility.md#grass-lod-and-shading-stability) — implemented: nested wider grass, continuous geometric fades and distant lighting filtering; native validation and focused 1080p comparison recorded.
@@ -30,7 +32,7 @@ Milestone 4 adds [hierarchical terrain residency](terrain_hierarchy.md): coarse 
 - [Vegetation asset and foliage foundation](rendering_vegetation_assets.md) — implemented 5J-V2; saved reusable assets, compact instancing, foliage lighting, submitted wind history and isolated review tools.
 
 - [Vegetation representation experiment](rendering_vegetation_experiment.md) — implemented 5J-V1 automated comparison with saved fixtures, compact indirect instancing, LOD, wind, CSM and temporal motion. Debug/Release, software Vulkan and native RTX 3060 synchronization validation pass; native performance results are recorded, final asset/scene acceptance remains open.
-- [Vegetation and ground clutter roadmap](rendering_vegetation.md) — agreed architecture; V1 experiment, V2 foliage foundation, V3 streaming and V4 engine integration implemented; V5–V6 proposed: baked grass tufts and mixed mesh/card plants, bounded GPU population and instancing, independent LOD/density/shadow budgets, shared wind and temporary player bending. Slices 5J-V1–V6 start with a representation/performance experiment; trees remain a separate future design.
+- [Vegetation and ground clutter roadmap](rendering_vegetation.md) — agreed architecture; V1 experiment, V2 foliage foundation, V3 streaming and V4 engine integration implemented; V5 interaction/habitats implemented and natively verified with remaining performance/visual gates; V6 proposed: baked grass tufts and mixed mesh/card plants, bounded GPU population and instancing, independent LOD/density/shadow budgets, shared wind and temporary player bending. Slices 5J-V1–V6 start with a representation/performance experiment; trees remain a separate future design.
 
 - [Engine UI and layout persistence](engine_ui.md) — implemented: menu-driven settings and diagnostics, dedicated UI modules, and UI-only JSON state saved on clean exit. Debug/Release and software Vulkan checks pass; native desktop review is blocked by an X11 drawable error.
 

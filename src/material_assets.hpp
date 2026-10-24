@@ -13,9 +13,10 @@ struct TextureData {
     std::vector<uint8_t> bytes; // DDS order: layer, mip, row/block
 };
 uint64_t textureMipBytes(TextureFormat, uint32_t width, uint32_t height);
-uint64_t textureBytes(const TextureData &);
-TextureData readTexture(const std::filesystem::path &);
-void writeTexture(const std::filesystem::path &, const TextureData &);
+// Atlas callers may opt into truncated mip tails; terrain defaults require complete chains.
+uint64_t textureBytes(const TextureData &, bool allowPartial = false);
+TextureData readTexture(const std::filesystem::path &, bool allowPartial = false);
+void writeTexture(const std::filesystem::path &, const TextureData &, bool allowPartial = false);
 struct TerrainMaterialSettings {
     bool enabled = true, weights = false;
     int isolate = -1, filtering = 1; // 0 trilinear, 1 8x, 2 16x

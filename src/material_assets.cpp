@@ -42,7 +42,7 @@ uint64_t textureMipBytes(TextureFormat f, uint32_t w, uint32_t h) {
                ? uint64_t(w) * h * 4
                : uint64_t((w + 3) / 4) * ((h + 3) / 4) * 16;
 }
-uint64_t textureBytes(const TextureData &t) {
+uint64_t textureBytes(const TextureData &t, bool allowPartial) {
     if (!t.width || !t.height || t.width > 8192 || t.height > 8192 || !t.layers || t.layers > 128 ||
         !t.levels || t.levels > 14)
         throw std::runtime_error("Invalid texture dimensions");
@@ -53,7 +53,7 @@ uint64_t textureBytes(const TextureData &t) {
     uint32_t full = 1;
     for (auto n = std::max(t.width, t.height); n > 1; n >>= 1)
         ++full;
-    if (t.levels != full)
+    if (t.levels > full || (!allowPartial && t.levels != full))
         throw std::runtime_error("Texture requires a complete mip chain");
     uint64_t bytes = 0;
     for (uint32_t m = 0; m < t.levels; ++m)
@@ -63,7 +63,7 @@ uint64_t textureBytes(const TextureData &t) {
         throw std::runtime_error("Texture exceeds material budget");
     return bytes;
 }
-TextureData readTexture(const std::filesystem::path &path) {
+TextureData readTexture(const std::filesystem::path &path, bool allowPartial) {
     std::ifstream in(path, std::ios::binary | std::ios::ate);
     if (!in)
         throw std::runtime_error("Missing texture: " + path.string());
@@ -79,7 +79,7 @@ TextureData readTexture(const std::filesystem::path &path) {
     t.levels = h[7];
     t.layers = h[35];
     t.format = TextureFormat(h[32]);
-    const auto bytes = textureBytes(t);
+    const auto bytes = textureBytes(t, allowPartial);
     if (uint64_t(size) != 148 + bytes)
         throw std::runtime_error("DDS payload size mismatch");
     t.bytes.resize(bytes);
@@ -87,8 +87,8 @@ TextureData readTexture(const std::filesystem::path &path) {
         throw std::runtime_error("Truncated DDS");
     return t;
 }
-void writeTexture(const std::filesystem::path &path, const TextureData &t) {
-    if (t.bytes.size() != textureBytes(t))
+void writeTexture(const std::filesystem::path &path, const TextureData &t, bool allowPartial) {
+    if (t.bytes.size() != textureBytes(t, allowPartial))
         throw std::runtime_error("Invalid texture payload");
     std::array<uint32_t, 37> h{};
     h[0] = 0x20534444;

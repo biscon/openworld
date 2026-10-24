@@ -23,6 +23,7 @@ struct UiContext {
 };
 
 struct UiActions {
+    bool vegetationReset = false;
     bool regenerate = false, resetCamera = false;
     bool saveReview = false, loadReview = false;
     bool renderHeightChanged = false, reloadPalette = false;

@@ -1,0 +1,326 @@
+{
+  "camera": {
+    "chunk": {
+      "x": 0,
+      "z": 0
+    },
+    "curvature": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "local": [
+      32.0,
+      63.052859497070315,
+      32.0
+    ],
+    "pitch": -0.07999999821186066,
+    "renderFar": 64000.0,
+    "speed": 100.0,
+    "yaw": 0.0
+  },
+  "lod": {
+    "focalPixels": 0.0,
+    "initialized": false,
+    "observer": {
+      "chunk": {
+        "x": 0,
+        "z": 0
+      },
+      "curvature": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "local": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "pitch": 0.0,
+      "renderFar": 64000.0,
+      "speed": 100.0,
+      "yaw": 0.0
+    },
+    "patches": [],
+    "qualityScale": 1.0
+  },
+  "scene": {
+    "antialiasing": 3,
+    "atmosphere": {
+      "aerialPerspective": true,
+      "aerosolDensity": 1.0,
+      "atmosphereHeight": 100000.0,
+      "boundaryHaze": 0.0,
+      "datum": 0.0,
+      "diagnostic": 0,
+      "environmentMultiplier": 1.0,
+      "groundAlbedo": 0.10000000149011612,
+      "mieAbsorption": 4.439999941041606e-07,
+      "mieG": 0.800000011920929,
+      "mieHeight": 1200.0,
+      "mieScattering": 3.9960000322025735e-06,
+      "mode": 2,
+      "multipleScattering": true,
+      "ozone": [
+        6.500000040432496e-07,
+        1.8810000028679497e-06,
+        8.500000348021786e-08
+      ],
+      "ozoneCentre": 25000.0,
+      "ozoneWidth": 15000.0,
+      "planetRadius": 6360000.0,
+      "quality": 0,
+      "rayleigh": [
+        5.802000032417709e-06,
+        1.3558000318880659e-05,
+        3.310000101919286e-05
+      ],
+      "rayleighHeight": 8000.0,
+      "sunRadius": 0.004674999974668026
+    },
+    "background": [
+      0.017999999225139618,
+      0.027000000700354576,
+      0.04500000178813934
+    ],
+    "bloom": {
+      "intensity": 0.05000000074505806,
+      "knee": 0.5,
+      "radius": 1.0,
+      "threshold": 10000.0
+    },
+    "chunkBorders": false,
+    "clusterDiagnostic": 0,
+    "eroded": true,
+    "filteredNormals": true,
+    "freezeLod": false,
+    "frustumCulling": true,
+    "gtao": {
+      "diagnostic": 0,
+      "mode": 0,
+      "radius": 1.0
+    },
+    "lighting": {
+      "environmentEnabled": true,
+      "environmentNits": 3000.0,
+      "environmentRotation": 0.0,
+      "sunColour": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "sunDirection": [
+        -0.6000000238418579,
+        0.800000011920929,
+        0.3499999940395355
+      ],
+      "sunEnabled": true,
+      "sunLux": 100000.0
+    },
+    "localLights": 2,
+    "lod": true,
+    "lodColours": false,
+    "material": {
+      "ao": 1.0,
+      "baseColour": [
+        0.4000000059604645,
+        0.46000000834465027,
+        0.3799999952316284
+      ],
+      "emissive": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "metallic": 0.0,
+      "roughness": 0.800000011920929
+    },
+    "normalView": false,
+    "opaqueDepthPrepass": true,
+    "output": {
+      "compensation": 0.0,
+      "ev100": 14,
+      "toneMapper": 0
+    },
+    "shading": 0,
+    "shadows": {
+      "biasTexels": 0.75,
+      "diagnostic": 0,
+      "farDistance": 0.0,
+      "mode": 1,
+      "nearDistance": 1000.0,
+      "normalBiasTexels": 0.25
+    },
+    "taa": {
+      "historyWeight": 0.8999999761581421,
+      "thinGeometry": true
+    },
+    "terrainLodErrorView": false,
+    "terrainLodPixelError": 2.0,
+    "terrainLodQuality": true,
+    "terrainMaterial": {
+      "blendWidth": 0.25,
+      "cliffs": true,
+      "diagnostic": 0,
+      "enabled": true,
+      "filtering": 1,
+      "heightBlend": true,
+      "heightInfluence": 0.5,
+      "isolate": -1,
+      "macro": true,
+      "macroRepeatMetres": 90.0,
+      "macroStrength": 1.0,
+      "normalStrength": 1.0,
+      "repeatMetres": 4.0,
+      "roughness": 1.0,
+      "tint": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "twoAxis": false,
+      "weights": false
+    },
+    "terrainVisible": true,
+    "vegetation": {
+      "density": 1.0,
+      "depthPrepass": true,
+      "distance": 80.0,
+      "enabled": true,
+      "exclusion": {
+        "centre": {
+          "local": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "x": 0,
+          "z": 0
+        },
+        "radius": 0.0,
+        "revision": 1
+      },
+      "habitat": {
+        "maximumElevation": 10000.0,
+        "minimumElevation": -10000.0,
+        "minimumUp": 0.7071067690849304,
+        "mode": 1,
+        "revision": 1,
+        "weights": [
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      "interaction": {
+        "enabled": true,
+        "recoveryHalfLife": 1.5
+      },
+      "occlusion": false,
+      "proxy": {
+        "active": true,
+        "marker": true,
+        "position": {
+          "local": [
+            32,
+            0,
+            27
+          ],
+          "x": 0,
+          "z": 0
+        },
+        "radius": 0.6499999761581421,
+        "route": true,
+        "strength": 1.0
+      },
+      "time": 4.616682052612305,
+      "transmission": true,
+      "wind": 1.0,
+      "windDirection": [
+        1.0,
+        0.44999998807907104
+      ]
+    },
+    "viewRadius": 64,
+    "visibility": 1,
+    "wireframe": false
+  },
+  "startup": {
+    "atmosphereBudgetBytes": 67108864,
+    "bloomBudgetBytes": 134217728,
+    "curvedHorizon": true,
+    "forceDirectShadows": false,
+    "forceDirectVisibility": false,
+    "forceFixedIndirect": false,
+    "forceFixedMaterials": false,
+    "forceManualShadowFiltering": false,
+    "forceNoAtmosphere": false,
+    "forceNoBloom": false,
+    "forceNoGtao": false,
+    "forceNoHiZ": false,
+    "forceNoShadowDepth": false,
+    "forceNoTaa": false,
+    "forceRgbaMaterials": false,
+    "forceSingleIndirect": false,
+    "forceTrilinear": false,
+    "forceWideGtao": false,
+    "gtaoBudgetBytes": 536870912,
+    "height": 1080,
+    "lod": {
+      "enabled": true,
+      "firstRange": 64.0,
+      "patchCells": 32,
+      "triangleBudget": 2097152
+    },
+    "materialBudgetBytes": 335544320,
+    "materialDirectory": "cmake-build-release/assets/terrain/runtime",
+    "normalSubdivisions": 2,
+    "renderHeight": 0,
+    "shadowCapacity": {
+      "bytes": 134217728,
+      "casters": 65536,
+      "resolution": 2048
+    },
+    "spatialAaBudgetBytes": 268435456,
+    "streaming": {
+      "enabled": true,
+      "gpuBytes": 536870912,
+      "hierarchical": true,
+      "horizonBytes": 134217728,
+      "horizonMaximumDistance": 1048576.0,
+      "hostBytes": 268435456,
+      "maximumDistance": 16384.0,
+      "shadowCasterBytes": 67108864,
+      "transferBytesPerFrame": 8388608,
+      "unfilteredHeightReference": false
+    },
+    "taaBudgetBytes": 536870912,
+    "terrainCapacity": 256,
+    "terrainChunkCapacity": 1,
+    "terrainGrid": {
+      "cells": 256,
+      "spacing": 0.5
+    },
+    "visibilityCapacity": 65536,
+    "width": 1920
+  },
+  "terrain": {
+    "baseDetail": 0.6499999761581421,
+    "creaseRounding": 0.30000001192092896,
+    "erosionStrength": 0.2199999988079071,
+    "erosionWavelength": 1024.0,
+    "heightScale": 1200.0,
+    "regionWavelength": 16384.0,
+    "ridgeStrength": 0.5,
+    "seed": 173,
+    "wavelength": 2048.0
+  },
+  "terrainOrigin": {
+    "x": 0,
+    "z": 0
+  },
+  "version": 5
+}

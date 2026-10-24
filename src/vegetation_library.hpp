@@ -36,6 +36,7 @@ struct FoliageMaterial {
     bool masked = false;
 };
 enum class FoliageCategory : uint32_t { Grass, Plant, Shrub, Clutter };
+enum class FoliageSpecies : uint32_t { Grass, Fern, Shrub, Daisy, Heather, Clutter };
 struct FoliageAsset {
     FoliageCategory category = FoliageCategory::Plant;
     std::array<std::vector<FoliagePart>, 3> lods;
@@ -43,6 +44,10 @@ struct FoliageAsset {
     glm::vec4 ranges{20, 45, 70, 0}; // LOD1, LOD2, camera fade end, shadow fade end
     float stiffness = 1, displacement = .5f;
     GrassStability grass;
+    FoliageSpecies species = FoliageSpecies::Fern;
+    glm::vec4 habitat{1, .65f, .35f, 0};        // meadow, moor, understory, cluster amount
+    glm::vec4 placement{.25f, .02f, .8f, 1.2f}; // footprint, conformity tolerance, scale range
+    glm::vec4 interaction{0};                   // horizontal displacement, flattening, reserved
 };
 struct VegetationLibrary {
     uint32_t revision = 3;

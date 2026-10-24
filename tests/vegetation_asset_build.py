@@ -57,4 +57,26 @@ openworld_add_vegetation_assets(assets importer "${{CMAKE_CURRENT_SOURCE_DIR}}/r
     time.sleep(1.05);recipe['grass']['blades']=24;recipe_path.write_text(json.dumps(recipe));build_assets()
     time.sleep(1.05);(source/'leaf.png').write_bytes(b'broken');build_assets(False);assert not stamp.exists(),'failed build left stamp'
     png(source/'leaf.png');build_assets();assert stamp.exists(),'failed import not recoverable'
+    # Four deliberately different owned sources expose tile contamination.
+    recipe['version']=2
+    recipe['leaves']=[]
+    for index,green in enumerate([60,110,170,220]):
+        name=f'tile{index}.png';png(source/name,green)
+        recipe['leaves'].append({'colour':name,'normalDome':.12})
+    recipe_path.write_text(json.dumps(recipe));build_assets()
+    atlas=(output/'texture0_rgba.dds').read_bytes()
+    assert struct.unpack_from('<I',atlas,28)[0]==4,'atlas stops before BC tiles merge'
+    data=atlas[148:];offset=0
+    for n in [32,16,8,4]:
+        mip=data[offset:offset+n*n*16];offset+=len(mip)
+        for tile,green in enumerate([60,110,170,220]):
+            for y in range(n):
+                for x in range(n):
+                    at=((y+(tile//2)*n)*n*2+x+(tile%2)*n)*4
+                    assert abs(mip[at+1]-green)<=1,('atlas tile contamination',n,tile)
+    assert offset==len(data),'bounded atlas mip payload'
+    before=stamp.stat().st_mtime_ns
+    time.sleep(1.05);png(source/'tile3.png',230);build_assets()
+    assert stamp.stat().st_mtime_ns>before,'fourth source dependency'
+    if gpu:run([gpu,output])
 print('Vegetation asset build/import checks passed')

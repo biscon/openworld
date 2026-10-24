@@ -1,0 +1,15 @@
+Vulkan device: NVIDIA GeForce RTX 3060
+Validation: disabled
+Settling: 600 frames; vegetation ready/pending/missing 3600/5764/0; terrain 0 + detail 0
+V5 vegetation off: CPU median/p95 8.16889 / 8.82134 ms; GPU 7.01485 / 8.0649 ms; vegetation CPU 0.002555 / 0.00462 ms; update GPU p95/max 0 / 0 ms; 163.889 MiB; 0 visible entries; 0 updates, 0 generated, 0 pending; 0 render-thread C++ allocation calls
+  vegetation GPU medians: select 0, depth 0, colour 0, shadows 0, interaction 0 ms
+V5 interaction off: CPU median/p95 11.4141 / 13.476 ms; GPU 11.498 / 13.4726 ms; vegetation CPU 0.389096 / 0.464356 ms; update GPU p95/max 0 / 0 ms; 163.889 MiB; 63884 visible entries; 0 updates, 0 generated, 0 pending; 0 render-thread C++ allocation calls
+  vegetation GPU medians: select 2.60045, depth 0.883712, colour 2.2528, shadows 0.001024, interaction 0.002048 ms
+Captured "/tmp/ow-v5-200/v5-undisturbed.ppm"
+V5 interaction on: CPU median/p95 11.2759 / 12.7885 ms; GPU 11.3915 / 12.8506 ms; vegetation CPU 0.41136 / 0.520503 ms; update GPU p95/max 0 / 0 ms; 163.889 MiB; 63884 visible entries; 0 updates, 0 generated, 0 pending; 0 render-thread C++ allocation calls
+  vegetation GPU medians: select 2.55078, depth 0.884736, colour 2.19853, shadows 0.001024, interaction 0.003072 ms
+Captured "/tmp/ow-v5-200/v5-bent.ppm"
+Captured "/tmp/ow-v5-200/v5-recovered.ppm"
+Captured "/tmp/ow-v5-200/v5-habitat-0.ppm"
+Captured "/tmp/ow-v5-200/v5-habitat-1.ppm"
+Captured "/tmp/ow-v5-200/v5-habitat-2.ppm"

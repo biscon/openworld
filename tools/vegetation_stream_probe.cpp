@@ -1,6 +1,7 @@
 #include "mesh_primitives.hpp"
 #include "renderer.hpp"
 #include "review_view.hpp"
+#include "vegetation_demo.hpp"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -50,7 +51,7 @@ double percentile(std::vector<double> v, double q) {
     return v.empty() ? 0 : v[size_t(q * (v.size() - 1))];
 }
 struct Samples {
-    std::vector<double> cpu, gpu, prepare, update, selection, depth, colour, shadows;
+    std::vector<double> cpu, gpu, prepare, update, selection, depth, colour, shadows, interaction;
     uint64_t bytes = 0, allocations = 0;
     uint32_t visible = 0, pending = 0, updates = 0, generated = 0;
     Samples() {
@@ -74,6 +75,7 @@ struct Samples {
         depth.push_back(v.depthMilliseconds);
         colour.push_back(v.colourMilliseconds);
         shadows.push_back(v.shadowMilliseconds);
+        interaction.push_back(v.interactionMilliseconds);
         bytes = v.allocatedBytes;
         visible = v.visible;
         pending = v.pendingCells;
@@ -92,7 +94,7 @@ struct Samples {
                   << allocations << " render-thread C++ allocation calls\n";
         std::cout << "  vegetation GPU medians: select " << percentile(selection, .5) << ", depth "
                   << percentile(depth, .5) << ", colour " << percentile(colour, .5) << ", shadows "
-                  << percentile(shadows, .5) << " ms\n";
+                  << percentile(shadows, .5) << ", interaction " << percentile(interaction, .5) << " ms\n";
     }
 };
 } // namespace
@@ -103,11 +105,17 @@ int main(int argc, char **argv) {
                                         "[--engine-scene] [--distance 20..200] [--occlusion-check] "
                                         "[--route-check] [--taa-check] [--aa-check] [--grass-check]");
         bool cpuOnly = false, routeOnly = false, engineScene = false, occlusionCheck = false,
-             taaCheck = false, aaCheck = false, grassCheck = false;
+             taaCheck = false, aaCheck = false, grassCheck = false, v5Check = false;
         float distance = 70;
+        uint32_t outputWidth = 1920, outputHeight = 1080;
         for (int i = 2; i < argc; ++i) {
             const std::string arg = argv[i];
-            if (arg == "--cpu-check")
+            if (arg == "--v5-check")
+                v5Check = true;
+            else if (arg == "--size" && i + 2 < argc) {
+                outputWidth = uint32_t(std::stoul(argv[++i]));
+                outputHeight = uint32_t(std::stoul(argv[++i]));
+            } else if (arg == "--cpu-check")
                 cpuOnly = true;
             else if (arg == "--grass-check")
                 grassCheck = true;
@@ -134,8 +142,8 @@ int main(int argc, char **argv) {
         RendererOptions o;
         o.ui = false;
         o.validation = false;
-        o.width = 1920;
-        o.height = 1080;
+        o.width = outputWidth;
+        o.height = outputHeight;
         o.shaderDirectory = OPENWORLD_SHADER_DIR;
         o.terrainGrid = {256, .5f};
         o.terrainCapacity = 256;
@@ -174,6 +182,8 @@ int main(int argc, char **argv) {
         SceneSettings scene;
         scene.viewRadius = engineScene ? 64 : 3;
         scene.vegetation.distance = distance;
+        if (v5Check)
+            scene.vegetation.habitat.mode = VegetationHabitatMode::Blended;
         if (engineScene) {
             scene.atmosphere.mode = AtmosphereMode::Physical;
             scene.bloom.intensity = .05f;
@@ -233,6 +243,74 @@ int main(int argc, char **argv) {
         bookmark.scene = scene;
         bookmark.startup = o;
         saveReviewView(output / "close-view.json", bookmark);
+        if (v5Check) {
+            auto anchor = translated(worldPosition(camera, o.terrainGrid), {0, 0, -3});
+            scene.vegetation.proxy.position = anchor;
+            scene.vegetation.proxy.active = true;
+            scene.vegetation.proxy.marker = false;
+            scene.vegetation.proxy.route = true;
+            VegetationDemo proxy;
+            for (int phase = 0; phase < 3; ++phase) {
+                scene.vegetation.enabled = phase != 0;
+                scene.vegetation.interaction.enabled = phase == 2;
+                scene.vegetation.time = 0;
+                scene.vegetation.proxy.position = anchor;
+                proxy.reset();
+                uint32_t ready = 0;
+                for (int i = 0; i < 4000; ++i) {
+                    proxy.update(scene.vegetation, {}, 1.f / 120, false);
+                    frame();
+                    proxy.submitted(scene.vegetation);
+                    const auto &v = r.vegetationStats();
+                    ready = v.pendingCells == 0 && v.updatedCells == 0 ? ready + 1 : 0;
+                    if (ready >= 8)
+                        break;
+                }
+                if (ready < 8)
+                    throw std::runtime_error("V5 paired population did not settle");
+                scene.vegetation.time = 0;
+                scene.vegetation.proxy.position = anchor;
+                proxy.reset();
+                Samples samples;
+                for (int i = 0; i < 480; ++i) {
+                    proxy.update(scene.vegetation, {}, 1.f / 120, false);
+                    auto ms = frame();
+                    proxy.submitted(scene.vegetation);
+                    if (i >= 240)
+                        samples.add(r, ms, frameAllocations);
+                }
+                samples.print(phase == 0   ? "V5 vegetation off"
+                              : phase == 1 ? "V5 interaction off"
+                                           : "V5 interaction on");
+                if (phase > 0)
+                    r.capture(output / (phase == 1 ? "v5-undisturbed.ppm" : "v5-bent.ppm"));
+            }
+            scene.vegetation.proxy.route = false;
+            scene.vegetation.proxy.active = false;
+            for (int i = 0; i < 720; ++i) {
+                proxy.update(scene.vegetation, {}, 1.f / 120, false);
+                frame();
+                proxy.submitted(scene.vegetation);
+            }
+            r.capture(output / "v5-recovered.ppm");
+            for (uint32_t preset = 0; preset < 3; ++preset) {
+                scene.vegetation.habitat = vegetationHabitat(VegetationHabitat(preset));
+                uint32_t settled = 0;
+                for (int i = 0; i < 4000; ++i) {
+                    frame();
+                    const auto &v = r.vegetationStats();
+                    settled = v.pendingCells == 0 && v.updatedCells == 0 ? settled + 1 : 0;
+                    if (settled >= 8)
+                        break;
+                }
+                if (settled < 8)
+                    throw std::runtime_error("Habitat review failed to settle");
+                r.capture(output / ("v5-habitat-" + std::to_string(preset) + ".ppm"));
+                bookmark.scene = scene;
+                saveReviewView(output / ("v5-habitat-" + std::to_string(preset) + ".json"), bookmark);
+            }
+            return 0;
+        }
         if (grassCheck) {
             const Camera origin = camera;
             scene.antialiasing = AntialiasingMode::Smaa1x;

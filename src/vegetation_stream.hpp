@@ -10,9 +10,11 @@ struct VegetationCellKey {
 struct VegetationCellHandle {
     uint32_t index = ~0u, generation = 0;
 };
+enum class VegetationHabitatMode : uint32_t { Uniform, Blended };
 enum class VegetationHabitat : uint32_t { Meadow, Moor, Understory };
 struct VegetationHabitatInput {
     uint32_t revision = 1;
+    VegetationHabitatMode mode = VegetationHabitatMode::Uniform;
     glm::vec3 weights{1, 0, 0};
     float minimumElevation = -10000, maximumElevation = 10000;
     float minimumUp = .70710678f;

@@ -129,7 +129,8 @@ int main() {
         auto library = std::make_shared<VegetationLibrary>(buildVegetationLibrary());
         for (bool fixed : {true, false}) {
             auto population = std::make_shared<VegetationPopulation>(makeVegetationPopulation(8, true));
-            population->instances[0].rootScale = {0, 0, 7, 1};
+            // Outside the camera even with the larger combined wind/contact envelope.
+            population->instances[0].rootScale = {-3, 0, 7, 1};
             // Irregular cell ranges and IDs above float's exact integer range.
             population->instances.erase(population->instances.begin() + 127);
             --population->cells[0].count;

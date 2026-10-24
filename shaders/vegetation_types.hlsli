@@ -14,13 +14,30 @@ struct VegetationUniform {
     float4 curvature,detail;
     column_major float4x4 raster;
     uint4 pyramidSize;
-    float4 grassBands[8],grassShading[8];
+    float4 grassBands[8],grassShading[8],interactionResponse[8];
+    float4 interaction,previousInteraction;
 };
 [[vk::binding(0,0)]] StructuredBuffer<Plant> plants;
 [[vk::binding(1,0)]] ConstantBuffer<VegetationUniform> vegetation;
 struct Cell {float4 lo,hi,origin,previousOrigin,phase,casterLo,casterHi;};
 [[vk::binding(4,0)]] StructuredBuffer<Cell> cells;
 [[vk::binding(7,0)]] StructuredBuffer<float4> attachments;
+[[vk::binding(11,0)]] StructuredBuffer<float2> interactionField;
+[[vk::binding(12,0)]] StructuredBuffer<float2> previousInteractionField;
+float2 interactionTexel(int2 p,bool previous) {
+    if(any(p<0)||any(p>=128))return 0;
+    return previous?previousInteractionField[p.y*128+p.x]:interactionField[p.y*128+p.x];
+}
+float2 interactionBend(float2 root,bool previous=false) {
+    float4 map=previous?vegetation.previousInteraction:vegetation.interaction;
+    if(map.z==0)return 0;
+    float2 local=root-map.xy;if(any(local<0)||any(local>=32))return 0;
+    float2 uv=local*4-.5;int2 p=int2(floor(uv));float2 f=frac(uv);
+    float2 v=lerp(lerp(interactionTexel(p,previous),interactionTexel(p+int2(1,0),previous),f.x),
+                  lerp(interactionTexel(p+int2(0,1),previous),interactionTexel(p+1,previous),f.x),f.y);
+    float edge=min(min(local.x,local.y),min(32-local.x,32-local.y));
+    return v*smoothstep(0,2,edge);
+}
 static float2 plantSlope=0;
 Plant loadPlant(uint index) {
     Plant p=plants[index];
@@ -103,6 +120,10 @@ float3 plantPosition(Plant p,Cell cell,float3 vertex,float4 weights,float time,f
     }
     float3 pos=rotatePlant(vertex,p.yaw);
     pos.xz+=direction*windBend(p,cell,weights,time,strength,lod,previous);
+    float2 contact=interactionBend(p.rootScale.xz+(previous?cell.previousOrigin.xz:cell.origin.xz),previous);
+    float4 response=vegetation.interactionResponse[asset];
+    pos.xz+=contact*response.x*weights.y;
+    pos.y-=length(contact)*response.y*weights.y;
     pos.y+=dot(plantSlope,pos.xz);
     return pos*p.rootScale.w+p.rootScale.xyz+(previous?cell.previousOrigin.xyz:cell.origin.xyz);
 }

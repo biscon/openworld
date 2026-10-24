@@ -185,7 +185,7 @@ and terrain attachment](rendering_vegetation_streaming.md) adds bounded GPU plac
 terrain reader retention, stitched-triangle attachment, and opt-in main-demo controls.
 [V4 engine integration](rendering_vegetation_visibility.md) enables vegetation in the
 ordinary engine with a dedicated settings window, live 20–200 m distance, bounded
-visibility and shared depth/coverage. [V4 native verification and full-scene measurements](measurements/vegetation_5j_v4/README.md) record completed integration and remaining moving CPU/art tuning gates. V5 interaction/habitat variety and V6 final tuning remain proposed. The [short native report](measurements/vegetation_5j_v3/README.md)
+visibility and shared depth/coverage. [V4 native verification and full-scene measurements](measurements/vegetation_5j_v4/README.md) record completed integration and remaining moving CPU/art tuning gates. [V5 interaction/habitat variety](rendering_vegetation_interaction.md) is implemented and natively verified; [V5 measurements](measurements/vegetation_5j_v5/README.md) retain unmet performance/visual gates for V6 final tuning. The [short native report](measurements/vegetation_5j_v3/README.md)
 distinguishes measured V3 costs from remaining full-scene acceptance.
 
 ### Scope

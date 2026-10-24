@@ -8,6 +8,7 @@ struct MaterialUniform {
     MaterialGeography geography; float4 controls,tint; uint4 options;
     MaterialCoordinates coordinates; float4 blend; uint4 features;
     float4 habitat,clearing;
+    uint4 habitatKey;float4 habitatLocal;uint4 habitatMode;float4 proxy;
 };
 struct MaterialRecord {uint4 maps;uint4 macro;float4 base,emission,factors;uint4 meshMaps;float4 alpha;uint4 temporalFlags;};
 [[vk::binding(0,2)]] ConstantBuffer<MaterialUniform> materialInfo;
@@ -41,7 +42,9 @@ float4 terrainWeights(float2 relative){
     float gravel=smoothstep(.2,.7,slope)*(.2+.4*(1-patch));
     float4 w=float4((1-soil)*(1-gravel),soil*(1-gravel),0,gravel)*(1-rock);w.z=rock;
     if(materialInfo.habitat.w!=0) {
-        float cover=vegetationProbability(materialInfo.habitat.xyz,0);
+        float2 habitatLocal=relative+materialInfo.habitatLocal.xy;
+        float3 weights=vegetationHabitatWeights(materialInfo.habitatKey,habitatLocal,materialInfo.habitat.xyz,materialInfo.habitatMode.x!=0,materialInfo.habitatMode.y);
+        float cover=vegetationProbability(weights,0)*vegetationClearing(materialInfo.habitatKey,habitatLocal,materialInfo.habitatMode.x!=0,materialInfo.habitatMode.y);
         if(vegetationExcluded(relative,materialInfo.clearing.xyz))cover=0;
         // Rebalance existing grass/soil coverage, keeping rock and gravel intact.
         // This is expected habitat coverage, never the currently visible population.
@@ -60,7 +63,12 @@ float3 displayMappedMaterial(MaterialEvaluation e,float3 relative,float visibili
     if(materialInfo.features.w==2)return e.projections;
     if(materialInfo.features.w==3)return e.surface.normal*.5+.5;
     if(materialInfo.features.w==4)return float3(e.reads/24.0,1-e.reads/24.0,0);
-    return shadeSurface(e.surface,relative,visibility,renderedPosition);
+    float3 colour=shadeSurface(e.surface,relative,visibility,renderedPosition);
+    if(materialInfo.proxy.w!=0) {
+        float ring=abs(distance(relative.xz,materialInfo.proxy.xy)-materialInfo.proxy.z);
+        colour=lerp(colour,float3(.1,.8,1)*max(.1,max(colour.r,max(colour.g,colour.b))),1-smoothstep(.025,.055,ring));
+    }
+    return colour;
 }
 float3 displayMappedMaterial(MaterialEvaluation e,float3 relative,float visibility){
     return displayMappedMaterial(e,relative,visibility,curvePosition(relative,temporal.curvature));

@@ -14,22 +14,29 @@ VulkanVegetationStream::VulkanVegetationStream(VkPhysicalDevice physical, VkDevi
                                                uint64_t populationBytes, VegetationStreamConfig config,
                                                const VegetationLibrary &library, uint64_t budget)
     : physical_(physical), device_(device), residency_(config), config_(config), budget_(budget) {
+    libraryRevision_ = library.revision;
     for (uint32_t i = 0; i < library.assets.size(); ++i) {
         const auto &asset = library.assets[i];
+        affinities_[i] = asset.habitat;
+        placement_[i] = asset.placement;
+        if (asset.species == FoliageSpecies::Daisy)
+            extraAssets_.x = i;
+        if (asset.species == FoliageSpecies::Heather)
+            extraAssets_.y = i;
         shadowDistance_ = std::max(shadowDistance_, asset.ranges.w);
-        if (asset.category == FoliageCategory::Grass) {
+        if (asset.species == FoliageSpecies::Grass) {
             if (assets_.x == ~0u)
                 assets_.x = i;
             else if (assets_.y == ~0u)
                 assets_.y = i;
         }
-        if (asset.category == FoliageCategory::Plant && assets_.z == ~0u)
+        if (asset.species == FoliageSpecies::Fern && assets_.z == ~0u)
             assets_.z = i;
-        if (asset.category == FoliageCategory::Shrub && assets_.w == ~0u)
+        if (asset.species == FoliageSpecies::Shrub && assets_.w == ~0u)
             assets_.w = i;
         envelope_ =
             std::max(envelope_, 2 * (glm::length(glm::max(glm::abs(asset.minimum), glm::abs(asset.maximum))) +
-                                     asset.displacement));
+                                     asset.displacement + asset.interaction.x + asset.interaction.y));
     }
     if (assets_.x == ~0u)
         throw std::invalid_argument("Streamed vegetation needs a grass asset");
@@ -133,6 +140,7 @@ void VulkanVegetationStream::prepare(uint32_t frame, WorldPosition camera, World
     completed_ = std::max(completed_, f.serial);
     updateCount_ = 0;
     uint64_t revision = terrain ? terrain->vegetationRevision() : 0;
+    revision = revision * 1099511628211ull ^ 5u; // population algorithm revision, not candidate hash salt
     revision = revision * 1099511628211ull ^ settings.habitat.revision;
     revision = revision * 1099511628211ull ^ settings.exclusion.revision;
     // Include values as well as caller revisions, so interactive edits cannot
@@ -142,6 +150,8 @@ void VulkanVegetationStream::prepare(uint32_t frame, WorldPosition camera, World
         for (size_t i = 0; i < size; ++i)
             revision = (revision ^ p[i]) * 1099511628211ull;
     };
+    mix(&libraryRevision_, 4);
+    mix(&settings.habitat.mode, 4);
     mix(&settings.habitat.weights, sizeof(settings.habitat.weights));
     mix(&settings.habitat.minimumElevation, 3 * sizeof(float));
     mix(&settings.exclusion.centre.x, 8);
@@ -216,6 +226,10 @@ void VulkanVegetationStream::prepare(uint32_t frame, WorldPosition camera, World
                     relativePosition(settings.exclusion.centre, vegetationCellOrigin(slot.key));
                 job.clearing = {float(clearing.x), float(clearing.z), settings.exclusion.radius, 0};
                 job.assets = assets_;
+                job.extraAssets = extraAssets_;
+                job.habitatMode = {float(uint32_t(settings.habitat.mode)), 0, 0, 0};
+                job.affinities = affinities_;
+                job.placement = placement_;
                 job.patches = surface.patches;
                 job.geography = terrain->vegetationGeography(slot.key);
                 if (!slot.generated) {

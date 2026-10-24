@@ -13,7 +13,9 @@ struct Patch {float4 rectangle;uint4 geometry,heights,topology;};
 struct Job {
     uint4 key,config,canonical; // config: slot,seed,generate,patch count
     float4 canonicalGrid,habitat,elevation,clearing;
-    uint4 assets;
+    uint4 assets,extraAssets;
+    float4 habitatMode;
+    float4 affinities[8],placement[8];
     Patch patches[16];
     MaterialGeography geography;
 };
@@ -80,14 +82,26 @@ void main(uint3 group:SV_GroupID,uint lane:SV_GroupIndex) {
     Plant p;
     if(job.config.z!=0) {
         uint species=lane<126?0:lane-125,candidate=lane<126?lane:0;
+        if(species!=0) {
+            // Fixed family slots; rank species independently of density and visibility.
+            float3 w=vegetationHabitatWeights(job.key,2.0.xx,job.habitat.xyz,job.habitatMode.x!=0,job.config.y);
+            uint first=species==1?job.assets.z:job.assets.w,second=species==1?job.extraAssets.x:job.extraAssets.y;
+            float a=first==0xffffffff?0:dot(w,job.affinities[min(first,7u)].xyz)*vegetationCluster(job.key,2.0.xx,species,job.config.y,job.affinities[min(first,7u)].w);
+            float b=second==0xffffffff?0:dot(w,job.affinities[min(second,7u)].xyz)*vegetationCluster(job.key,2.0.xx,species+2,job.config.y,job.affinities[min(second,7u)].w);
+            uint rank=hash(job.key.x^hash(job.key.y)^hash(job.key.z)^job.key.w^job.config.y^(species*751));
+            if(b>0&&random(rank)<b/max(a+b,1e-6))species+=2;
+        }
         uint h=hash(job.config.y^0x56330001u);
         h=hash(h^job.key.x);h=hash(h^job.key.y);h=hash(h^job.key.z);h=hash(h^job.key.w);
         h=hash(h^species);h=hash(h^candidate);
         p.identity=h;p.rootScale=float4(4*random(h+1),0,4*random(h+2),species==0?.8+.4*random(h+3):1);
         p.yaw=random(h+4)*6.2831853;p.variation=random(h+5);
-        uint asset=species==0?(random(h+6)<.5?job.assets.x:job.assets.y):species==1?job.assets.z:job.assets.w;
+        uint asset=species==0?(random(h+6)<.5?job.assets.x:job.assets.y):species==1?job.assets.z:species==2?job.assets.w:species==3?job.extraAssets.x:job.extraAssets.y;
         p.assetCell=job.config.x*8+(asset&7);
-        float probability=vegetationProbability(job.habitat.xyz,species);
+        float3 weights=vegetationHabitatWeights(job.key,p.rootScale.xz,job.habitat.xyz,job.habitatMode.x!=0,job.config.y);
+        float probability=asset==0xffffffff?0:dot(weights,job.affinities[min(asset,7u)].xyz)*vegetationCluster(job.key,p.rootScale.xz,species,job.config.y,job.affinities[min(asset,7u)].w);
+        probability*=vegetationClearing(job.key,p.rootScale.xz,job.habitatMode.x!=0,job.config.y);
+        if(asset!=0xffffffff)p.rootScale.w=lerp(job.placement[min(asset,7u)].z,job.placement[min(asset,7u)].w,random(h+3));
         if(species==0) {
             plantGeography=job.geography;
             float rock=terrainRockWeight(length(evaluateBaseTerrain(p.rootScale.xz,true).gradient));
@@ -103,9 +117,8 @@ void main(uint3 group:SV_GroupID,uint lane:SV_GroupIndex) {
     bool valid=p.rootScale.w>0&&surface(job,p.rootScale.xz,height,slope);
     valid=valid&&rsqrt(1+dot(slope,slope))>=job.habitat.w;
     if(valid) {
-        uint species=lane<126?0:lane-125;
-        float footprint=(species==0?.25:species==1?.45:.6)*p.rootScale.w;
-        float tolerance=species==2?.05:.02;
+        float footprint=job.placement[p.assetCell&7].x*p.rootScale.w;
+        float tolerance=job.placement[p.assetCell&7].y;
         for(uint i=0;i<4;++i) {
             float2 delta=(i==0?float2(1,0):i==1?float2(-1,0):i==2?float2(0,1):float2(0,-1))*footprint;
             float testHeight;float2 unused;

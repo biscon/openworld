@@ -98,11 +98,14 @@ void from_json(const json &j, TaaSettings &v) {
 }
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(BloomSettings, intensity, threshold, knee, radius)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WorldPosition, x, z, local)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(VegetationHabitatInput, revision, weights, minimumElevation,
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(VegetationHabitatInput, revision, mode, weights, minimumElevation,
                                    maximumElevation, minimumUp)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(VegetationExclusionInput, revision, centre, radius)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(VegetationSettings, enabled, habitat, exclusion, density, time, wind,
-                                   windDirection, distance, transmission, depthPrepass, occlusion)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(VegetationInteractionSettings, enabled, recoveryHalfLife)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(VegetationProxy, position, active, route, marker, radius, strength)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(VegetationSettings, enabled, habitat, exclusion, interaction, proxy,
+                                   density, time, wind, windDirection, distance, transmission, depthPrepass,
+                                   occlusion)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SceneSettings, shading, atmosphere, antialiasing, taa, bloom, gtao,
                                    shadows, terrainVisible, localLights, clusterDiagnostic, material,
                                    terrainMaterial, lighting, output, viewRadius, lod, lodColours, freezeLod,
@@ -143,7 +146,7 @@ void cameraValid(const Camera &c) {
 }
 } // namespace
 void validateReviewView(const ReviewView &v) {
-    check(v.version == 1 || v.version == 2 || v.version == 3 || v.version == 4,
+    check(v.version == 1 || v.version == 2 || v.version == 3 || v.version == 4 || v.version == 5,
           "Unsupported review view version");
     finite(json(v));
     cameraValid(v.camera);
@@ -227,6 +230,12 @@ ReviewView loadReviewView(const std::filesystem::path &path) {
             j.at("scene").at("taa").value("enabled", false) ? AntialiasingMode::Taa : AntialiasingMode::Off;
         j["startup"]["spatialAaBudgetBytes"] = RendererOptions{}.spatialAaBudgetBytes;
     }
+    if (j.value("version", 0) < 5) {
+        auto &vegetation = j["scene"]["vegetation"];
+        vegetation["habitat"]["mode"] = VegetationHabitatMode::Uniform;
+        vegetation["interaction"] = VegetationInteractionSettings{};
+        vegetation["proxy"] = VegetationProxy{};
+    }
     auto v = j.get<ReviewView>();
     validateReviewView(v);
     return v;
@@ -241,7 +250,7 @@ void saveReviewView(const std::filesystem::path &path, const ReviewView &v) {
         std::ofstream f(temp, std::ios::trunc);
         f.exceptions(std::ios::failbit | std::ios::badbit);
         auto document = json(v);
-        document["version"] = 4; // Loading v1–v3 remains supported; every new save
+        document["version"] = 5; // Loading v1–v4 remains supported; every new save
                                  // uses the current format.
         const auto bytes = document.dump(2);
         check(bytes.size() + 1 <= 1024 * 1024, "Review file exceeds 1 MiB");

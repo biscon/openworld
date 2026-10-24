@@ -34,11 +34,13 @@ class VulkanVegetationStream {
     struct Job {
         glm::uvec4 key{}, config{}, canonical{};
         glm::vec4 canonicalGrid{}, habitat{}, elevation{}, clearing{};
-        glm::uvec4 assets{};
+        glm::uvec4 assets{}, extraAssets{};
+        glm::vec4 habitatMode{};
+        std::array<glm::vec4, 8> affinities{}, placement{};
         std::array<VegetationTerrainPatch, 16> patches{};
         TerrainParameters geography{};
     };
-    static_assert(sizeof(Job) == 1648);
+    static_assert(sizeof(Job) == 1936);
     struct Frame {
         render_detail::Buffer attachments, jobs;
         VkDescriptorSet set{};
@@ -70,7 +72,9 @@ class VulkanVegetationStream {
     std::vector<VegetationTerrainCell> diagnosticSurfaces_;
     std::vector<uint8_t> diagnosticHistory_;
     uint32_t frame_ = 0, updateCount_ = 0, seed_ = 0;
-    glm::uvec4 assets_{~0u};
+    glm::uvec4 assets_{~0u}, extraAssets_{~0u};
+    std::array<glm::vec4, 8> affinities_{}, placement_{};
+    uint32_t libraryRevision_ = 0;
     float envelope_ = 3, shadowDistance_ = 0;
     double cellCost_ = .5 / 4;
     std::vector<uint64_t> previousSignatures_, currentSignatures_;

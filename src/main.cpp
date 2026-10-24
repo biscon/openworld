@@ -2,6 +2,7 @@
 #include "lighting_demo.hpp"
 #include "renderer.hpp"
 #include "review_view.hpp"
+#include "vegetation_demo.hpp"
 #include "volumetric_demo.hpp"
 #include <optional>
 
@@ -109,6 +110,7 @@ int main(int argc, char **argv) {
         ow::SceneSettings scene;
         scene.vegetation.enabled = true;
         scene.vegetation.distance = 80;
+        scene.vegetation.habitat.mode = ow::VegetationHabitatMode::Blended;
         std::optional<bool> vegetationEnabled;
         std::optional<float> vegetationDistance;
         scene.antialiasing = ow::AntialiasingMode::Taa;
@@ -463,6 +465,7 @@ int main(int argc, char **argv) {
         };
         if (fogPreset)
             applyFogPreset(fogPreset);
+        ow::VegetationDemo vegetationDemo;
         ow::LightingDemo lightingDemo(renderer);
         bool demoDirty = demoControls.enabled;
         ow::WorldPosition demoAnchor;
@@ -553,6 +556,8 @@ int main(int argc, char **argv) {
                 ow::UiContext uiContext{renderer,     options,      scene,        terrain,        camera,
                                         demoControls, terrainError, reviewStatus, reviewPathLabel};
                 const auto actions = ui.draw(uiContext);
+                if (actions.vegetationReset)
+                    vegetationDemo.reset();
                 if (actions.renderHeightChanged)
                     renderer.setRenderHeight(options.renderHeight);
                 if (actions.reloadPalette)
@@ -595,6 +600,7 @@ int main(int argc, char **argv) {
                         camera = saved.camera;
                         terrain = {saved.terrainOrigin, saved.terrain};
                         scene = saved.scene;
+                        vegetationDemo.reset();
                         fitSingleChunkCamera = false;
                         renderer.setTerrainLodReviewState(saved.lod);
                         options.renderHeight = saved.startup.renderHeight;
@@ -626,8 +632,18 @@ int main(int argc, char **argv) {
                 demoSeconds += dt;
                 lightingDemo.animate(demoSeconds);
             }
+            glm::vec2 proxyMovement{};
+            bool proxyBoost = false;
+            if (platform.window && !ImGui::GetIO().WantCaptureKeyboard) {
+                const bool *keys = SDL_GetKeyboardState(nullptr);
+                proxyMovement = {float(keys[SDL_SCANCODE_RIGHT]) - float(keys[SDL_SCANCODE_LEFT]),
+                                 float(keys[SDL_SCANCODE_DOWN]) - float(keys[SDL_SCANCODE_UP])};
+                proxyBoost = keys[SDL_SCANCODE_LSHIFT] || keys[SDL_SCANCODE_RSHIFT];
+            }
+            vegetationDemo.update(scene.vegetation, proxyMovement, dt, proxyBoost);
             scene.vegetation.time += dt;
             if (renderer.render(camera, scene)) {
+                vegetationDemo.submitted(scene.vegetation);
                 ++frames;
                 if (fitSingleChunkCamera && scene.terrainVisible) {
                     // Startup/explicit reset only, never ordinary navigation:

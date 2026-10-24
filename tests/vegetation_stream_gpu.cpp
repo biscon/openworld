@@ -104,7 +104,10 @@ void checkGround(Renderer &r, const VegetationSnapshot &snapshot) {
         for (uint32_t i = 0; i < 128; ++i) {
             const auto &p = cell.population[i];
             const auto &attachment = cell.attachment[i];
-            require(p.identity == vegetationCandidateHash(cell.key, cell.surface.seed, i < 126 ? 0 : i - 125,
+            require(p.identity == vegetationCandidateHash(cell.key, cell.surface.seed,
+                                                          (cell.population[i].assetCell & 7) < 2
+                                                              ? 0
+                                                              : (cell.population[i].assetCell & 7) - 1,
                                                           i < 126 ? i : 0),
                     "CPU/GPU integer identity agreement");
             if (attachment.w == 0)
@@ -170,7 +173,12 @@ void rockExclusion() {
     o.streaming.shadowCasterBytes = 0;
     o.streaming.gpuBytes = 40 * terrainMiB;
     o.streaming.hostBytes = 64 * terrainMiB;
-    o.vegetation.library = std::make_shared<VegetationLibrary>(buildVegetationLibrary());
+    // Fixed historical population isolates rock suitability from V5 species mixing.
+    auto rockLibrary = std::make_shared<VegetationLibrary>(buildVegetationLibrary());
+    rockLibrary->assets.resize(4);
+    rockLibrary->assets[2].habitat = {.15f, .25f, 1, 0};
+    rockLibrary->assets[3].habitat = {.15f, .75f, .4f, 0};
+    o.vegetation.library = rockLibrary;
     o.vegetation.streaming.enabled = o.vegetation.streaming.diagnostics = true;
     o.vegetation.streaming.cellCapacity = 64;
     o.vegetation.streaming.demandRadius = 8;
@@ -226,8 +234,7 @@ void rockExclusion() {
         }
     std::cout << "Rock fixture: " << bare << " bare, " << mixed << " mixed, " << ordinary << " non-rock, "
               << kept << " grass retained\n";
-    require(bare > 64 && mixed > 64 && kept > 64,
-            "mountain fixture exercises bare rock and mixed edges");
+    require(bare > 64 && mixed > 64 && kept > 64, "mountain fixture exercises bare rock and mixed edges");
     --c.chunk.x;
     c.local.x += 16;
     samePopulation(snapshot, settle(r, c, s));
@@ -241,10 +248,79 @@ void rockExclusion() {
         }
     require(!r.validationErrors(), "rock exclusion Vulkan validation");
 }
+void habitatBoundaries() {
+    const auto path =
+        std::filesystem::temp_directory_path() /
+        ("ow-habitats-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    struct Cleanup {
+        std::filesystem::path path;
+        ~Cleanup() {
+            std::error_code error;
+            std::filesystem::remove_all(path, error);
+        }
+    } cleanup{path};
+    std::filesystem::create_directories(path);
+    for (const auto &entry : std::filesystem::directory_iterator(OPENWORLD_SHADER_DIR)) {
+        if (entry.path().extension() != ".spv")
+            continue;
+        auto source = entry.path();
+        if (source.filename() == "vegetation_populate.comp.spv")
+            source = source.parent_path() / "vegetation_habitat_fixture.comp.spv";
+        std::filesystem::create_symlink(std::filesystem::absolute(source), path / entry.path().filename());
+    }
+    RendererOptions o;
+    o.ui = false;
+    o.requireValidation = true;
+    o.width = 128;
+    o.height = 96;
+    o.shaderDirectory = path;
+    o.terrainGrid = {32, .5f};
+    o.terrainCapacity = 32;
+    o.lod = {true, 8, 64};
+    o.streaming.enabled = o.streaming.hierarchical = true;
+    o.streaming.diskCache = false;
+    o.streaming.maximumDistance = 64;
+    o.streaming.shadowCasterBytes = 0;
+    o.streaming.gpuBytes = 40 * terrainMiB;
+    o.streaming.hostBytes = 64 * terrainMiB;
+    o.vegetation.library = std::make_shared<VegetationLibrary>(buildVegetationLibrary());
+    o.vegetation.streaming.enabled = o.vegetation.streaming.diagnostics = true;
+    o.vegetation.streaming.cellCapacity = 64;
+    o.vegetation.streaming.demandRadius = 8;
+    o.vegetation.streaming.retentionRadius = 12;
+    Renderer r(o);
+    TerrainRequest terrain;
+    terrain.settings.heightScale = 0;
+    r.requestTerrain(terrain);
+    SceneSettings s;
+    s.viewRadius = 1;
+    s.shadows.mode = ShadowMode::Off;
+    s.vegetation.habitat.mode = VegetationHabitatMode::Blended;
+    Camera c;
+    c.pitch = -.8f;
+    c.local = {1, 7, 10};
+    for (int64_t x : {0ll, -1ll, 1000000ll, -1000000ll}) {
+        c.chunk = {x, -x};
+        auto snapshot = settle(r, c, s);
+        uint32_t checked = 0;
+        for (const auto &cell : snapshot.cells)
+            for (auto value : cell.attachment) {
+                near(value.x + value.y + value.z, 1, 2e-5, "normalized blended habitat");
+                require(value.x >= 0 && value.y >= 0 && value.z >= 0, "nonnegative habitat mixture");
+                near(value.w, 0, 2e-5, "habitat and clearing agree across signed cell boundary");
+                ++checked;
+            }
+        require(checked > 128, "owned habitat sample coverage");
+        samePopulation(snapshot, settle(r, c, s));
+    }
+    require(!r.validationErrors(), "habitat Vulkan validation");
+}
+
 } // namespace
 int main() {
     try {
         rockExclusion();
+        habitatBoundaries();
         for (bool fixed : {false, true}) {
             RendererOptions o;
             o.ui = false;
@@ -391,7 +467,10 @@ int main() {
             for (const auto &cell : distant.cells)
                 for (uint32_t i = 0; i < 128; ++i)
                     require(cell.population[i].identity ==
-                                vegetationCandidateHash(cell.key, cell.surface.seed, i < 126 ? 0 : i - 125,
+                                vegetationCandidateHash(cell.key, cell.surface.seed,
+                                                        (cell.population[i].assetCell & 7) < 2
+                                                            ? 0
+                                                            : (cell.population[i].assetCell & 7) - 1,
                                                         i < 126 ? i : 0),
                             "large integer GPU candidate identity");
             s.vegetation.enabled = false;

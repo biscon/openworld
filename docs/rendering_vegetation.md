@@ -2,7 +2,7 @@
 
 Status: architecture agreed on 2026-10-24. V1 experiment implemented with software
 Vulkan verification and native RTX 3060 measurements. Final density/appearance
-acceptance remains open. The V2 asset/foliage foundation and V3 streaming/attachment are implemented; V4 engine integration is implemented and natively verified; V5–V6 remain proposed. This expands
+acceptance remains open. The V2 asset/foliage foundation and V3 streaming/attachment are implemented; V4 engine integration is implemented and natively verified; V5 interaction/habitats are implemented with acceptance in progress; V6 remains proposed. This expands
 the vegetation part of [rendering roadmap slice 5J](rendering_roadmap.md#5j--representative-scene-content-and-reflections).
 It records the direction, implementation sequence, and acceptance gates. Each slice
 needs its own focused implementation plan before coding; exact layouts, capacities,
@@ -356,6 +356,8 @@ Close density is preserved with 256 MiB bounded GPU storage. No new standalone v
   cost/benefit for optional occlusion. Recheck V1 performance with streamed content.
 
 ### 5J-V5 — Interaction and habitat variety
+
+Detailed design: [interaction and habitat variety](rendering_vegetation_interaction.md). Implemented and natively verified; [measurements and remaining acceptance gates](measurements/vegetation_5j_v5/README.md).
 
 - Add the player-centred bend/recovery field and bounded interaction shapes, with
   correct previous-frame deformation and a controllable demo proxy.

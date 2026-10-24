@@ -235,6 +235,13 @@ VegetationFixture makeVegetationFixture(VegetationAssets assets, uint32_t side, 
     return f;
 }
 void validate(const VegetationSettings &s) {
+    validate(s.interaction, s.contacts);
+    if (uint32_t(s.habitat.mode) > 1)
+        throw std::invalid_argument("Invalid habitat mode");
+    validate(s.proxy.position);
+    if (!std::isfinite(s.proxy.radius) || s.proxy.radius < .1f || s.proxy.radius > 4 ||
+        !std::isfinite(s.proxy.strength) || s.proxy.strength < 0 || s.proxy.strength > 1)
+        throw std::invalid_argument("Invalid vegetation proxy");
     validate(s.exclusion.centre);
     for (float v : {s.habitat.weights.x, s.habitat.weights.y, s.habitat.weights.z, s.habitat.minimumElevation,
                     s.habitat.maximumElevation, s.habitat.minimumUp, s.exclusion.radius})

@@ -1,5 +1,6 @@
 #pragma once
 #include "scene.hpp"
+#include "vegetation_interaction.hpp"
 #include "vegetation_library.hpp"
 #include "vegetation_stream.hpp"
 #include <array>
@@ -37,6 +38,9 @@ struct VegetationSettings {
     bool enabled = true, coverage = false;
     VegetationHabitatInput habitat;
     VegetationExclusionInput exclusion;
+    VegetationInteractionSettings interaction;
+    VegetationInteractionInput contacts;
+    VegetationProxy proxy;
     uint32_t representation = 0; // blades, cards, hybrid
     float density = 1, cardWidth = 1, cardDensity = 1;
     float time = 0, wind = 1, distance = 70, shadowDistance = 0;
@@ -53,9 +57,12 @@ struct VegetationStats {
     uint32_t residentCells = 0, pendingCells = 0, retiringCells = 0, deferredCells = 0,
              missingTerrainCells = 0, updatedCells = 0, generatedCells = 0;
     double updateMilliseconds = 0;
+    double interactionMilliseconds = 0;
+    uint32_t interactionShapes = 0, interactionRejected = 0, interactionResets = 0;
     bool completed = false, timingsAvailable = false, enabled = false;
 };
 struct VegetationSnapshot {
+    std::vector<glm::vec2> interaction;
     uint32_t binCount = vegetationBins;
     VegetationStats stats;
     std::vector<VegetationCellSnapshot> cells;

@@ -52,12 +52,22 @@ Output main(Input i,uint id:SV_InstanceID) {
     if(vegetation.profile.x!=0)shear=float2(1,.45)*plantBend(p,vegetation.cameraTime.w,vegetation.settings.y)*2*i.position.y/p.rootScale.w;
     else if(vertex.y>1e-5) {
         float bend=windBend(p,cell,weights,vegetation.cameraTime.w,vegetation.settings.y,lod);
-        shear=vegetation.wind.xy*(2*bend/vertex.y);
+        float2 contact=interactionBend(p.rootScale.xz+cell.origin.xz);
+        shear=(vegetation.wind.xy*bend+contact*vegetation.interactionResponse[asset].x*weights.y)*(2/vertex.y);
+        float vertical=max(.2,1-length(contact)*vegetation.interactionResponse[asset].y*weights.y*2/vertex.y);
+        o.normal.y/=vertical;tangent.y*=vertical;
     }
     o.normal.y-=dot(o.normal.xz,shear);tangent.xz+=shear*tangent.y;
     o.normal.xz-=plantSlope*o.normal.y;tangent.y+=dot(plantSlope,tangent.xz);
     o.tangent=float4(tangent,i.tangent.w);o.uv=i.uv;o.material=vegetation.geometry[bin].z;
     bool valid=vegetation.modes.z!=0&&(vegetation.inspection.y==0||cell.previousOrigin.w!=0)&&oldAsset==asset&&oldLod==lod&&oldCoverage>0&&oldWidth>1e-5;
+    if(vegetation.interaction.w!=0 || vegetation.interaction.z!=vegetation.previousInteraction.z) {
+        float2 root=p.rootScale.xz+cell.origin.xz;
+        float2 oldRoot=p.rootScale.xz+cell.previousOrigin.xz;
+        bool affected=(vegetation.interaction.z!=0&&all(abs(root-vegetation.interaction.xy-16)<16)) ||
+                      (vegetation.previousInteraction.z!=0&&all(abs(oldRoot-vegetation.previousInteraction.xy-16)<16));
+        if(affected)valid=false;
+    }
     float3 previous=plantPosition(p,cell,oldVertex,oldWeights,vegetation.previousCameraTime.w,vegetation.previousSettings.y,vegetation.previousWind.xy,asset,lod,true);
     o.previousClip=valid?mul(temporal.previous,float4(curvePosition(previous,temporal.previousCurvature),1)):0;
     o.plant=float4(coverage,p.variation,vegetation.cards.z,oldCoverage);o.identity=p.identity;

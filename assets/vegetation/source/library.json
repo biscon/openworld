@@ -1,9 +1,9 @@
 {
-  "version": 1,
+  "version": 2,
   "size": 1024,
   "grass": {
     "blades": 24,
-    "width": 0.010,
+    "width": 0.01,
     "spread": 0.23,
     "height": 0.65
   },
@@ -15,6 +15,14 @@
     {
       "colour": "shrub.png",
       "normalDome": 0.16
+    },
+    {
+      "colour": "daisy.png",
+      "normalDome": 0.06
+    },
+    {
+      "colour": "heather.png",
+      "normalDome": 0.12
     }
   ],
   "ground": "../../terrain/source/grass.png"

@@ -108,9 +108,13 @@ struct MaterialUniform {
     glm::vec4 blend;
     glm::uvec4 features;
     glm::vec4 habitat, clearing;
+    glm::uvec4 habitatKey;
+    glm::vec4 habitatLocal;
+    glm::uvec4 habitatMode;
+    glm::vec4 proxy;
 };
 static_assert(sizeof(MaterialRecord) == 128);
-static_assert(sizeof(MaterialUniform) == 640);
+static_assert(sizeof(MaterialUniform) == 704);
 static_assert(offsetof(MaterialUniform, coordinates) == 544);
 static_assert(offsetof(MaterialUniform, blend) == 576);
 static_assert(offsetof(MaterialUniform, features) == 592);
@@ -534,6 +538,16 @@ void VulkanMaterials::prepare(uint32_t frame, const Camera &camera, TerrainGrid 
     MaterialUniform u{};
     if (vegetation && terrainCoordinates) {
         u.habitat = {vegetation->habitat.weights, 1};
+        auto position = worldPosition(camera, grid);
+        auto key = vegetationCellAt(position);
+        auto local = relativePosition(position, vegetationCellOrigin(key));
+        u.habitatKey = {uint32_t(key.x), uint32_t(uint64_t(key.x) >> 32), uint32_t(key.z),
+                        uint32_t(uint64_t(key.z) >> 32)};
+        u.habitatLocal = {float(local.x), float(local.z), 0, 0};
+        u.habitatMode = {uint32_t(vegetation->habitat.mode), terrain.seed, 0, 0};
+        auto proxy = relativePosition(vegetation->proxy.position, position);
+        u.proxy = {float(proxy.x), float(proxy.z), vegetation->proxy.radius,
+                   vegetation->proxy.active && vegetation->proxy.marker ? 1.f : 0.f};
         const auto clearing = relativePosition(vegetation->exclusion.centre, worldPosition(camera, grid));
         u.clearing = {float(clearing.x), float(clearing.z), vegetation->exclusion.radius, 0};
     }
@@ -620,7 +634,7 @@ void VulkanMaterials::recordUploads(VkCommandBuffer cmd) {
 }
 uint64_t VulkanMaterials::textureAllocationRequirements(const TextureData &t) const {
     auto &s = *impl_;
-    if (!t.width || !t.height || !t.levels || t.layers != 1 || t.bytes.size() != textureBytes(t))
+    if (!t.width || !t.height || !t.levels || t.layers != 1 || t.bytes.size() != textureBytes(t, true))
         throw std::invalid_argument("Invalid texture requirements");
     VkImageCreateInfo ci{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
     ci.imageType = VK_IMAGE_TYPE_2D;
@@ -650,7 +664,7 @@ TextureHandle VulkanMaterials::uploadTexture(const TextureData &t) {
     auto &s = *impl_;
     s.retireImages();
     if (t.layers != 1 || !t.width || !t.height || !t.levels || t.levels > 15 ||
-        t.bytes.size() != textureBytes(t))
+        t.bytes.size() != textureBytes(t, true))
         throw std::invalid_argument("Invalid mesh texture");
     for (uint32_t i = 3; i < s.caps.images; ++i)
         if (!s.meshImages[i].image) {

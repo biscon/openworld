@@ -142,8 +142,8 @@ struct Wire {
 void payload(Wire &w, VegetationLibrary &l) {
     if (w.u(0x3256474f) != 0x3256474f)
         throw std::runtime_error("Unsupported vegetation library");
-    const auto version = w.u(3);
-    if (version != 2 && version != 3)
+    const auto version = w.u(4);
+    if (version != 2 && version != 3 && version != 4)
         throw std::runtime_error("Unsupported vegetation library version");
     l.revision = w.u(l.revision);
     l.assets.resize(w.count(l.assets.size(), 8));
@@ -170,6 +170,24 @@ void payload(Wire &w, VegetationLibrary &l) {
                 a.grass.counts[k] = w.u(a.grass.counts[k]);
             w.vec(a.grass.bands);
             w.vec(a.grass.shading);
+        }
+        if (version >= 4) {
+            a.species = FoliageSpecies(w.u(uint32_t(a.species)));
+            w.vec(a.habitat);
+            w.vec(a.placement);
+            w.vec(a.interaction);
+        } else {
+            a.species = a.category == FoliageCategory::Grass     ? FoliageSpecies::Grass
+                        : a.category == FoliageCategory::Shrub   ? FoliageSpecies::Shrub
+                        : a.category == FoliageCategory::Clutter ? FoliageSpecies::Clutter
+                                                                 : FoliageSpecies::Fern;
+            a.habitat = a.species == FoliageSpecies::Grass  ? glm::vec4(1, .65f, .35f, 0)
+                        : a.species == FoliageSpecies::Fern ? glm::vec4(.15f, .25f, 1, 0)
+                                                            : glm::vec4(.15f, .75f, .4f, 0);
+            a.placement = a.species == FoliageSpecies::Grass  ? glm::vec4(.25f, .02f, .8f, 1.2f)
+                          : a.species == FoliageSpecies::Fern ? glm::vec4(.45f, .02f, 1, 1)
+                                                              : glm::vec4(.6f, .05f, 1, 1);
+            a.interaction = {};
         }
         for (auto &lod : a.lods) {
             lod.resize(w.count(lod.size(), 2));
@@ -232,26 +250,58 @@ VegetationLibrary buildVegetationLibrary(const VegetationRecipe &r) {
                 }
         l.textures.push_back(std::move(t));
     }
-    for (uint32_t asset = 0; asset < 4; ++asset) {
+    l.materials.push_back({{.16f, .28f, .055f, 1}, .85f, .5f, .1f});
+    l.materials.push_back({{1, 1, 1, 1}, .8f, .5f, .18f, 0, 1, true});
+    l.materials.push_back({{1, 1, 1, 1}, .86f, .5f, .2f, 2, 3, true});
+    for (uint32_t asset = 0; asset < 6; ++asset) {
         FoliageAsset a;
         a.category = asset < 2    ? FoliageCategory::Grass
                      : asset == 3 ? FoliageCategory::Shrub
                                   : FoliageCategory::Plant;
+        if (asset == 5)
+            a.category = FoliageCategory::Shrub;
+        a.species = asset < 2    ? FoliageSpecies::Grass
+                    : asset == 2 ? FoliageSpecies::Fern
+                    : asset == 3 ? FoliageSpecies::Shrub
+                    : asset == 4 ? FoliageSpecies::Daisy
+                                 : FoliageSpecies::Heather;
+        a.habitat = asset < 2    ? glm::vec4(1, .65f, .35f, 0)
+                    : asset == 2 ? glm::vec4(.15f, .2f, 1, .65f)
+                    : asset == 3 ? glm::vec4(.1f, .3f, .6f, .65f)
+                    : asset == 4 ? glm::vec4(.8f, .1f, .05f, .75f)
+                                 : glm::vec4(.05f, 1, .15f, .7f);
+        a.placement = asset < 2 ? glm::vec4(.25f, .02f, .8f, 1.2f)
+                                : glm::vec4(asset == 2 ? .45f : .6f, asset == 2 ? .02f : .05f, .8f, 1.2f);
+        a.interaction = asset < 2    ? glm::vec4(.45f, .18f, 0, 0)
+                        : asset == 2 ? glm::vec4(.35f, .18f, 0, 0)
+                        : asset == 3 ? glm::vec4(.12f, .05f, 0, 0)
+                        : asset == 4 ? glm::vec4(.4f, .16f, 0, 0)
+                                     : glm::vec4(.18f, .08f, 0, 0);
         a.stiffness = asset == 3 ? .45f : asset == 2 ? .7f : 1;
+        if (asset == 5)
+            a.stiffness = .5f;
         a.displacement = .46f;
         a.ranges = asset == 3   ? glm::vec4(25, 50, 90, 50)
                    : asset == 2 ? glm::vec4(15, 35, 70, 25)
                                 : glm::vec4(20, 45, 70, 0);
+        if (asset == 4)
+            a.ranges = {15, 35, 70, 15};
+        if (asset == 5)
+            a.ranges = {20, 45, 90, 40};
         if (asset < 2)
             a.grass.counts = {r.blades, (r.blades + 2) / 3, (r.blades + 5) / 6, 0};
         a.minimum = glm::vec3(INFINITY);
         a.maximum = glm::vec3(-INFINITY);
         for (uint32_t lod = 0; lod < 3; ++lod) {
             auto &parts = a.lods[lod];
-            parts.resize(asset == 3 ? 2 : 1);
+            parts.resize(asset >= 3 ? 2 : 1);
             parts[0].material = asset == 3 ? 3 : asset;
             if (asset == 3)
                 parts[1].material = 4;
+            if (asset >= 4) {
+                parts[0].material = asset == 4 ? 5 : 3;
+                parts[1].material = asset == 4 ? 6 : 7;
+            }
             uint32_t segments = asset < 2 ? (lod == 0 ? 3 : 1) : 4 - lod;
             if (asset < 2)
                 for (uint32_t b = 0; b < a.grass.counts[lod]; ++b) {
@@ -268,25 +318,73 @@ VegetationLibrary buildVegetationLibrary(const VegetationRecipe &r) {
                     float angle = b * 2.39996323f;
                     glm::vec3 right(std::cos(angle), 0, std::sin(angle));
                     auto direction = glm::normalize(glm::vec3(-right.z * .85f, 1, right.x * .85f));
-                    leaf(parts[0], {0, 0, 0}, direction, right, .8f, .20f, segments, float(b) * .13f, true,
-                         1);
+                    // Unequal arch lengths and a small crown prevent a radial fan of identical fronds.
+                    glm::vec3 crown(-right.z*.035f,0,right.x*.035f);
+                    leaf(parts[0], crown, direction, right, .65f+.25f*random(b+811),
+                         .14f+.05f*random(b+977), segments, float(b)*.13f, true, .85f);
                 }
             if (asset == 3)
                 for (uint32_t b = 0; b < 5; ++b) {
                     float angle = b * 2.39996323f;
                     glm::vec3 right(std::cos(angle), 0, std::sin(angle));
                     glm::vec3 direction = glm::normalize(glm::vec3(-right.z * .5f, 1, right.x * .5f));
-                    leaf(parts[0], {0, 0, 0}, direction, right, .9f, .012f, segments, float(b) * .17f, false,
-                         1, true);
+                    float branchHeight=.72f+.28f*random(b+129);
+                    leaf(parts[0], {0, 0, 0}, direction, right, branchHeight, .012f, segments, float(b)*.17f, false, 1, true);
                     for (uint32_t j = 0; j < (6u >> lod); ++j) {
                         float t = .22f + j * .12f;
-                        auto root = direction * (.9f * t) + glm::vec3(0, -.144f * t * t, 0);
+                        auto root = direction * (branchHeight * t) + glm::vec3(0, -.16f * branchHeight * t * t, 0);
                         auto leafDir = glm::normalize(right * (j % 2 ? 1.f : -1.f) + glm::vec3(0, .45f, 0));
                         auto leafRight = glm::normalize(glm::cross(glm::vec3(0, 1, 0), leafDir));
-                        leaf(parts[1], root, leafDir, leafRight, .25f, .095f, segments, float(b + j) * .17f,
+                        leaf(parts[1], root, leafDir, leafRight, .19f+.07f*random(b*7+j+101), .08f, segments, float(b + j) * .17f,
                              true, 1);
                     }
                 }
+            if (asset == 4) {
+                // Several individually curved stems and shallow, shaped flower heads.
+                for (uint32_t b = 0; b < (lod == 0 ? 7u : lod == 1 ? 5u : 3u); ++b) {
+                    float angle = b * 2.39996323f, h = .40f + .22f * random(b + 331);
+                    glm::vec3 right(std::cos(angle), 0, std::sin(angle));
+                    glm::vec3 root = right * (.08f + .19f * random(b + 57));
+                    auto dir = glm::normalize(glm::vec3(-right.z * .16f, 1, right.x * .16f));
+                    leaf(parts[0], root, dir, right, h, .006f, segments, float(b) * .11f, false, .65f, true);
+                    leaf(parts[0], root + dir * h * .32f, glm::normalize(right + glm::vec3(0, .4f, 0)),
+                         glm::vec3(-right.z, 0, right.x), .13f, .018f, 2, float(b) * .1f, false, .65f);
+                    glm::vec3 centre = root + dir * h + glm::vec3(0, -.16f * h, 0);
+                    uint32_t first = uint32_t(parts[1].vertices.size()), n = lod == 2 ? 8 : 16;
+                    float wh = std::clamp(centre.y / .65f, 0.f, 1.f), radius = .055f + .015f * random(b + 87);
+                    glm::vec3 headNormal=glm::normalize(glm::vec3(-right.z*.25f,1,right.x*.25f));
+                    glm::vec3 headAcross=glm::normalize(glm::cross(right,headNormal));
+                    parts[1].vertices.push_back({centre,
+                                                 headNormal,
+                                                 {right, -1},
+                                                 {.5f, .5f},
+                                                 {wh, wh * wh, wh * wh, float(b) * .1f}});
+                    for (uint32_t j = 0; j <= n; ++j) {
+                        float a = j * 6.2831853f / n;
+                        glm::vec2 uv(std::cos(a), std::sin(a));
+                        auto pos = centre + (right*uv.x+headAcross*uv.y)*radius-headNormal*.008f;
+                        parts[1].vertices.push_back({pos,
+                                                     glm::normalize(headNormal+(right*uv.x+headAcross*uv.y)*.15f),
+                                                     {right, -1},
+                                                     uv * .5f + .5f,
+                                                     {wh, wh * wh, wh * wh, float(b) * .1f}});
+                        if (j)
+                            parts[1].indices.insert(parts[1].indices.end(),
+                                                    {first, first + j + 1, first + j});
+                    }
+                }
+            }
+            if (asset == 5) {
+                for (uint32_t b = 0; b < (lod == 0 ? 12u : lod == 1 ? 8u : 5u); ++b) {
+                    float angle = b * 2.39996323f;
+                    glm::vec3 right(std::cos(angle), 0, std::sin(angle));
+                    float h = .35f + .2f * random(b + 553);
+                    glm::vec3 root = right * (.08f + .18f * random(b + 93));
+                    auto dir = glm::normalize(glm::vec3(-right.z * .4f, 1, right.x * .4f));
+                    leaf(parts[0], root, dir, right, h, .007f, segments, float(b) * .13f, false, .55f, true);
+                    leaf(parts[1], root, dir, right, h, .11f, segments, float(b) * .13f, true, .55f);
+                }
+            }
             for (auto &p : parts)
                 for (auto &v : p.vertices) {
                     a.minimum = glm::min(a.minimum, v.position);
@@ -305,7 +403,8 @@ void validate(const VegetationLibrary &l) {
                 l.textures.size() <= 4,
             "Invalid vegetation library limits");
     for (auto &t : l.textures)
-        require(t.layers == 1 && t.width <= 2048 && t.height <= 2048 && t.bytes.size() == textureBytes(t),
+        require(t.layers == 1 && t.width <= 2048 && t.height <= 2048 &&
+                    t.bytes.size() == textureBytes(t, true),
                 "Invalid foliage texture");
     for (auto &m : l.materials) {
         for (float f :
@@ -324,6 +423,17 @@ void validate(const VegetationLibrary &l) {
             require(i >= -1 && (i < 0 || size_t(i) < l.textures.size()), "Invalid foliage texture reference");
     }
     for (auto &a : l.assets) {
+        require(uint32_t(a.species) <= 5, "Invalid foliage species");
+        for (int k = 0; k < 4; ++k) {
+            require(std::isfinite(a.habitat[k]) && a.habitat[k] >= 0 && a.habitat[k] <= 1,
+                    "Invalid species habitat");
+            require(std::isfinite(a.placement[k]) && a.placement[k] > 0 && a.placement[k] <= 2,
+                    "Invalid species placement");
+            require(std::isfinite(a.interaction[k]) && a.interaction[k] >= 0 && a.interaction[k] <= .5f,
+                    "Invalid interaction envelope");
+        }
+        require(a.placement.z <= a.placement.w && a.interaction.z == 0 && a.interaction.w == 0,
+                "Invalid species metadata");
         require(uint32_t(a.category) <= 3 && (a.category != FoliageCategory::Grass || a.ranges.w == 0),
                 "Invalid foliage category/casting policy");
         require(std::isfinite(a.stiffness) && a.stiffness >= 0 && a.stiffness <= 1 &&
@@ -459,7 +569,7 @@ void writeVegetationLibrary(const std::filesystem::path &dir, const VegetationLi
     Wire w(dir / ("library" + suffix + ".bin"), true);
     payload(w, copy);
     for (uint32_t i = 0; i < l.textures.size(); ++i)
-        writeTexture(dir / ("texture" + std::to_string(i) + suffix + ".dds"), l.textures[i]);
+        writeTexture(dir / ("texture" + std::to_string(i) + suffix + ".dds"), l.textures[i], true);
 }
 VegetationLibrary readVegetationLibrary(const std::filesystem::path &dir, bool rgba) {
     std::string suffix = rgba ? "_rgba" : "";
@@ -469,7 +579,7 @@ VegetationLibrary readVegetationLibrary(const std::filesystem::path &dir, bool r
     if (w.stream.peek() != std::char_traits<char>::eof())
         throw std::runtime_error("Trailing vegetation library data");
     for (uint32_t i = 0; i < l.textures.size(); ++i)
-        l.textures[i] = readTexture(dir / ("texture" + std::to_string(i) + suffix + ".dds"));
+        l.textures[i] = readTexture(dir / ("texture" + std::to_string(i) + suffix + ".dds"), true);
     validate(l);
     return l;
 }

@@ -20,21 +20,11 @@ void *operator new(std::size_t n) {
         return p;
     throw std::bad_alloc();
 }
-void *operator new[](std::size_t n) {
-    return ::operator new(n);
-}
-void operator delete(void *p) noexcept {
-    std::free(p);
-}
-void operator delete[](void *p) noexcept {
-    std::free(p);
-}
-void operator delete(void *p, std::size_t) noexcept {
-    std::free(p);
-}
-void operator delete[](void *p, std::size_t) noexcept {
-    std::free(p);
-}
+void *operator new[](std::size_t n) { return ::operator new(n); }
+void operator delete(void *p) noexcept { std::free(p); }
+void operator delete[](void *p) noexcept { std::free(p); }
+void operator delete(void *p, std::size_t) noexcept { std::free(p); }
+void operator delete[](void *p, std::size_t) noexcept { std::free(p); }
 void *operator new(std::size_t n, std::align_val_t a) {
     allocationCalls.fetch_add(1, std::memory_order_relaxed);
     void *p = nullptr;
@@ -42,21 +32,11 @@ void *operator new(std::size_t n, std::align_val_t a) {
         return p;
     throw std::bad_alloc();
 }
-void *operator new[](std::size_t n, std::align_val_t a) {
-    return ::operator new(n, a);
-}
-void operator delete(void *p, std::align_val_t) noexcept {
-    std::free(p);
-}
-void operator delete[](void *p, std::align_val_t) noexcept {
-    std::free(p);
-}
-void operator delete(void *p, std::size_t, std::align_val_t) noexcept {
-    std::free(p);
-}
-void operator delete[](void *p, std::size_t, std::align_val_t) noexcept {
-    std::free(p);
-}
+void *operator new[](std::size_t n, std::align_val_t a) { return ::operator new(n, a); }
+void operator delete(void *p, std::align_val_t) noexcept { std::free(p); }
+void operator delete[](void *p, std::align_val_t) noexcept { std::free(p); }
+void operator delete(void *p, std::size_t, std::align_val_t) noexcept { std::free(p); }
+void operator delete[](void *p, std::size_t, std::align_val_t) noexcept { std::free(p); }
 using namespace ow;
 namespace {
 using Clock = std::chrono::steady_clock;
@@ -253,7 +233,7 @@ int main(int argc, char **argv) {
                 "all|blades|cards|hybrid] [--density 4|8] [--variants] [--fixed] "
                 "[--require-validation] [--no-captures] [--grass-shadow-distance N] "
                 "[--gtao off|half|full] [--canopy-fixture] [--profile v1|v2] "
-                "[--mixed] [--rgba] [--no-prepass] [--asset grass|fern|shrub] [--exposure EV]");
+                "[--mixed] [--rgba] [--no-prepass] [--asset grass|fern|shrub|daisy|heather] [--exposure EV]");
         Options o;
         o.output = argv[1];
         for (int i = 2; i < argc; ++i) {
@@ -268,9 +248,14 @@ int main(int argc, char **argv) {
                 o.side = 16;
             } else if (arg == "--asset" && i + 1 < argc) {
                 std::string name = argv[++i];
-                o.asset = name == "grass" ? 0 : name == "fern" ? 2 : name == "shrub" ? 3 : -1;
+                o.asset = name == "grass"     ? 0
+                          : name == "fern"    ? 2
+                          : name == "shrub"   ? 3
+                          : name == "daisy"   ? 4
+                          : name == "heather" ? 5
+                                              : -1;
                 if (o.asset < 0)
-                    throw std::invalid_argument("Asset must be grass, fern or shrub");
+                    throw std::invalid_argument("Asset must be grass, fern, shrub, daisy or heather");
                 o.profile = "v2";
                 o.sequence = "asset";
             } else if (arg == "--exposure" && i + 1 < argc) {
