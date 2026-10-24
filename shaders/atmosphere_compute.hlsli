@@ -39,7 +39,7 @@ void main(uint3 id:SV_DispatchThreadID){
         float4 p=mul(atmosphere.inverseRaster,float4(uv*2-1,0,1));float3 ray=normalize(p.xyz/p.w);
         float viewDepth=atmSliceDistance(float(id.z));
         float directionDepth=mul(atmosphere.current,float4(ray,0)).w;
-        AtmTransport t=atmIntegrate(atmOrigin(),ray,atmosphere.sun.xyz,viewDepth/max(directionDepth,.01)*.001,32,true,false,false,true);
+        AtmTransport t=atmIntegrateSegment(atmOrigin(),ray,atmosphere.sun.xyz,min(viewDepth,atmosphere.profile.z)/max(directionDepth,.01)*.001,viewDepth/max(directionDepth,.01)*.001,32,true,false,false,true);
         outputT[id]=float4(t.t,1);outputS[id]=float4(t.s,1);
     }else if(ATM_PASS==4){
         if(id.z>=6)return;float3 n=cubeRay(id.z,(id.xy+.5)/float2(width,height)*2-1),c=0;

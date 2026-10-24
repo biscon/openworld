@@ -198,7 +198,7 @@ void VulkanClusters::prepare(uint32_t frame, const Camera &camera, TerrainGrid t
         records[n++] = {glm::vec4(glm::vec3(curved), l.range),
                         glm::vec4(l.colour, l.intensity),
                         glm::vec4(direction, std::cos(l.outerAngle)),
-                        {l.sourceRadius, std::cos(l.innerAngle), float(l.type), 0}};
+                        {l.sourceRadius, std::cos(l.innerAngle), float(l.type), l.volumetricScattering}};
     }
     std::memcpy(f.uniform.mapped, &u, sizeof(u));
     f.mode = uint32_t(mode);

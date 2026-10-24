@@ -1,0 +1,90 @@
+Test project /home/bison/Projects/openworld/cmake-build-release
+      Start  1: volumetrics_cpu
+ 1/41 Test  #1: volumetrics_cpu ..................   Passed    0.00 sec
+      Start  2: atmosphere_cpu
+ 2/41 Test  #2: atmosphere_cpu ...................   Passed    0.00 sec
+      Start  3: temporal_cpu
+ 3/41 Test  #3: temporal_cpu .....................   Passed    0.00 sec
+      Start  4: cli_help
+ 4/41 Test  #4: cli_help .........................   Passed    0.00 sec
+      Start  5: render_resolution_cpu
+ 5/41 Test  #5: render_resolution_cpu ............   Passed    0.00 sec
+      Start  6: lighting_cpu
+ 6/41 Test  #6: lighting_cpu .....................   Passed    0.12 sec
+      Start  7: terrain_cpu
+ 7/41 Test  #7: terrain_cpu ......................   Passed    0.01 sec
+      Start  8: terrain_lod
+ 8/41 Test  #8: terrain_lod ......................   Passed    0.20 sec
+      Start  9: terrain_stream
+ 9/41 Test  #9: terrain_stream ...................   Passed    1.03 sec
+      Start 10: terrain_hierarchy
+10/41 Test #10: terrain_hierarchy ................   Passed    0.21 sec
+      Start 11: terrain_generation_budget
+11/41 Test #11: terrain_generation_budget ........   Passed    0.01 sec
+      Start 12: curvature_gpu
+12/41 Test #12: curvature_gpu ....................   Passed    1.68 sec
+      Start 13: horizon_gpu
+13/41 Test #13: horizon_gpu ......................   Passed   33.35 sec
+      Start 14: volumetrics_gpu
+14/41 Test #14: volumetrics_gpu ..................   Passed   13.37 sec
+      Start 15: atmosphere_gpu
+15/41 Test #15: atmosphere_gpu ...................   Passed   10.95 sec
+      Start 16: temporal_terrain_gpu
+16/41 Test #16: temporal_terrain_gpu .............   Passed   23.54 sec
+      Start 17: temporal_gpu
+17/41 Test #17: temporal_gpu .....................   Passed   17.48 sec
+      Start 18: render_resolution_gpu
+18/41 Test #18: render_resolution_gpu ............   Passed    3.72 sec
+      Start 19: lighting_gpu
+19/41 Test #19: lighting_gpu .....................   Passed    3.81 sec
+      Start 20: terrain_geography_gpu
+20/41 Test #20: terrain_geography_gpu ............   Passed    4.09 sec
+      Start 21: terrain_detail_gpu
+21/41 Test #21: terrain_detail_gpu ...............   Passed   65.36 sec
+      Start 22: terrain_hierarchy_gpu
+22/41 Test #22: terrain_hierarchy_gpu ............   Passed   81.75 sec
+      Start 23: terrain_stream_gpu
+23/41 Test #23: terrain_stream_gpu ...............   Passed   25.61 sec
+      Start 24: terrain_lod_gpu
+24/41 Test #24: terrain_lod_gpu ..................   Passed    9.53 sec
+      Start 25: terrain_neighbourhood
+25/41 Test #25: terrain_neighbourhood ............   Passed    7.29 sec
+      Start 26: terrain_gpu
+26/41 Test #26: terrain_gpu ......................   Passed   15.89 sec
+      Start 27: vulkan_smoke
+27/41 Test #27: vulkan_smoke .....................   Passed    4.83 sec
+      Start 28: material_cpu
+28/41 Test #28: material_cpu .....................   Passed    0.00 sec
+      Start 29: material_import
+29/41 Test #29: material_import ..................   Passed    0.06 sec
+      Start 30: terrain_asset_build
+30/41 Test #30: terrain_asset_build ..............   Passed   15.56 sec
+      Start 31: material_gpu
+31/41 Test #31: material_gpu .....................   Passed   29.65 sec
+      Start 32: terrain_lod_quality_gpu
+32/41 Test #32: terrain_lod_quality_gpu ..........   Passed   26.51 sec
+      Start 33: scene_cpu
+33/41 Test #33: scene_cpu ........................   Passed    0.00 sec
+      Start 34: scene_gpu
+34/41 Test #34: scene_gpu ........................   Passed   12.71 sec
+      Start 35: visibility_cpu
+35/41 Test #35: visibility_cpu ...................   Passed    0.00 sec
+      Start 36: visibility_gpu
+36/41 Test #36: visibility_gpu ...................   Passed   37.19 sec
+      Start 37: gtao_cpu
+37/41 Test #37: gtao_cpu .........................   Passed    0.00 sec
+      Start 38: gtao_gpu
+38/41 Test #38: gtao_gpu .........................   Passed   27.26 sec
+      Start 39: shadows_gpu
+39/41 Test #39: shadows_gpu ......................   Passed   78.40 sec
+      Start 40: shadows_cpu
+40/41 Test #40: shadows_cpu ......................   Passed    0.00 sec
+      Start 41: review_view
+41/41 Test #41: review_view ......................   Passed    0.00 sec
+
+100% tests passed out of 41
+
+Label Time Summary:
+gpu    = 533.97 sec*proc (22 tests)
+
+Total Test time (real) = 551.21 sec

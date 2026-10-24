@@ -1,8 +1,9 @@
 # Temporal antialiasing and HDR bloom (slice 5G)
 
 Status: implemented; verification results are recorded below. Target-GPU and live
-windowed acceptance remain separate gates. Auto-exposure, temporal upscaling,
-sharpening and separate fog histories are deferred. [Slice 5H](rendering_atmosphere.md)
+windowed acceptance remain separate gates. Auto-exposure, temporal upscaling and sharpening are deferred.
+[Slice 5I](rendering_volumetrics.md) adds independent fog source history and feeds
+its rejection into final-image reactivity. [Slice 5H](rendering_atmosphere.md)
 adds sky reprojection to the existing TAA history.
 
 ## Colour, resolution and controls

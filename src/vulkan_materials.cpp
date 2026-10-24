@@ -127,12 +127,12 @@ MaterialCapabilities materialCapabilities(VkPhysicalDevice p, bool fixed, bool t
     const uint32_t limit = std::min(
         {l.maxPerStageDescriptorSampledImages, l.maxDescriptorSetSampledImages, l.maxPerStageResources});
     c.bindless =
-        !fixed && v12.runtimeDescriptorArray && v12.shaderSampledImageArrayNonUniformIndexing && limit >= 80;
+        !fixed && v12.runtimeDescriptorArray && v12.shaderSampledImageArrayNonUniformIndexing && limit >= 96;
     if (c.bindless) {
         c.arrays = 16;
-        // Reserve the terrain, clustered lighting, shadow, temporal and atmosphere
+        // Reserve the terrain, clustered lighting, shadow, temporal, atmosphere and volumetric
         // bindings across all sets, including the 16 array-image descriptors.
-        c.images = std::min(128u, limit - 64);
+        c.images = std::min(128u, limit - 80);
     }
     return c;
 }

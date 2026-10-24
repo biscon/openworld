@@ -52,6 +52,9 @@ glm::dvec3 relativePosition(const WorldPosition &p, const WorldPosition &origin)
 }
 void validate(const LocalLight &l) {
     validate(l.position);
+    require(std::isfinite(l.volumetricScattering) && l.volumetricScattering >= 0 &&
+                l.volumetricScattering <= 10,
+            "Invalid volumetric light multiplier");
     require(finite(l.colour) && glm::all(glm::greaterThanEqual(l.colour, glm::vec3(0))) &&
                 glm::all(glm::lessThanEqual(l.colour, glm::vec3(1))),
             "Light colour must be finite and in [0,1]");

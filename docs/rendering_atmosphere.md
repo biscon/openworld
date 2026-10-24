@@ -1,8 +1,8 @@
 # Sky, atmosphere and distant coverage — slice 5H
 
 Status: implemented; verification results are recorded below. Target-GPU and live
-flight acceptance remain separate gates. Local fog, shafts, clouds, stars, space
-rendering and automatic exposure remain outside this slice.
+flight acceptance remain separate gates. Local fog and shafts are supplied by [slice 5I](rendering_volumetrics.md). Clouds,
+stars, space rendering and automatic exposure remain outside this slice.
 
 ## Responsibilities, controls and units
 
@@ -70,9 +70,10 @@ of the outer square radius, decays with a 2 km height scale, and is integrated
 alongside physical extinction. Its source uses the analytic daylight sky colour:
 this is an artistic source approximation, not an additional physical aerosol
 multiple-scattering solution. A matching double-precision mixed-medium reference
-checks it. It is included for sky rays as well as finite surface rays. Future 5I
-media must combine sources/extinction over overlapping segments rather than apply
-a second full-strength fog pass. Nonoverlapping segments compose as
+checks it. It is included for sky rays as well as finite surface rays. Implemented [5I media](rendering_volumetrics.md) combine sources/extinction over
+overlapping segments. While local fog is active, aerial LUTs store tail transport
+from its endpoint, reported by `AtmosphereSnapshot::aerialStartDistance`; the full
+sky/environment LUTs retain their original meaning. Nonoverlapping segments compose as
 `(T_near*T_far, S_near + T_near*S_far)`.
 
 ## Products, invalidation and GPU ownership

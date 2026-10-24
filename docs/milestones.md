@@ -165,6 +165,9 @@ lighting and RGB aerial transport. Its [continuous-horizon extension](rendering_
 adds compact distant terrain, visual curvature and long-range aerial sampling.
 Clear-air boundaries and the ground-to-2-km flight envelope remain explicit
 production-scale/target-GPU review gates.
+[Slice 5I](rendering_volumetrics.md) adds opt-in height/local fog, bounded froxel lighting,
+CSM shafts, mixed atmospheric transport and independent source history. Local lights
+remain unshadowed; target-GPU performance and live motion review remain pending.
 
 ### Scope
 

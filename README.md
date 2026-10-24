@@ -83,14 +83,28 @@ Hold **right mouse outside the panel** to look and fly: **WASD** moves forward/b
 and sideways, **Q/E** moves down/up, and **Shift** boosts speed fourfold. Release
 right mouse to use the UI. **Escape** releases mouse capture first, then exits
 when UI keyboard input is not active. Capture also releases on focus loss or
-minimization. The panel includes a camera reset and flight speed control.
+minimization. **View → Camera & Review** includes camera reset, flight speed,
+and explicit review-view save/load controls.
+
+The top menu bar is the only UI visible on first launch. **Terrain** and
+**Rendering** open focused settings windows; **Diagnostics** opens individual
+groups of counters, timings and visualization tools. Checked menu entries and
+window close buttons control the same visibility state. **View → Close All
+Windows** returns to the menu-only view.
+
+On clean exit, window visibility, position, size and collapsed state are saved
+to `ui-state.json` in the SDL per-user settings directory (typically
+`~/.local/share/OpenWorld/OpenWorld/` on Linux) and restored next launch.
+Terrain, camera and rendering values are not saved automatically. Headless and
+`--no-ui` runs leave this layout file untouched. Delete it to reset the layout.
+See [engine UI and layout persistence](docs/engine_ui.md).
 
 **F10** toggles borderless desktop fullscreen. The initial window is **1920×1080**.
 Scene rendering defaults to **1080 pixels high**, with width following the window
 aspect ratio; ImGui stays at native framebuffer resolution. Select a **Render height**
-preset in the OpenWorld panel or launch with `--render-height 720` (custom heights
+preset in **Rendering → Rendering Settings** or launch with `--render-height 720` (custom heights
 1–16384 are accepted). Shrinking the window still renders at the chosen scene height
-and downscales. The panel shows both scene and output dimensions. See
+and downscales. **Diagnostics → Frame & Device** shows scene and output dimensions. See
 [scene resolution and presentation](docs/rendering_resolution.md) for resource
 ownership and verification.
 
@@ -289,7 +303,9 @@ spacing and dimensions through the terrain API. No test depends on game assets.
 
 ## Layout and design
 
-- `src/main.cpp`: SDL lifetime/events, ImGui controls, frame timing, CLI.
+- `src/main.cpp`: SDL/backend lifetime and events, application orchestration, frame timing, CLI.
+- `src/engine_ui*`: menu/window shell, settings panels and diagnostic panels.
+- `src/ui_state.*`: stable window registry and UI-only JSON layout persistence.
 - `src/terrain.*`: terrain value types, neighbourhood construction, transactional batch validation, grid topology, request state.
 - `src/terrain_lod.*`: bounded quadtree selection, shared patch topology, bounds and draw statistics.
 - `src/terrain_stream.*`: bounded residency policy, spatial lookup, handles, payload layout and budgets.

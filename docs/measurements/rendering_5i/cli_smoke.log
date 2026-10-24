@@ -1,0 +1,9 @@
+Vulkan device: llvmpipe (LLVM 23.1.3, 256 bits)
+Validation: enabled
+Captured "/tmp/5i-cli.ppm"
+Terrain: 4 m square, 0.5 m spacing, 8 cells/side
+Chunks: 1; triangles: 128; terrain allocation: 0.0306816 MiB
+Selected patches: 1; culled: 0; first LOD range: 64 m
+HDR: 0.878906 MiB; lighting: 0.379059 MiB; scene: 18.8127 ms; output + UI: 1.73204 ms; lighting startup: 187.259 ms
+Terrain generations: 1
+Rendered 8 frames; validation errors: 0

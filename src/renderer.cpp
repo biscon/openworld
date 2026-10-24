@@ -11,6 +11,7 @@
 #include "vulkan_terrain.hpp"
 #include "vulkan_terrain_stream.hpp"
 #include "vulkan_visibility.hpp"
+#include "vulkan_volumetrics.hpp"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
@@ -113,6 +114,7 @@ void imageBarrier(VkCommandBuffer cmd, VkImage image, VkImageAspectFlags aspect,
 struct Renderer::Impl {
     RendererOptions options;
     std::unique_ptr<VulkanAtmosphere> atmosphere;
+    std::unique_ptr<VulkanVolumetrics> volumetrics;
     VkPipelineLayout skyLayout{};
     VkPipeline skyPipeline{}, skyTemporalPipeline{};
     std::unique_ptr<VulkanShadows> shadows;
@@ -251,6 +253,9 @@ struct Renderer::Impl {
         atmosphere = std::make_unique<VulkanAtmosphere>(
             physical, device, queueFamily, options.atmosphereBudgetBytes, options.forceNoAtmosphere,
             options.shaderDirectory, options.curvedHorizon);
+        volumetrics = std::make_unique<VulkanVolumetrics>(
+            physical, device, queueFamily, options.volumetricCapacity, options.sceneCapacity.lights,
+            options.forceNoVolumetrics, lightingSetLayout, options.shaderDirectory);
         renderingStats.lightingStartupMilliseconds =
             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - lightingStart)
                 .count();
@@ -736,8 +741,17 @@ struct Renderer::Impl {
             {23, VK_DESCRIPTOR_TYPE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
             {24, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr}};
         VkDescriptorSetLayoutCreateInfo li{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-        li.bindingCount = 25;
-        li.pBindings = b;
+        std::vector<VkDescriptorSetLayoutBinding> shared(std::begin(b), std::end(b));
+        for (auto &binding : shared)
+            if (binding.binding == 0 || (binding.binding >= 10 && binding.binding <= 13) ||
+                binding.binding >= 16)
+                binding.stageFlags |= VK_SHADER_STAGE_COMPUTE_BIT;
+        for (uint32_t k = 25; k <= 31; ++k)
+            shared.push_back({k,
+                              k == 25 ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER : VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                              1, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, nullptr});
+        li.bindingCount = uint32_t(shared.size());
+        li.pBindings = shared.data();
         check(vkCreateDescriptorSetLayout(device, &li, nullptr, &lightingSetLayout),
               "Create lighting layout");
         li.bindingCount = 0;
@@ -752,9 +766,9 @@ struct Renderer::Impl {
         li.bindingCount = 4;
         li.pBindings = ob;
         check(vkCreateDescriptorSetLayout(device, &li, nullptr, &outputSetLayout), "Create output layout");
-        VkDescriptorPoolSize sizes[] = {{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 10},
+        VkDescriptorPoolSize sizes[] = {{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 12},
                                         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 14},
-                                        {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 26},
+                                        {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 38},
                                         {VK_DESCRIPTOR_TYPE_SAMPLER, 8}};
         VkDescriptorPoolCreateInfo pool{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
         pool.maxSets = 4;
@@ -1024,6 +1038,18 @@ struct Renderer::Impl {
             throw;
         }
     }
+    VolumetricSnapshot readVolumetricSnapshot() {
+        if (!hasRendered || !volumetrics->snapshotBytes())
+            throw std::runtime_error("Volumetric snapshot requires an active submitted frame");
+        check(vkDeviceWaitIdle(device), "Wait before volumetric snapshot");
+        render_detail::Buffer readback;
+        readback.create(physical, device, volumetrics->snapshotBytes(), VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                        true);
+        auto cmd = beginImmediate();
+        volumetrics->copySnapshot(cmd, readback.buffer);
+        endImmediate(cmd);
+        return volumetrics->decodeSnapshot(readback.mapped);
+    }
     AtmosphereSnapshot readAtmosphereSnapshot() {
         if (!hasRendered || !atmosphere->snapshotBytes())
             throw std::runtime_error("Atmosphere snapshot requires a rendered frame");
@@ -1202,25 +1228,26 @@ struct Renderer::Impl {
             check(vkDeviceWaitIdle(device), "Wait before scene resolution change");
         destroySceneTargets();
         atmosphere->invalidateSceneViews();
+        volumetrics->invalidateSceneViews();
         sceneExtent = {next.width, next.height};
         visibility->resize(sceneExtent.width, sceneExtent.height);
         gtao->resize(sceneExtent.width, sceneExtent.height, gtaoMode);
         clusters->resize(sceneExtent.width, sceneExtent.height);
         for (auto &frame : frames) {
-            createImage(
-                frame.depth, frame.depthMemory, depthFormat,
-                VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
-                    ((visibilityCaps.hiZ || gtaoCaps.supported || postCaps.taa || atmosphere->supported())
-                         ? VK_IMAGE_USAGE_SAMPLED_BIT
-                         : 0),
-                sceneExtent.width, sceneExtent.height);
+            createImage(frame.depth, frame.depthMemory, depthFormat,
+                        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
+                            ((visibilityCaps.hiZ || gtaoCaps.supported || postCaps.taa ||
+                              atmosphere->supported() || volumetrics->supported())
+                                 ? VK_IMAGE_USAGE_SAMPLED_BIT
+                                 : 0),
+                        sceneExtent.width, sceneExtent.height);
             frame.depthView = createView(frame.depth, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
-            renderingStats.hdrBytes +=
-                createImage(frame.hdr, frame.hdrMemory, hdrFormat,
-                            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
-                                VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                                (atmosphere->supported() ? VK_IMAGE_USAGE_STORAGE_BIT : 0),
-                            sceneExtent.width, sceneExtent.height);
+            renderingStats.hdrBytes += createImage(
+                frame.hdr, frame.hdrMemory, hdrFormat,
+                VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+                    VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                    ((atmosphere->supported() || volumetrics->supported()) ? VK_IMAGE_USAGE_STORAGE_BIT : 0),
+                sceneExtent.width, sceneExtent.height);
             frame.hdrView = createView(frame.hdr, hdrFormat, VK_IMAGE_ASPECT_COLOR_BIT);
             VkDescriptorImageInfo image{VK_NULL_HANDLE, frame.hdrView,
                                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
@@ -1559,6 +1586,7 @@ struct Renderer::Impl {
             return false;
         }
         validateAtmosphere(settings.atmosphere);
+        validateVolumetrics(settings.volumetrics);
         if (atmosphere->needsResize(settings.atmosphere)) {
             check(vkDeviceWaitIdle(device), "Wait for atmosphere resource change");
             atmosphere->resize(settings.atmosphere);
@@ -1568,6 +1596,12 @@ struct Renderer::Impl {
         validatePost(settings.taa, settings.bloom);
         if (sceneDirty)
             updateSceneTargets(true);
+        if (volumetrics->needsResize(sceneExtent.width, sceneExtent.height, settings.volumetrics)) {
+            check(vkDeviceWaitIdle(device), "Wait for explicit volumetric reconfiguration");
+            volumetrics->resize(sceneExtent.width, sceneExtent.height, settings.volumetrics);
+            post->reset(TemporalReset::Settings);
+            hasRendered = false;
+        }
         if (gtao->needsResize(sceneExtent.width, sceneExtent.height, settings.gtao.mode)) {
             check(vkDeviceWaitIdle(device), "Wait for explicit GTAO mode change");
             gtaoMode = settings.gtao.mode;
@@ -1612,15 +1646,23 @@ struct Renderer::Impl {
         updateLighting(camera, settings, frame);
         const bool postDiagnostic = frame.diagnostic || settings.gtao.diagnostic != GtaoDiagnostic::Shaded ||
                                     settings.shadows.diagnostic != 0;
-        if (atmosphere->historyChanged(settings.atmosphere, postDiagnostic))
+        const bool atmosphereChanged = atmosphere->historyChanged(settings.atmosphere, postDiagnostic);
+        if (atmosphereChanged || volumetrics->historyChanged(settings.volumetrics))
             post->reset(TemporalReset::Settings);
         post->begin(frameIndex, camera, options.terrainGrid, settings.taa, settings.bloom, frame.preExposure,
-                    postDiagnostic);
+                    postDiagnostic || settings.volumetrics.diagnostic != 0 ||
+                        settings.atmosphere.diagnostic != 0);
+        volumetrics->begin(frameIndex, camera, options.terrainGrid, settings.volumetrics, settings.lighting,
+                           clusters->lights, settings.localLights, post->view(), frame.preExposure,
+                           postDiagnostic || settings.atmosphere.diagnostic != 0, atmosphereChanged,
+                           frame.lightingSet, frame.hdrView, frame.depthView,
+                           glm::vec3(settings.background[0], settings.background[1], settings.background[2]));
         atmosphere->begin(frameIndex, camera, settings.atmosphere, settings.lighting, post->view(),
                           frame.preExposure, postDiagnostic,
                           float((streaming ? streaming->stats().outerEffectiveRadius : settings.viewRadius) *
                                 options.terrainGrid.extent()),
-                          frame.lightingSet, frame.hdrView, frame.depthView);
+                          frame.lightingSet, frame.hdrView, frame.depthView,
+                          volumetrics->active() ? settings.volumetrics.distance : 0);
         post->bindLighting(frame.lightingSet);
         static_cast<LightingUniform *>(frame.lightingMapped)->viewProjection = post->view().raster;
         materials->prepare(frameIndex, camera, options.terrainGrid, materialTerrainSettings,
@@ -1833,6 +1875,7 @@ struct Renderer::Impl {
             shadows->finish(cmd);
         }
         atmosphere->record(cmd);
+        volumetrics->record(cmd);
         visibility->beginGpu(cmd);
         visibility->cull(cmd, false);
         const bool depthPrepass = settings.opaqueDepthPrepass || visibility->hiZ() || gtao->active();
@@ -1840,7 +1883,7 @@ struct Renderer::Impl {
         depth.imageView = frame.depthView;
         depth.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
         depth.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        depth.storeOp = (depthPrepass || post->stats().taa || atmosphere->active())
+        depth.storeOp = (depthPrepass || post->stats().taa || atmosphere->active() || volumetrics->active())
                             ? VK_ATTACHMENT_STORE_OP_STORE
                             : VK_ATTACHMENT_STORE_OP_DONT_CARE;
         depth.clearValue.depthStencil = {0.f, 0};
@@ -1940,9 +1983,10 @@ struct Renderer::Impl {
             rendering.colorAttachmentCount = post->stats().taa ? 3 : 1;
             rendering.pColorAttachments = sceneColours.data();
             depth.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-            depth.storeOp = (visibility->hiZ() || post->stats().taa || atmosphere->active())
-                                ? VK_ATTACHMENT_STORE_OP_STORE
-                                : VK_ATTACHMENT_STORE_OP_DONT_CARE;
+            depth.storeOp =
+                (visibility->hiZ() || post->stats().taa || atmosphere->active() || volumetrics->active())
+                    ? VK_ATTACHMENT_STORE_OP_STORE
+                    : VK_ATTACHMENT_STORE_OP_DONT_CARE;
             visibility->stamp(cmd, 8);
             vkCmdBeginRendering(cmd, &rendering);
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -1952,9 +1996,9 @@ struct Renderer::Impl {
         meshes->draw(cmd, frameIndex, frame.lightingSet, depthPrepass ? 1 : 0, visibility.get());
         visibility->stamp(cmd, 9);
         clusters->timestamp(cmd, frameIndex, 3);
-        if (atmosphere->active()) {
+        if (atmosphere->active() || volumetrics->active()) {
             vkCmdEndRendering(cmd);
-            if (atmosphere->physical()) {
+            if (atmosphere->physical() || volumetrics->active()) {
                 imageBarrier(cmd, frame.hdr, VK_IMAGE_ASPECT_COLOR_BIT,
                              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
                              VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
@@ -1968,7 +2012,11 @@ struct Renderer::Impl {
                              VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
                                  VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT,
                              VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
-                atmosphere->composite(cmd, sceneExtent.width, sceneExtent.height);
+                if (volumetrics->active()) {
+                    atmosphere->composite(cmd, sceneExtent.width, sceneExtent.height, false);
+                    volumetrics->composite(cmd, sceneExtent.width, sceneExtent.height);
+                } else
+                    atmosphere->composite(cmd, sceneExtent.width, sceneExtent.height);
                 imageBarrier(cmd, frame.hdr, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_GENERAL,
                              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                              VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT,
@@ -2097,6 +2145,7 @@ struct Renderer::Impl {
         check(vkResetFences(device, 1, &frame.fence), "Reset frame fence");
         check(vkQueueSubmit2(queue, 1, &submit, frame.fence), "Submit frame");
         atmosphere->submitted();
+        volumetrics->submitted();
         post->submitted();
         meshes->submitted();
         terrainHistory->submitted();
@@ -2211,6 +2260,7 @@ struct Renderer::Impl {
             terrain.reset();
             meshes.reset();
             visibility.reset();
+            volumetrics.reset();
             atmosphere.reset();
             if (skyPipeline)
                 vkDestroyPipeline(device, skyPipeline, nullptr);
@@ -2333,6 +2383,7 @@ void Renderer::setTerrainLodReviewState(const TerrainLodReviewState &state) {
 }
 void Renderer::setTerrainGrid(TerrainGrid grid) {
     impl_->post->reset(TemporalReset::Settings);
+    impl_->volumetrics->reset();
     if (impl_->streaming)
         throw std::invalid_argument("Streaming footprint is selected at startup");
     impl_->terrain->setGrid(grid);
@@ -2341,6 +2392,7 @@ void Renderer::setTerrainGrid(TerrainGrid grid) {
 }
 std::vector<uint32_t> Renderer::readTerrainIndices() { return impl_->terrain->readIndices(); }
 void Renderer::requestTerrain(const TerrainRequest &request) {
+    impl_->volumetrics->reset();
     if (impl_->streaming)
         impl_->streaming->settings(request.settings);
     else
@@ -2357,6 +2409,7 @@ std::vector<glm::vec4> Renderer::readTerrainNormals(uint32_t slot, uint32_t leve
     return impl_->terrain->readNormals(slot, level);
 }
 void Renderer::requestTerrainBatch(const TerrainBatchRequest &request) {
+    impl_->volumetrics->reset();
     if (impl_->streaming)
         impl_->streaming->settings(request.settings);
     else
@@ -2405,6 +2458,7 @@ std::vector<TerrainSample> Renderer::sampleCurvatureFixture(const std::vector<Te
 }
 void Renderer::setTerrainSettings(const TerrainSettings &settings) {
     impl_->post->reset(TemporalReset::Settings);
+    impl_->volumetrics->reset();
     if (impl_->streaming)
         impl_->streaming->settings(settings);
     else
@@ -2458,10 +2512,38 @@ uint32_t Renderer::renderHeight() const { return impl_->sceneExtent.height; }
 } // namespace ow
 
 namespace ow {
-void Renderer::resetTemporalHistory() { impl_->post->reset(); }
+void Renderer::resetTemporalHistory() {
+    impl_->post->reset();
+    impl_->volumetrics->reset();
+}
 bool Renderer::invalidateInstanceHistory(InstanceHandle h) { return impl_->meshes->invalidateHistory(h); }
 const PostStats &Renderer::postStats() const { return impl_->post->stats(); }
 PostSnapshot Renderer::readPostSnapshot() { return impl_->readPostSnapshot(); }
 const AtmosphereStats &Renderer::atmosphereStats() const { return impl_->atmosphere->stats(); }
 AtmosphereSnapshot Renderer::readAtmosphereSnapshot() { return impl_->readAtmosphereSnapshot(); }
+} // namespace ow
+
+namespace ow {
+FogVolumeHandle Renderer::createFogVolume(const FogVolume &v) {
+    validate(v);
+    auto h = impl_->volumetrics->volumes.create(v);
+    if (h.slot != ~0u)
+        impl_->volumetrics->edited();
+    return h;
+}
+bool Renderer::updateFogVolume(FogVolumeHandle h, const FogVolume &v) {
+    validate(v);
+    bool ok = impl_->volumetrics->volumes.update(h, v);
+    if (ok)
+        impl_->volumetrics->edited();
+    return ok;
+}
+bool Renderer::removeFogVolume(FogVolumeHandle h) {
+    bool ok = impl_->volumetrics->volumes.remove(h);
+    if (ok)
+        impl_->volumetrics->edited();
+    return ok;
+}
+const VolumetricStats &Renderer::volumetricStats() const { return impl_->volumetrics->stats(); }
+VolumetricSnapshot Renderer::readVolumetricSnapshot() { return impl_->readVolumetricSnapshot(); }
 } // namespace ow
