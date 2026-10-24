@@ -15,6 +15,10 @@ Milestone 4 adds [hierarchical terrain residency](terrain_hierarchy.md): coarse 
 
 ## System design index
 
+- [Grass rock exclusion](rendering_vegetation_streaming.md#rock-exclusion-for-grass) — implemented and natively verified: shared terrain rock classification and stable soft-edge grass suppression.
+
+- [Grass LOD and shading stability](rendering_vegetation_visibility.md#grass-lod-and-shading-stability) — implemented: nested wider grass, continuous geometric fades and distant lighting filtering; native validation and focused 1080p comparison recorded.
+
 - [Spatial antialiasing](rendering_temporal_post.md#spatial-antialiasing) — implemented and natively verified: selectable FXAA and SMAA 1x in the engine output pipeline, preserving current TAA.
 
 - [Thin-geometry TAA stability](rendering_temporal_post.md#thin-geometry-coverage) — implemented and natively verified: material classification, bounded coverage history and local rejection relaxation for grass and future canopy foliage.

@@ -135,9 +135,116 @@ void checkGround(Renderer &r, const VegetationSnapshot &snapshot) {
     }
     require(checked > 128 && sloping > 64, "nontrivial sloping attachment fixture");
 }
+void rockExclusion() {
+    const auto path =
+        std::filesystem::temp_directory_path() /
+        ("ow-grass-rock-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    struct Cleanup {
+        std::filesystem::path path;
+        ~Cleanup() {
+            std::error_code error;
+            std::filesystem::remove_all(path, error);
+        }
+    } cleanup{path};
+    std::filesystem::create_directories(path);
+    for (const auto &entry : std::filesystem::directory_iterator(OPENWORLD_SHADER_DIR)) {
+        if (entry.path().extension() != ".spv")
+            continue;
+        auto source = entry.path();
+        if (source.filename() == "vegetation_populate.comp.spv")
+            source = source.parent_path() / "vegetation_rock_fixture.comp.spv";
+        std::filesystem::create_symlink(std::filesystem::absolute(source), path / entry.path().filename());
+    }
+    RendererOptions o;
+    o.ui = false;
+    o.requireValidation = true;
+    o.width = 128;
+    o.height = 96;
+    o.shaderDirectory = path;
+    o.terrainGrid = {32, .5f};
+    o.terrainCapacity = 32;
+    o.lod = {true, 8, 64};
+    o.streaming.enabled = o.streaming.hierarchical = true;
+    o.streaming.diskCache = false;
+    o.streaming.maximumDistance = 64;
+    o.streaming.shadowCasterBytes = 0;
+    o.streaming.gpuBytes = 40 * terrainMiB;
+    o.streaming.hostBytes = 64 * terrainMiB;
+    o.vegetation.library = std::make_shared<VegetationLibrary>(buildVegetationLibrary());
+    o.vegetation.streaming.enabled = o.vegetation.streaming.diagnostics = true;
+    o.vegetation.streaming.cellCapacity = 64;
+    o.vegetation.streaming.demandRadius = 8;
+    o.vegetation.streaming.retentionRadius = 12;
+    Renderer r(o);
+    TerrainRequest terrain;
+    terrain.settings.ridgeStrength = terrain.settings.baseDetail = 1;
+    terrain.settings.erosionStrength = 0;
+    r.requestTerrain(terrain);
+    Camera c;
+    c.chunk = {0, 341};
+    c.local = {7.25, 660, 12.5};
+    c.pitch = -1;
+    SceneSettings s;
+    s.viewRadius = 1;
+    s.frustumCulling = false;
+    s.shadows.mode = ShadowMode::Off;
+    s.vegetation.habitat.minimumUp = .1f;
+    auto snapshot = settle(r, c, s);
+    uint32_t bare = 0, mixed = 0, ordinary = 0, kept = 0;
+    auto random = [](uint32_t h) {
+        h ^= h >> 16;
+        h *= 0x7feb352du;
+        h ^= h >> 15;
+        h *= 0x846ca68bu;
+        h ^= h >> 16;
+        return float(h >> 8) / 16777216.f;
+    };
+    for (const auto &cell : snapshot.cells)
+        for (uint32_t i = 0; i < 128; ++i) {
+            const auto &p = cell.population[i];
+            const auto &sample = cell.attachment[i];
+            near(sample.x, sample.y, 2e-5, "rock classification agrees across cell origins");
+            const uint32_t species = i < 126 ? 0 : i - 125;
+            require(p.identity ==
+                        vegetationCandidateHash(cell.key, terrain.settings.seed, species, i < 126 ? i : 0),
+                    "rock exclusion preserves candidate identity");
+            float probability = species == 0 ? 1.f : .15f;
+            if (species == 0) {
+                const float t = std::clamp((sample.x - .15f) / .35f, 0.f, 1.f);
+                probability *= 1 - t * t * (3 - 2 * t);
+                bare += sample.x >= .5f;
+                mixed += sample.x > .15f && sample.x < .5f;
+                ordinary += sample.x <= .15f;
+                kept += p.rootScale.w > 0;
+                if (sample.x >= .5f)
+                    require(p.rootScale.w == 0, "exposed rock never accepts grass");
+            }
+            const bool accepted =
+                sample.w != 0 && sample.z >= .1f && probability > 0 && random(p.identity + 7) <= probability;
+            require((p.rootScale.w > 0) == accepted,
+                    "population uses rock probability without altering other species");
+        }
+    std::cout << "Rock fixture: " << bare << " bare, " << mixed << " mixed, " << ordinary << " non-rock, "
+              << kept << " grass retained\n";
+    require(bare > 64 && mixed > 64 && kept > 64,
+            "mountain fixture exercises bare rock and mixed edges");
+    --c.chunk.x;
+    c.local.x += 16;
+    samePopulation(snapshot, settle(r, c, s));
+    terrain.settings.heightScale = 0;
+    r.requestTerrain(terrain);
+    auto flat = settle(r, c, s);
+    for (const auto &cell : flat.cells)
+        for (uint32_t i = 0; i < 126; ++i) {
+            require(cell.attachment[i].x == 0 && cell.population[i].rootScale.w > 0,
+                    "terrain setting changes regenerate rock exclusions and restore non-rock grass");
+        }
+    require(!r.validationErrors(), "rock exclusion Vulkan validation");
+}
 } // namespace
 int main() {
     try {
+        rockExclusion();
         for (bool fixed : {false, true}) {
             RendererOptions o;
             o.ui = false;

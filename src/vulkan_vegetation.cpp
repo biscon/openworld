@@ -22,8 +22,9 @@ struct Uniform {
     glm::vec4 curvature{}, detail{};
     glm::mat4 raster{1};
     glm::uvec4 pyramidSize{};
+    std::array<glm::vec4, 8> grassBands{}, grassShading{};
 };
-static_assert(sizeof(Uniform) == 3088);
+static_assert(sizeof(Uniform) == 3344);
 using Cell = VegetationGpuCell;
 } // namespace
 struct VulkanVegetation::Impl {
@@ -38,7 +39,7 @@ struct VulkanVegetation::Impl {
     VkQueryPool queries{};
     bool temporalAttachments = false, uploaded = false, history = false;
     Buffer instances, geometry, casters, staging, diagnostic;
-    uint64_t indexOffset = 0, bytes = 0, budget = 0, serial = 0;
+    uint64_t morphOffset = 0, indexOffset = 0, bytes = 0, budget = 0, serial = 0;
     uint32_t count = 0, cellCount = 0, listCapacity = 0, frame = 0, lastFrame = 0, timestampBits = 0;
     double timestampPeriod = 0;
     std::array<glm::uvec4, 48> geometryInfo{};
@@ -188,17 +189,22 @@ struct VulkanVegetation::Impl {
         stages[0].module = vs;
         stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
         stages[1].module = fs;
-        VkVertexInputBindingDescription bind{0, sizeof(FoliageVertex), VK_VERTEX_INPUT_RATE_VERTEX};
+        VkVertexInputBindingDescription bind[] = {{0, sizeof(FoliageVertex), VK_VERTEX_INPUT_RATE_VERTEX},
+                                                  {1, sizeof(GrassMorph), VK_VERTEX_INPUT_RATE_VERTEX}};
         VkVertexInputAttributeDescription attrs[] = {
             {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(FoliageVertex, position)},
             {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(FoliageVertex, normal)},
             {2, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(FoliageVertex, tangent)},
             {3, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(FoliageVertex, uv)},
-            {4, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(FoliageVertex, deformation)}};
+            {4, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(FoliageVertex, deformation)},
+            {5, 1, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(GrassMorph, centreBlade)},
+            {6, 1, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(GrassMorph, nextCentreWidth)},
+            {7, 1, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(GrassMorph, nextNormal)},
+            {8, 1, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(GrassMorph, nextDeformation)}};
         VkPipelineVertexInputStateCreateInfo input{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
-        input.vertexBindingDescriptionCount = 1;
-        input.pVertexBindingDescriptions = &bind;
-        input.vertexAttributeDescriptionCount = 5;
+        input.vertexBindingDescriptionCount = 2;
+        input.pVertexBindingDescriptions = bind;
+        input.vertexAttributeDescriptionCount = 9;
         input.pVertexAttributeDescriptions = attrs;
         VkPipelineInputAssemblyStateCreateInfo assembly{
             VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
@@ -383,12 +389,16 @@ VulkanVegetation::VulkanVegetation(VkPhysicalDevice p, VkDevice d, uint32_t fami
         s.materialHandles.push_back(h);
     }
     std::vector<FoliageVertex> vertices;
+    std::vector<GrassMorph> morphs;
     std::vector<uint32_t> indices;
     s.bins = 0;
     for (uint32_t asset = 0; asset < library.assets.size(); ++asset) {
         const auto &a = library.assets[asset];
         s.current.ranges[asset] = a.ranges;
-        s.current.deformation[asset] = {a.stiffness, a.displacement, float(a.category), 0};
+        s.current.deformation[asset] = {a.stiffness, a.displacement, float(a.category),
+                                        a.grass.counts.x ? 1.f : 0.f};
+        s.current.grassBands[asset] = a.grass.bands;
+        s.current.grassShading[asset] = a.grass.shading;
         auto horizontalExtent = glm::max(glm::abs(glm::vec2(a.minimum.x, a.minimum.z)),
                                          glm::abs(glm::vec2(a.maximum.x, a.maximum.z)));
         float radius = glm::length(horizontalExtent) + a.displacement;
@@ -399,14 +409,20 @@ VulkanVegetation::VulkanVegetation(VkPhysicalDevice p, VkDevice d, uint32_t fami
                 uint32_t base = uint32_t(vertices.size()), bin = s.bins++;
                 s.geometryInfo[bin] = {uint32_t(part.indices.size()), uint32_t(indices.size()),
                                        m.resolve(s.materialHandles[part.material]), asset};
-                s.current.foliage[bin] = {1, 1, 1, library.materials[part.material].transmission};
+                s.current.foliage[bin] = {a.grass.counts.x ? 1.f : 0.f, a.grass.shading.z, a.grass.shading.w,
+                                          library.materials[part.material].transmission};
                 vertices.insert(vertices.end(), part.vertices.begin(), part.vertices.end());
+                if (part.grassMorph.empty())
+                    morphs.resize(vertices.size());
+                else
+                    morphs.insert(morphs.end(), part.grassMorph.begin(), part.grassMorph.end());
                 for (auto i : part.indices)
                     indices.push_back(base + i);
             }
         }
     }
-    s.indexOffset = vertices.size() * sizeof(FoliageVertex);
+    s.morphOffset = vertices.size() * sizeof(FoliageVertex);
+    s.indexOffset = s.morphOffset + morphs.size() * sizeof(GrassMorph);
     const uint64_t geometryBytes = s.indexOffset + indices.size() * 4,
                    instanceBytes = s.count * sizeof(FoliageInstance);
     std::vector<glm::uvec4> workGroups, casterWork;
@@ -492,7 +508,8 @@ VulkanVegetation::VulkanVegetation(VkPhysicalDevice p, VkDevice d, uint32_t fami
     s.allocate(s.staging, geometryBytes + (options.streaming.enabled ? 0 : instanceBytes),
                VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true);
     auto *data = static_cast<char *>(s.staging.mapped);
-    std::memcpy(data, vertices.data(), s.indexOffset);
+    std::memcpy(data, vertices.data(), s.morphOffset);
+    std::memcpy(data + s.morphOffset, morphs.data(), morphs.size() * sizeof(GrassMorph));
     std::memcpy(data + s.indexOffset, indices.data(), indices.size() * 4);
     if (instanceBytes && !options.streaming.enabled)
         std::memcpy(data + geometryBytes, s.population.instances.data(), instanceBytes);
@@ -818,8 +835,9 @@ void VulkanVegetation::draw(VkCommandBuffer cmd, VkDescriptorSet lighting, uint3
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, s.layout, 0, 3, sets, 0, nullptr);
     const uint32_t pipelineIndex = pass == 4 ? 3 : pass + (f.temporal && pass < 2 ? 4 : 0);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, s.pipelines[pipelineIndex]);
-    VkDeviceSize offset = 0;
-    vkCmdBindVertexBuffers(cmd, 0, 1, &s.geometry.buffer, &offset);
+    VkDeviceSize offsets[] = {0, s.morphOffset};
+    VkBuffer buffers[] = {s.geometry.buffer, s.geometry.buffer};
+    vkCmdBindVertexBuffers(cmd, 0, 2, buffers, offsets);
     vkCmdBindIndexBuffer(cmd, s.geometry.buffer, s.indexOffset, VK_INDEX_TYPE_UINT32);
     for (uint32_t bin = 0; bin < s.bins; ++bin) {
         if (view && !s.legacy && s.current.ranges[s.geometryInfo[bin].w].w <= 0)

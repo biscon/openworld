@@ -3,6 +3,14 @@
 #include <cstring>
 #include <tuple>
 namespace ow {
+TerrainParameters VulkanTerrainStream::vegetationGeography(VegetationCellKey key) const {
+    // A four-metre grid anchors the continuous material evaluator to this cell,
+    // independently of the rendered terrain provider and camera origin.
+    auto parameters = terrainParameters({8, .5f}, {{key.x, key.z}, settings_});
+    parameters.sampling.w = 1;
+    return parameters;
+}
+
 void VulkanTerrainStream::prepareVegetation(const Camera &camera, bool eroded) {
     if (!ground_) {
         vegetationReady_ = false;

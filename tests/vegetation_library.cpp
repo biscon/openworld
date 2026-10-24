@@ -1,6 +1,7 @@
 #include "vegetation_library.hpp"
 #include "test_support.hpp"
 #include <chrono>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -13,6 +14,103 @@ template <class F> void rejects(F f) {
         rejected = true;
     }
     require(rejected, "invalid asset/population rejected");
+}
+// Independent version-2 encoder: compatibility fixtures own their geometry/textures.
+void writeVersion2(const std::filesystem::path &path, const VegetationLibrary &l) {
+    std::ofstream f(path, std::ios::binary | std::ios::trunc);
+    auto u = [&](uint32_t x) {
+        for (int k = 0; k < 4; ++k)
+            f.put(char(x >> (8 * k)));
+    };
+    auto scalar = [&](float x) {
+        uint32_t bits;
+        std::memcpy(&bits, &x, 4);
+        u(bits);
+    };
+    auto vec = [&](auto v) {
+        for (int k = 0; k < v.length(); ++k)
+            scalar(v[k]);
+    };
+    u(0x3256474f);
+    u(2);
+    u(l.revision);
+    u(uint32_t(l.assets.size()));
+    u(uint32_t(l.materials.size()));
+    u(uint32_t(l.textures.size()));
+    for (auto &m : l.materials) {
+        vec(m.colour);
+        scalar(m.roughness);
+        scalar(m.cutoff);
+        scalar(m.transmission);
+        u(uint32_t(m.colourTexture));
+        u(uint32_t(m.normalTexture));
+        u(m.masked);
+    }
+    for (auto &a : l.assets) {
+        u(uint32_t(a.category));
+        vec(a.minimum);
+        vec(a.maximum);
+        vec(a.ranges);
+        scalar(a.stiffness);
+        scalar(a.displacement);
+        for (auto &lod : a.lods) {
+            u(uint32_t(lod.size()));
+            for (auto &p : lod) {
+                u(p.material);
+                u(uint32_t(p.vertices.size()));
+                u(uint32_t(p.indices.size()));
+                for (auto &v : p.vertices) {
+                    vec(v.position);
+                    vec(v.normal);
+                    vec(v.tangent);
+                    vec(v.uv);
+                    vec(v.deformation);
+                }
+                for (auto index : p.indices)
+                    u(index);
+            }
+        }
+    }
+}
+void checkGrass(const VegetationLibrary &library, uint32_t blades) {
+    for (uint32_t a = 0; a < 2; ++a) {
+        const auto &asset = library.assets[a];
+        require(asset.grass.counts == glm::uvec4(blades, (blades + 2) / 3, (blades + 5) / 6, 0),
+                "nested rounded blade counts");
+        for (uint32_t lod = 0; lod < 3; ++lod) {
+            const auto &p = asset.lods[lod][0];
+            const auto &target = asset.lods[std::min(2u, lod + 1)][0];
+            for (size_t i = 0; i < p.vertices.size(); ++i) {
+                const auto &m = p.grassMorph[i];
+                const auto &v = p.vertices[i];
+                const uint32_t b = uint32_t(m.centreBlade.w);
+                auto end = glm::vec3(m.nextCentreWidth) +
+                           (v.position - glm::vec3(m.centreBlade)) * m.nextCentreWidth.w;
+                if (b >= asset.grass.counts[std::min(2u, lod + 1)]) {
+                    near(m.nextCentreWidth.w, 0, 0, "retired blade collapses completely");
+                } else {
+                    const auto &root = target.vertices[b * 4 + i % 2];
+                    const auto &tip = target.vertices[b * 4 + 2 + i % 2];
+                    near(glm::length(end - glm::mix(root.position, tip.position, v.uv.y)), 0, 1e-6,
+                         "morph endpoint matches coarse surface");
+                    near(glm::length(m.nextDeformation - glm::mix(root.deformation, tip.deformation, v.uv.y)),
+                         0, 1e-6, "morph wind weights match coarse surface");
+                }
+                // Convex morph/fade envelope and finite anchored roots throughout the band.
+                for (float t : {0.f, .25f, .5f, 1.f})
+                    for (float coverage : {0.f, .4f, 1.f}) {
+                        auto q = glm::mix(glm::vec3(m.centreBlade), glm::vec3(m.nextCentreWidth), t) +
+                                 (v.position - glm::vec3(m.centreBlade)) *
+                                     glm::mix(1.f, m.nextCentreWidth.w, t) * coverage;
+                        for (int k = 0; k < 3; ++k)
+                            require(q[k] >= asset.minimum[k] - 1e-6 && q[k] <= asset.maximum[k] + 1e-6,
+                                    "intermediate geometry stays in asset envelope");
+                        if (v.uv.y == 0)
+                            near(q.y, 0, 1e-6, "morph and fade preserve grounded roots");
+                    }
+            }
+        }
+    }
 }
 int main() {
     try {
@@ -30,15 +128,13 @@ int main() {
                     if (v.position.y == 0)
                         require(v.deformation.y == 0 && v.deformation.z == 0, "roots anchored");
             }
-        // First blade root and tip persist through changing segment counts.
-        for (uint32_t a = 0; a < 2; ++a)
-            for (uint32_t lod = 1; lod < 3; ++lod) {
-                const auto &full = library.assets[a].lods[0][0].vertices;
-                const auto &low = library.assets[a].lods[lod][0].vertices;
-                near(glm::length(full[0].position - low[0].position), 0, .004, "nested blade root");
-                near(glm::length(full[6].position - low[(3 - lod) * 2].position), 0, .001,
-                     "nested blade tip");
-            }
+        checkGrass(library, 24);
+        for (uint32_t count : {8u, 25u, 64u}) {
+            VegetationRecipe recipe;
+            recipe.blades = count;
+            auto varied = buildVegetationLibrary(recipe);
+            checkGrass(varied, count);
+        }
         auto population = makeVegetationPopulation(8, true, true);
         validate(population, library);
         for (auto &cell : population.cells)
@@ -73,6 +169,15 @@ int main() {
         malformed = library;
         malformed.assets[0].lods[0][0].vertices[0].normal = {};
         rejects([&] { validate(malformed); });
+        malformed = library;
+        malformed.assets[0].lods[0][0].grassMorph.pop_back();
+        rejects([&] { validate(malformed); });
+        malformed = library;
+        malformed.assets[0].lods[0][0].grassMorph[0].nextCentreWidth.x = 20;
+        rejects([&] { validate(malformed); });
+        malformed = library;
+        malformed.assets[0].grass.bands.y = 10;
+        rejects([&] { validate(malformed); });
         auto dir =
             std::filesystem::temp_directory_path() /
             ("ow-foliage-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
@@ -85,6 +190,7 @@ int main() {
         } cleanup{dir};
         writeVegetationLibrary(dir, library);
         auto loaded = readVegetationLibrary(dir);
+        checkGrass(loaded, 24);
         require(loaded.textures[0].bytes == library.textures[0].bytes, "saved texture round trip");
         auto &a = loaded.assets[3].lods[1][1];
         auto &b = library.assets[3].lods[1][1];
@@ -92,6 +198,15 @@ int main() {
         for (size_t i = 0; i < a.vertices.size(); ++i)
             near(glm::length(a.vertices[i].deformation - b.vertices[i].deformation), 0, 0,
                  "saved deformation metadata");
+        writeVersion2(dir / "library.bin", library);
+        auto legacy = readVegetationLibrary(dir);
+        require(legacy.assets[0].grass.counts.x == 0 && legacy.assets[0].lods[0][0].grassMorph.empty(),
+                "version 2 keeps legacy rendering without morph metadata");
+        require(legacy.assets[0].lods[0][0].indices == library.assets[0].lods[0][0].indices,
+                "version 2 preserves stored mesh topology");
+        writeVegetationLibrary(dir, legacy);
+        require(readVegetationLibrary(dir).assets[0].grass.counts.x == 0,
+                "legacy re-save does not opt into morphing");
         {
             std::ofstream f(dir / "library.bin", std::ios::binary | std::ios::app);
             f.put('x');

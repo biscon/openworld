@@ -121,3 +121,13 @@ it is not per-vertex ground conforming geometry. Steep/unsupported footprints ar
 suppressed with their candidate identity retained. V4 still owns production visibility,
 terrain coverage/fades and longer species ranges; V5 owns habitat art/interaction;
 V6 retains full-scene quality, moving-frame CPU spikes and longer stress acceptance.
+
+## Rock exclusion for grass
+
+Status: implemented and natively verified. Grass population generation uses the same continuous procedural slope and rock classifier as the terrain material. The multiplier is `1 - smoothstep(0.15, 0.50, rockWeight)`: unchanged acceptance below 15% rock, no grass at or above 50%, and stable thinning between. Existing ranks, positions, habitat, elevation, slope, clearing and attachment rules remain intact. Ferns/shrubs are unchanged; texture detail, lighting and debug material overrides do not affect placement.
+
+The terrain stream supplies cell-anchored `TerrainParameters` using the existing 4 m geographic cell and current terrain settings. Each bounded generation job appends this 496-byte record (1648 bytes total); the two 32-job upload buffers add 31 KiB. The compute shader evaluates the material's continuous geography only for newly generated grass, never for attachment repairs or ordinary drawing. Parameters use canonical integer world origins to preserve cell/rebase agreement. Terrain revisions already retire populations when settings change. Buffers retain existing frame-fence ownership and update limits; no new descriptors, per-instance fields or readbacks are required.
+
+Verification covers bare/mixed/non-rock acceptance, cell-origin equivalence, unchanged candidate identity, terrain-setting regeneration, existing material rendering and Vulkan synchronization. TAA becomes the engine startup default again; explicit CLI and saved-review AA modes continue to override it, with thin-geometry stability defaulting on.
+
+Verification (2026-10-24): Debug/Release engine builds, material GPU checks and streamed vegetation GPU checks pass on the RTX 3060 with validation. The owned mountain fixture rejects all 1,198 grass candidates on rock-dominated ground, verifies mixed-edge ranks and adjacent-origin agreement, and restores all grass after changing the terrain to flat non-rock ground. The saved user mountain camera was replayed for 600 frames at 1080p with zero validation errors; `/tmp/ow-rock-mountain.png` records the resulting bare slopes. One bounded update check measured 0.046 ms p95 / 0.058 ms maximum GPU update work, 152.130 MiB vegetation allocation and zero steady-state render-thread allocations. Native startup/review smoke checks verify TAA plus thin-geometry stability by default, explicit SMAA override and preservation of the saved SMAA choice.

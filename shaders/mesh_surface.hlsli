@@ -5,6 +5,7 @@ struct MeshSurface {
 [[vk::location(10)]]nointerpolation float4 plant:TEXCOORD9;
 [[vk::location(11)]]nointerpolation uint identity:TEXCOORD10;
 [[vk::location(12)]]nointerpolation float4 foliage:TEXCOORD11;
+[[vk::location(13)]]nointerpolation float4 grassLighting:TEXCOORD12;
 #endif
 [[vk::location(9)]]float3 renderedPosition:TEXCOORD8;[[vk::location(8)]]float4 previousClip:TEXCOORD7;float4 position:SV_Position;[[vk::location(0)]]float3 relative:TEXCOORD0;[[vk::location(1)]]float3 normal:NORMAL;[[vk::location(2)]]float4 tangent:TANGENT;[[vk::location(3)]]float2 uv:TEXCOORD1;[[vk::location(4)]]nointerpolation uint material:TEXCOORD2;};
 float4 meshTexture(uint index,float2 uv,float2 dx,float2 dy){
@@ -34,7 +35,7 @@ SurfaceMaterial meshSurface(MeshSurface i,MaterialRecord r,float4 base,float2 dx
     float2 xy=0;
     float normalDetail=1;
     #ifdef OW_VEGETATION
-    normalDetail=1-smoothstep(35,65,length(i.relative));
+    normalDetail=i.foliage.x!=0?1-i.grassLighting.w:1-smoothstep(35,65,length(i.relative));
     #endif
     if(r.meshMaps.y!=1 && r.factors.w>0 && normalDetail>0)xy=(meshTexture(r.meshMaps.y,i.uv,dx,dy).xy*2-1)*r.factors.w*normalDetail;
     float3 tn=float3(xy,sqrt(saturate(1-dot(xy,xy))));
@@ -46,6 +47,7 @@ SurfaceMaterial meshSurface(MeshSurface i,MaterialRecord r,float4 base,float2 dx
 
 #ifdef OW_VEGETATION
 void vegetationMask(MeshSurface i) {
+    if(i.foliage.x!=0)return; // Opaque grass fades geometrically in the vertex stage.
     // Stable plant-local coverage noise shared by camera/depth/shadow evaluation.
     uint2 q=uint2(saturate(i.uv)*128);
     uint h=q.x*1973+q.y*9277+i.identity*26699;h^=h>>16;h*=0x7feb352d;h^=h>>15;

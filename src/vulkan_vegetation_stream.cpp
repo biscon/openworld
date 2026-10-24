@@ -217,8 +217,10 @@ void VulkanVegetationStream::prepare(uint32_t frame, WorldPosition camera, World
                 job.clearing = {float(clearing.x), float(clearing.z), settings.exclusion.radius, 0};
                 job.assets = assets_;
                 job.patches = surface.patches;
-                if (!slot.generated)
+                job.geography = terrain->vegetationGeography(slot.key);
+                if (!slot.generated) {
                     ++stats.generatedCells;
+                }
                 slot.generated = true;
                 f.signatures[i] = surface.signature;
                 f.generations[i] = slot.generation;

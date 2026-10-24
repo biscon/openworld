@@ -22,7 +22,7 @@ struct TerrainMaterialSettings {
     float repeatMetres = 4, normalStrength = 1, roughness = 1;
     glm::vec3 tint{1};
     bool heightBlend = true, cliffs = true, macro = true, twoAxis = false;
-    float heightInfluence = .5f, blendWidth = .25f, macroRepeatMetres = 64, macroStrength = 1;
+    float heightInfluence = .5f, blendWidth = .25f, macroRepeatMetres = 90, macroStrength = 1;
     int diagnostic = 0; // shaded, adjusted weights, projections, normals, logical reads
 };
 enum class TerrainMaterialPreset { Baseline, Balanced, High };

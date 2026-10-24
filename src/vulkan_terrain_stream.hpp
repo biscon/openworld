@@ -36,6 +36,7 @@ class VulkanTerrainStream {
     uint64_t vegetationRevision() const { return epoch_ * 2 + (vegetationEroded_ ? 1 : 0); }
     uint64_t vegetationSurfaceVersion() const { return vegetationPartition_; }
     uint32_t vegetationSeed() const { return settings_.seed; }
+    TerrainParameters vegetationGeography(VegetationCellKey) const;
     void vegetationReservation(double milliseconds, uint32_t groups = 0) {
         vegetationReserved_ = milliseconds;
         vegetationGroups_ = groups;

@@ -26,8 +26,106 @@ float difference(const HdrSnapshot &a, const HdrSnapshot &b) {
         total += glm::length(glm::vec3(a.pixels[i] - b.pixels[i]));
     return total / a.pixels.size();
 }
+void grassTransitions() {
+    VegetationRecipe recipe;
+    recipe.width = .05f;
+    recipe.height = 1.4f;
+    auto library = std::make_shared<VegetationLibrary>(buildVegetationLibrary(recipe));
+    auto population = std::make_shared<VegetationPopulation>();
+    population->cells.push_back({{}, 0, 1});
+    population->instances.push_back({{0, 0, 0, 2}, .4f, .5f, 0, 0});
+    auto o = options(library, population, true);
+    o.width = 512;
+    o.height = 288;
+    Renderer r(o);
+    SceneSettings s;
+    s.terrainVisible = false;
+    s.shadows.mode = ShadowMode::Off;
+    s.vegetation.wind = 1;
+    s.vegetation.time = .7f;
+    s.vegetation.depthPrepass = false;
+    s.antialiasing = AntialiasingMode::Off;
+    Camera c;
+    c.local = {0, 1, 10};
+    // The first LOD is exactly the close geometry, including wind and shading.
+    r.render(c, s);
+    auto near = r.readHdrSnapshot();
+    s.vegetation.forceLod = 0;
+    r.render(c, s);
+    require(difference(near, r.readHdrSnapshot()) < 1e-6f, "near grass unchanged by automatic LOD");
+    s.vegetation.forceLod = -1;
+    std::set<uint32_t> visited;
+    for (double distance : {18., 22., 30., 36., 40., 60.}) {
+        c.local.z = distance;
+        s.opaqueDepthPrepass = false;
+        r.render(c, s);
+        const auto colour = r.readHdrSnapshot();
+        const auto snapshot = r.readVegetationSnapshot();
+        require(snapshot.stats.visible == 1 && snapshot.stats.casters == 0,
+                "grass morph retains instance identity");
+        for (uint32_t lod = 0; lod < 3; ++lod)
+            if (snapshot.counts[lod])
+                visited.insert(lod);
+        s.opaqueDepthPrepass = true;
+        r.render(c, s);
+        require(difference(colour, r.readHdrSnapshot()) < .00001f,
+                "morph and geometric fade agree in depth and colour");
+    }
+    require(visited.size() == 3, "fixture crosses both grass LOD bands");
+    // Immediately before a bin change, the fine mesh must rasterize the same
+    // wind-deformed coverage as the next mesh (no double draw or silhouette pop).
+    uint32_t hash = 781;
+    hash ^= hash >> 16;
+    hash *= 0x7feb352du;
+    hash ^= hash >> 15;
+    hash *= 0x846ca68bu;
+    hash ^= hash >> 16;
+    const float stagger = (float(hash >> 8) / 16777216.f - .5f) * 4;
+    const float focalScale = 288.f / 1080.f * 2;
+    s.vegetation.coverage = true;
+    for (uint32_t lod = 0; lod < 2; ++lod) {
+        const float d =
+            15 + (library->assets[0].grass.bands[lod * 2 + 1] + stagger - 15 - .0001f) * focalScale;
+        c.local.z = std::sqrt(d * d - 1);
+        r.render(c, s);
+        const auto morphed = r.readHdrSnapshot();
+        require(r.readVegetationSnapshot().counts[lod] == 1, "endpoint fixture is in the retiring bin");
+        s.vegetation.forceLod = int32_t(lod + 1);
+        r.render(c, s);
+        const auto coarse = r.readHdrSnapshot();
+        uint32_t changed = 0;
+        for (size_t i = 0; i < coarse.pixels.size(); ++i)
+            changed += (coarse.pixels[i].x > .5f) != (morphed.pixels[i].x > .5f);
+        // Subdivided and unsplit triangles may disagree on an edge pixel due to
+        // floating-point projection/subpixel raster precision, even when coplanar.
+        require(changed <= 2, "morph endpoint matches the next LOD within two raster edge pixels");
+        s.vegetation.forceLod = -1;
+    }
+    s.vegetation.coverage = false;
+    // Moving inside the first morph band must reproject previous geometry, not
+    // merely the current mesh under the previous camera matrix.
+    s.antialiasing = AntialiasingMode::Taa;
+    s.vegetation.wind = 0;
+    c.local.z = 18;
+    for (int i = 0; i < 3; ++i)
+        r.render(c, s);
+    c.local.z += .02;
+    r.render(c, s);
+    uint32_t moving = 0;
+    for (auto motion : r.readPostSnapshot().motion) {
+        require(std::isfinite(motion.x) && std::isfinite(motion.y), "finite grass morph motion");
+        moving += motion.w > 0 && glm::length(glm::vec2(motion)) > 1e-6f;
+    }
+    require(moving > 4, "morphing grass retains valid submitted motion");
+    c.local.z = 40;
+    r.render(c, s);
+    for (auto motion : r.readPostSnapshot().motion)
+        require(motion.w <= 0, "grass bin changes reject incompatible history");
+    require(!r.validationErrors(), "grass transition Vulkan validation");
+}
 int main() {
     try {
+        grassTransitions();
         auto library = std::make_shared<VegetationLibrary>(buildVegetationLibrary());
         for (bool fixed : {true, false}) {
             auto population = std::make_shared<VegetationPopulation>(makeVegetationPopulation(8, true));

@@ -101,14 +101,16 @@ int main(int argc, char **argv) {
         if (argc < 2)
             throw std::invalid_argument("Usage: vegetation_stream_probe OUTPUT [--cpu-check] "
                                         "[--engine-scene] [--distance 20..200] [--occlusion-check] "
-                                        "[--route-check] [--taa-check] [--aa-check]");
+                                        "[--route-check] [--taa-check] [--aa-check] [--grass-check]");
         bool cpuOnly = false, routeOnly = false, engineScene = false, occlusionCheck = false,
-             taaCheck = false, aaCheck = false;
+             taaCheck = false, aaCheck = false, grassCheck = false;
         float distance = 70;
         for (int i = 2; i < argc; ++i) {
             const std::string arg = argv[i];
             if (arg == "--cpu-check")
                 cpuOnly = true;
+            else if (arg == "--grass-check")
+                grassCheck = true;
             else if (arg == "--aa-check")
                 aaCheck = true;
             else if (arg == "--taa-check")
@@ -231,6 +233,46 @@ int main(int argc, char **argv) {
         bookmark.scene = scene;
         bookmark.startup = o;
         saveReviewView(output / "close-view.json", bookmark);
+        if (grassCheck) {
+            const Camera origin = camera;
+            scene.antialiasing = AntialiasingMode::Smaa1x;
+            scene.vegetation.wind = 0;
+            scene.vegetation.time = 0;
+            Samples sample;
+            for (int i = 0; i < 152; ++i) {
+                auto ms = frame();
+                if (i >= 32)
+                    sample.add(r, ms, frameAllocations);
+            }
+            sample.print("grass 1080p SMAA");
+            r.capture(output / "grass-close.ppm");
+            for (int phase = 0; phase < 3; ++phase) {
+                camera = origin;
+                scene.vegetation.wind = phase == 1 ? 1 : 0;
+                scene.vegetation.time = 0;
+                for (int i = 0; i < 32; ++i)
+                    frame();
+                for (int i = 0; i < 24; ++i) {
+                    if (phase == 0)
+                        camera.yaw += .001f;
+                    if (phase == 2)
+                        camera.local.z += .3;
+                    frame();
+                    r.capture(output / ("grass-" + std::to_string(phase) + "-" + std::to_string(i) + ".ppm"));
+                }
+            }
+            for (auto mode : {AntialiasingMode::Fxaa, AntialiasingMode::Taa}) {
+                camera = origin;
+                scene.antialiasing = mode;
+                scene.vegetation.wind = 1;
+                for (int i = 0; i < 32; ++i) {
+                    camera.yaw += .001f;
+                    frame();
+                }
+                r.capture(output / ("grass-aa-" + std::to_string(uint32_t(mode)) + ".ppm"));
+            }
+            return 0;
+        }
         if (aaCheck) {
             const Camera origin = camera;
             for (auto mode : {AntialiasingMode::Off, AntialiasingMode::Fxaa, AntialiasingMode::Smaa1x,

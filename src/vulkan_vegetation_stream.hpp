@@ -36,8 +36,9 @@ class VulkanVegetationStream {
         glm::vec4 canonicalGrid{}, habitat{}, elevation{}, clearing{};
         glm::uvec4 assets{};
         std::array<VegetationTerrainPatch, 16> patches{};
+        TerrainParameters geography{};
     };
-    static_assert(sizeof(Job) == 1152);
+    static_assert(sizeof(Job) == 1648);
     struct Frame {
         render_detail::Buffer attachments, jobs;
         VkDescriptorSet set{};

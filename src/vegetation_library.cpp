@@ -38,6 +38,67 @@ void leaf(FoliagePart &p, glm::vec3 root, glm::vec3 direction, glm::vec3 right, 
         p.indices.insert(p.indices.end(), {a, a + 1, a + 2, a + 1, a + 3, a + 2});
     }
 }
+// Static correspondence is baked once; no instance-specific data is needed.
+void buildGrassMorph(FoliageAsset &a) {
+    auto area = [](const FoliagePart &p) {
+        float sum = 0;
+        for (size_t i = 0; i < p.indices.size(); i += 3) {
+            auto x = p.vertices[p.indices[i]].position;
+            auto y = p.vertices[p.indices[i + 1]].position;
+            auto z = p.vertices[p.indices[i + 2]].position;
+            sum += glm::length(glm::cross(y - x, z - x)) * .5f;
+        }
+        return sum;
+    };
+    const float fullArea = area(a.lods[0][0]);
+    for (uint32_t lod = 1; lod < 3; ++lod) {
+        auto &p = a.lods[lod][0];
+        const float width = std::min(6.f, fullArea / area(p));
+        for (size_t i = 0; i < p.vertices.size(); i += 2) {
+            auto centre = (p.vertices[i].position + p.vertices[i + 1].position) * .5f;
+            for (size_t e = 0; e < 2; ++e)
+                p.vertices[i + e].position = centre + (p.vertices[i + e].position - centre) * width;
+        }
+    }
+    for (uint32_t lod = 0; lod < 3; ++lod) {
+        auto &p = a.lods[lod][0];
+        const uint32_t stride = lod == 0 ? 8 : 4, next = std::min(2u, lod + 1);
+        const auto &target = a.lods[next][0];
+        p.grassMorph.resize(p.vertices.size());
+        for (size_t i = 0; i < p.vertices.size(); ++i) {
+            auto &m = p.grassMorph[i];
+            const auto &v = p.vertices[i];
+            const uint32_t blade = uint32_t(i) / stride;
+            auto centre = (p.vertices[i & ~size_t(1)].position + p.vertices[i | 1].position) * .5f;
+            m.centreBlade = {centre, float(blade)};
+            m.nextCentreWidth = {centre, 0};
+            m.nextNormal = {v.normal, 0};
+            m.nextDeformation = v.deformation;
+            if (blade >= a.grass.counts[next])
+                continue;
+            const auto &root = target.vertices[blade * 4 + i % 2];
+            const auto &tip = target.vertices[blade * 4 + 2 + i % 2];
+            auto targetCentre = glm::mix(
+                (target.vertices[blade * 4].position + target.vertices[blade * 4 + 1].position) * .5f,
+                (target.vertices[blade * 4 + 2].position + target.vertices[blade * 4 + 3].position) * .5f,
+                v.uv.y);
+            const auto targetPosition = glm::mix(root.position, tip.position, v.uv.y);
+            m.nextCentreWidth = {targetCentre, glm::length(targetPosition - targetCentre) /
+                                                   glm::length(v.position - centre)};
+            m.nextNormal = {glm::mix(root.normal, tip.normal, v.uv.y), 0};
+            m.nextDeformation = glm::mix(root.deformation, tip.deformation, v.uv.y);
+        }
+    }
+    // A morph is a convex interpolation of endpoints, including the widened meshes.
+    a.minimum = glm::vec3(INFINITY);
+    a.maximum = glm::vec3(-INFINITY);
+    for (const auto &lod : a.lods)
+        for (const auto &p : lod)
+            for (const auto &v : p.vertices) {
+                a.minimum = glm::min(a.minimum, v.position);
+                a.maximum = glm::max(a.maximum, v.position);
+            }
+}
 struct Wire {
     std::fstream stream;
     bool writing;
@@ -79,8 +140,11 @@ struct Wire {
     }
 };
 void payload(Wire &w, VegetationLibrary &l) {
-    if (w.u(0x3256474f) != 0x3256474f || w.u(2) != 2)
+    if (w.u(0x3256474f) != 0x3256474f)
         throw std::runtime_error("Unsupported vegetation library");
+    const auto version = w.u(3);
+    if (version != 2 && version != 3)
+        throw std::runtime_error("Unsupported vegetation library version");
     l.revision = w.u(l.revision);
     l.assets.resize(w.count(l.assets.size(), 8));
     l.materials.resize(w.count(l.materials.size(), 16));
@@ -101,6 +165,12 @@ void payload(Wire &w, VegetationLibrary &l) {
         w.vec(a.ranges);
         a.stiffness = w.f(a.stiffness);
         a.displacement = w.f(a.displacement);
+        if (version >= 3) {
+            for (int k = 0; k < 4; ++k)
+                a.grass.counts[k] = w.u(a.grass.counts[k]);
+            w.vec(a.grass.bands);
+            w.vec(a.grass.shading);
+        }
         for (auto &lod : a.lods) {
             lod.resize(w.count(lod.size(), 2));
             for (auto &p : lod) {
@@ -116,6 +186,15 @@ void payload(Wire &w, VegetationLibrary &l) {
                 }
                 for (auto &i : p.indices)
                     i = w.u(i);
+                if (version >= 3) {
+                    p.grassMorph.resize(w.count(p.grassMorph.size(), 65536));
+                    for (auto &m : p.grassMorph) {
+                        w.vec(m.centreBlade);
+                        w.vec(m.nextCentreWidth);
+                        w.vec(m.nextNormal);
+                        w.vec(m.nextDeformation);
+                    }
+                }
             }
         }
     }
@@ -163,6 +242,8 @@ VegetationLibrary buildVegetationLibrary(const VegetationRecipe &r) {
         a.ranges = asset == 3   ? glm::vec4(25, 50, 90, 50)
                    : asset == 2 ? glm::vec4(15, 35, 70, 25)
                                 : glm::vec4(20, 45, 70, 0);
+        if (asset < 2)
+            a.grass.counts = {r.blades, (r.blades + 2) / 3, (r.blades + 5) / 6, 0};
         a.minimum = glm::vec3(INFINITY);
         a.maximum = glm::vec3(-INFINITY);
         for (uint32_t lod = 0; lod < 3; ++lod) {
@@ -171,19 +252,16 @@ VegetationLibrary buildVegetationLibrary(const VegetationRecipe &r) {
             parts[0].material = asset == 3 ? 3 : asset;
             if (asset == 3)
                 parts[1].material = 4;
-            uint32_t segments = asset < 2 ? 3 - lod : 4 - lod;
+            uint32_t segments = asset < 2 ? (lod == 0 ? 3 : 1) : 4 - lod;
             if (asset < 2)
-                for (uint32_t b = 0; b < (lod == 0   ? r.blades
-                                          : lod == 1 ? r.blades / 4
-                                                     : std::max(2u, r.blades / 12));
-                     ++b) {
+                for (uint32_t b = 0; b < a.grass.counts[lod]; ++b) {
                     uint32_t id = b * 13 + asset * 177;
                     float angle = random(id) * 6.2831853f;
                     glm::vec3 right(std::cos(angle), 0, std::sin(angle));
                     glm::vec3 root = right * (r.spread * std::sqrt(random(id + 2)));
                     auto direction = glm::normalize(glm::vec3(-right.z * .4f, 1, right.x * .4f));
-                    leaf(parts[0], root, direction, right, r.height * (.7f + .3f * random(id + 1)),
-                         r.width * (lod ? 1.15f : 1), segments, random(id + 3), false, r.height);
+                    leaf(parts[0], root, direction, right, r.height * (.7f + .3f * random(id + 1)), r.width,
+                         segments, random(id + 3), false, r.height);
                 }
             if (asset == 2)
                 for (uint32_t b = 0; b < (8u >> lod); ++b) {
@@ -215,6 +293,8 @@ VegetationLibrary buildVegetationLibrary(const VegetationRecipe &r) {
                     a.maximum = glm::max(a.maximum, v.position);
                 }
         }
+        if (asset < 2)
+            buildGrassMorph(a);
         l.assets.push_back(std::move(a));
     }
     validate(l);
@@ -259,6 +339,23 @@ void validate(const VegetationLibrary &l) {
                     "Invalid foliage ranges");
         require(a.ranges.x > 0 && a.ranges.y > a.ranges.x && a.ranges.z > a.ranges.y,
                 "Invalid foliage LOD order");
+        if (a.grass.counts.x) {
+            require(a.category == FoliageCategory::Grass && a.grass.counts.x <= 64 &&
+                        a.grass.counts.x > a.grass.counts.y && a.grass.counts.y > a.grass.counts.z &&
+                        a.grass.counts.z > 0 && a.grass.counts.w == 0,
+                    "Invalid grass counts");
+            for (int k = 0; k < 4; ++k)
+                require(std::isfinite(a.grass.bands[k]) && a.grass.bands[k] >= 17 &&
+                            a.grass.bands[k] <= 100 && (k == 0 || a.grass.bands[k] > a.grass.bands[k - 1]),
+                        "Invalid grass bands");
+            require(std::isfinite(a.grass.shading.x) && std::isfinite(a.grass.shading.y) &&
+                        a.grass.shading.x >= 15 && a.grass.shading.y > a.grass.shading.x &&
+                        a.grass.shading.y <= 100 && std::isfinite(a.grass.shading.z) &&
+                        a.grass.shading.z >= 0 && a.grass.shading.z <= .4f &&
+                        std::isfinite(a.grass.shading.w) && a.grass.shading.w >= .045f &&
+                        a.grass.shading.w <= 1,
+                    "Invalid grass shading");
+        }
         for (auto &lod : a.lods) {
             require(!lod.empty() && lod.size() <= 2, "Invalid vegetation parts");
             for (auto &p : lod) {
@@ -266,6 +363,39 @@ void validate(const VegetationLibrary &l) {
                             p.vertices.size() <= 65536 && !p.indices.empty() && p.indices.size() <= 196608 &&
                             p.indices.size() % 3 == 0,
                         "Invalid foliage mesh");
+                require(a.grass.counts.x ? p.grassMorph.size() == p.vertices.size() : p.grassMorph.empty(),
+                        "Invalid grass morph count");
+                if (a.grass.counts.x) {
+                    require(lod.size() == 1 && !l.materials[p.material].masked,
+                            "Grass morph requires opaque blades");
+                    const size_t level = size_t(&lod - a.lods.data());
+                    const uint32_t stride = level == 0 ? 8 : 4;
+                    require(p.vertices.size() == a.grass.counts[level] * stride, "Invalid grass topology");
+                    for (size_t i = 0; i < p.grassMorph.size(); ++i) {
+                        const auto &m = p.grassMorph[i];
+                        for (int k = 0; k < 4; ++k)
+                            require(std::isfinite(m.centreBlade[k]) && std::isfinite(m.nextCentreWidth[k]) &&
+                                        std::isfinite(m.nextNormal[k]) &&
+                                        std::isfinite(m.nextDeformation[k]) && m.nextDeformation[k] >= 0 &&
+                                        m.nextDeformation[k] <= (k == 3 ? 8 : 1),
+                                    "Invalid grass morph value");
+                        require(m.centreBlade.w == float(i / stride) && m.nextCentreWidth.w >= 0 &&
+                                    m.nextCentreWidth.w <= 6.01f &&
+                                    glm::length(glm::vec3(m.nextNormal)) > .001f,
+                                "Invalid grass correspondence");
+                        auto target =
+                            glm::vec3(m.nextCentreWidth) +
+                            (p.vertices[i].position - glm::vec3(m.centreBlade)) * m.nextCentreWidth.w;
+                        for (int k = 0; k < 3; ++k)
+                            require(m.centreBlade[k] >= a.minimum[k] - .0001f &&
+                                        m.centreBlade[k] <= a.maximum[k] + .0001f &&
+                                        m.nextCentreWidth[k] >= a.minimum[k] - .0001f &&
+                                        m.nextCentreWidth[k] <= a.maximum[k] + .0001f &&
+                                        target[k] >= a.minimum[k] - .0001f &&
+                                        target[k] <= a.maximum[k] + .0001f,
+                                    "Grass morph escapes bounds");
+                    }
+                }
                 for (auto i : p.indices)
                     require(i < p.vertices.size(), "Invalid foliage index");
                 for (auto &v : p.vertices) {

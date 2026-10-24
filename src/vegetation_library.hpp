@@ -14,10 +14,20 @@ struct FoliageVertex {
     glm::vec4 deformation{}; // normalized height, bend weight, flutter weight, phase
 };
 static_assert(sizeof(FoliageVertex) == 64);
+struct GrassMorph {
+    glm::vec4 centreBlade{}, nextCentreWidth{}, nextNormal{}, nextDeformation{};
+};
+static_assert(sizeof(GrassMorph) == 64);
+struct GrassStability {
+    glm::uvec4 counts{}; // zero disables the profile; xyz are nested blade counts
+    glm::vec4 bands{18, 28, 38, 55};
+    glm::vec4 shading{15, 40, .4f, .95f}; // start/end, macro-normal blend, roughness floor
+};
 struct FoliagePart {
     std::vector<FoliageVertex> vertices;
     std::vector<uint32_t> indices;
     uint32_t material = 0;
+    std::vector<GrassMorph> grassMorph;
 };
 struct FoliageMaterial {
     glm::vec4 colour{1};
@@ -32,9 +42,10 @@ struct FoliageAsset {
     glm::vec3 minimum{0}, maximum{0};
     glm::vec4 ranges{20, 45, 70, 0}; // LOD1, LOD2, camera fade end, shadow fade end
     float stiffness = 1, displacement = .5f;
+    GrassStability grass;
 };
 struct VegetationLibrary {
-    uint32_t revision = 2;
+    uint32_t revision = 3;
     std::vector<FoliageAsset> assets;
     std::vector<FoliageMaterial> materials;
     std::vector<TextureData> textures;

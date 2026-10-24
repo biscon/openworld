@@ -159,15 +159,25 @@ int main(int argc, char **argv) {
         hashBytes(recipeText.data(), recipeText.size());
         for (const auto &t : library.textures)
             hashBytes(t.bytes.data(), t.bytes.size());
-        for (const auto &a : library.assets)
+        for (const auto &a : library.assets) {
+            for (int k = 0; k < 4; ++k) {
+                hashBytes(&a.grass.counts[k], sizeof(uint32_t));
+                hashBytes(&a.grass.bands[k], sizeof(float));
+                hashBytes(&a.grass.shading[k], sizeof(float));
+            }
             for (const auto &lod : a.lods)
                 for (const auto &part : lod) {
                     for (const auto &v : part.vertices)
                         for (int k = 0; k < 3; ++k)
                             hashBytes(&v.position[k], sizeof(float));
+                    for (const auto &m : part.grassMorph)
+                        for (auto field : {m.centreBlade, m.nextCentreWidth, m.nextNormal, m.nextDeformation})
+                            for (int k = 0; k < 4; ++k)
+                                hashBytes(&field[k], sizeof(float));
                     for (auto index : part.indices)
                         hashBytes(&index, sizeof(index));
                 }
+        }
         library.revision = rgba.revision = revision;
         writeVegetationLibrary(out, library);
         writeVegetationLibrary(out, rgba, "_rgba");

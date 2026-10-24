@@ -14,6 +14,7 @@ struct VegetationUniform {
     float4 curvature,detail;
     column_major float4x4 raster;
     uint4 pyramidSize;
+    float4 grassBands[8],grassShading[8];
 };
 [[vk::binding(0,0)]] StructuredBuffer<Plant> plants;
 [[vk::binding(1,0)]] ConstantBuffer<VegetationUniform> vegetation;
@@ -40,8 +41,25 @@ uint plantAsset(Plant p,uint representation,float d) {
     bool card=representation==1||(representation==2&&d>lerp(35,45,plantRandom(p.identity+781)));
     return (p.identity%2)*2+(card?1:0);
 }
+bool stableGrass(uint asset) {return vegetation.profile.x==0&&vegetation.deformation[asset].w!=0;}
+float grassDistance(Plant p,float d,bool previous=false) {
+    // Preserve near appearance regardless of instance scale or render resolution.
+    return min(d,15)+max(d-15,0)/max(.1,p.rootScale.w*(previous?vegetation.detail.y:vegetation.detail.x));
+}
+float grassMorph(Plant p,float d,uint asset,uint lod,bool previous=false) {
+    if(lod==2||vegetation.profile.z!=0xffffffff)return 0;
+    float4 bands=vegetation.grassBands[asset];
+    float2 band=lod==0?bands.xy:bands.zw;
+    float stagger=(plantRandom(p.identity+781)-.5)*4;
+    return smoothstep(band.x+stagger,band.y+stagger,grassDistance(p,d,previous));
+}
 uint plantLod(Plant p,float d,uint asset,bool previous=false) {
     if(vegetation.profile.x==0&&vegetation.profile.z!=0xffffffff)return vegetation.profile.z;
+    if(stableGrass(asset)) {
+        d=grassDistance(p,d,previous);
+        float stagger=(plantRandom(p.identity+781)-.5)*4;
+        return d>vegetation.grassBands[asset].w+stagger?2:d>vegetation.grassBands[asset].y+stagger?1:0;
+    }
     if(vegetation.inspection.y!=0 && d>20)
         d=max(20,d/max(.1,p.rootScale.w*(previous?vegetation.detail.y:vegetation.detail.x)));
     float jitter=(plantRandom(p.identity+781)-.5)*4;

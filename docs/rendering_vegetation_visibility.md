@@ -42,7 +42,8 @@ curvature. Near-plane or uncertain Hi-Z tests retain candidates.
 
 Near density and existing thinning are retained; extra thinning starts beyond 80 m.
 Projected size supplements species LOD distances, with identity-staggered transitions.
-Density and final fade use matching stable masks in colour, depth and shadow passes.
+Plants and legacy grass use matching stable masks in colour, depth and shadow passes.
+New grass libraries use the geometric fades described in [grass stability](#grass-lod-and-shading-stability).
 Shading, fine flutter and shadows have independent limits. Previous submitted wind,
 camera and settings determine motion; incompatible/new geometry rejects history locally.
 
@@ -109,3 +110,21 @@ signature and per-cell patch ordering are independent of render traversal order,
 do not invalidate otherwise unchanged attachment caches. Provider generation, epoch,
 geometry and stitched topology still invalidate them. Snapshot storage is charged to
 the terrain host allocation; buckets never borrow indices into a reordered render list.
+
+## Grass LOD and shading stability
+
+Status: implemented; native verification recorded below. This replaces the grass LOD and stochastic fade described above for newly built assets; existing version-2 libraries retain their previous behavior.
+
+Near grass stays unchanged through 15 m. The offline builder creates nested blade prefixes (default 24/8/4, generally N/ceil(N/3)/ceil(N/6)) with 3/1/1 segments. Coarse blades expand to approximately preserve summed surface area, capped at six times authored width. Single-draw morphs retire blades by shrinking their width and widen/straighten survivors to match the next mesh. Bands are 18–28 and 38–55 adjusted metres, staggered by a stable per-instance ±2 m; bin changes occur only after the morph completes. Scale and unjittered focal length adjust distance beyond the protected 15 m zone. Forced LOD inspection shows settled meshes.
+
+An optional grass profile owns counts, transition bands and shading controls. Each participating vertex has a separate static 64-byte morph record: current centre/blade ID, next centre/width ratio, next normal, and next deformation weights. Nonparticipating vertices receive neutral records in the GPU stream. Library format 3 stores these fields, with format 2 still readable. The importer hashes the metadata. The existing geometry allocation and staging budget include the second stream; there are no per-instance additions, new frame allocations, extra draws or fragment terrain fetches. Bounds enclose the widened meshes and all interpolated targets; existing wind/slope envelopes still apply.
+
+Grass density/range fades use blade width instead of fragment noise. Candidate identities, thinning and render range remain unchanged. Camera depth and colour share the geometry. Motion evaluates the previous submitted distance, focal length, coverage, wind and geometry; newly appearing blades and incompatible LODs reject history. Grass remains excluded from shadow casting.
+
+From 15–40 adjusted metres, grass lighting normals blend at most 40% toward the attached terrain macro-normal, roughness approaches max(authored, 0.95), and normal-map detail fades out. Diffuse, specular and transmission use the filtered normal; shadow bias retains the original surface normal. Other plants and wind animation remain unchanged. This targets moving geometric and lighting aliasing but cannot guarantee pixel stability for unresolved geometry.
+
+Validation: owned CPU checks for nested geometry, endpoint correspondence, envelopes, malformed metadata and version-2 compatibility; existing native GPU coverage extended across morph/fade boundaries and submitted motion. One engine-view before/after comparison with SMAA (wind and camera movement), brief FXAA/TAA sanity checks, and one short 1080p timing sample. No standalone viewer or broad benchmark matrix.
+
+Verification (2026-10-24): Debug and Release engine builds and asset imports pass. Owned library, population, streaming, legacy vegetation, foliage and imported-texture integration checks pass on the RTX 3060 with Vulkan synchronization validation; 42 affected SPIR-V modules validate. CPU fixtures cover 8/24/25/64 blades, morph endpoint/deformation correspondence, intermediate envelopes and v2 read/re-save. The GPU fixture checks both LOD bands, opaque depth/colour agreement, geometric range fading, submitted motion and history rejection. At a fully morphed endpoint, subdivided and unsplit triangles agree within two raster edge pixels (one observed at the first boundary).
+
+A single 1080p/80 m engine-view sample (SMAA, 32 warmup + 120 measured frames) recorded grass depth/colour GPU medians of 0.369/0.860 ms before and 0.574/1.245 ms after: approximately +0.59 ms for the denser representation and morph stream. Vegetation memory increased from 151.955 to 152.100 MiB, with zero steady-state render-thread allocation calls. Full-frame medians were 6.47/6.23 ms; this short sample does not establish a total-frame speedup. Matching pan, stationary-wind and forward-movement sequences plus brief FXAA/TAA captures are in `/tmp/ow-grass-before` and `/tmp/ow-grass-after`. Captures confirm fuller distant coverage; raw temporal pixel differences also include actual movement and changed coverage, so no shimmer-reduction percentage is claimed. The user subsequently confirmed stable stationary TAA and preferred it over the spatial modes; TAA is restored as the engine startup default.

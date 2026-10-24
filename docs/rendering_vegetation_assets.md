@@ -24,7 +24,7 @@ not plants. Integer world origins are reduced before camera-relative conversion.
 Static per-cell wind phases preserve animation across camera rebasing.
 
 Library/population data is validated before upload. Mesh serialization writes named
-32-bit fields in little-endian order (format version 2), never compiler struct
+32-bit fields in little-endian order (format version 3; version 2 remains readable), never compiler struct
 padding. Recyclable
 materials/textures use existing generation-checked handles; immutable asset IDs are
 validated indices. No live library slot recycling is exposed. Partial initialization
@@ -67,7 +67,9 @@ Camera groups remain contiguous per cell. This changes scheduling only, preservi
 plant identity, caster bounds, distances and output lists.
 Overflow clamps writes and reports lost entries, invalidating acceptance runs.
 
-The GPU ABI uses 64-byte vertices, 32-byte instances and 112-byte frame-local cells.
+The GPU ABI uses 64-byte primary vertices, 32-byte instances and 112-byte frame-local cells.
+The [grass stability update](rendering_vegetation_visibility.md#grass-lod-and-shading-stability)
+adds a separate static 64-byte morph stream and an optional asset profile to version 3.
 Cells contain camera and caster bounds, current/previous relative origins and a
 stable wind phase. A 16-byte work record identifies a contiguous range or a range
 in the immutable caster index list. Each of six views has 48 fixed indirect bins

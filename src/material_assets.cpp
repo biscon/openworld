@@ -10,7 +10,7 @@ void applyMaterialPreset(TerrainMaterialSettings &s, TerrainMaterialPreset prese
     s.filtering = preset == TerrainMaterialPreset::High ? 2 : 1;
     s.heightInfluence = .5f;
     s.blendWidth = .25f;
-    s.macroRepeatMetres = 64;
+    s.macroRepeatMetres = 90;
     s.macroStrength = 1;
     s.diagnostic = 0;
 }

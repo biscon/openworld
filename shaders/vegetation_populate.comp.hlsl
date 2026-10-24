@@ -1,5 +1,13 @@
 #include "terrain_stationary.hlsli"
 #include "vegetation_habitat.hlsli"
+#include "terrain_geography.hlsli"
+#include "terrain_rock.hlsli"
+static MaterialGeography plantGeography;
+#define params plantGeography
+#define OW_MATERIAL_CONTINUOUS
+#include "terrain_evaluate.hlsli"
+#undef OW_MATERIAL_CONTINUOUS
+#undef params
 struct Plant {float4 rootScale;float yaw;float variation;uint identity;uint assetCell;};
 struct Patch {float4 rectangle;uint4 geometry,heights,topology;};
 struct Job {
@@ -7,6 +15,7 @@ struct Job {
     float4 canonicalGrid,habitat,elevation,clearing;
     uint4 assets;
     Patch patches[16];
+    MaterialGeography geography;
 };
 [[vk::binding(0,0)]] RWStructuredBuffer<Plant> population;
 [[vk::binding(1,0)]] RWStructuredBuffer<float4> attachment;
@@ -56,6 +65,15 @@ bool surface(Job job,float2 queryPosition,out float height,out float2 slope) {
     }
     return false;
 }
+bool canonicalSurface(Job job,float2 queryPosition,out float height,out float2 slope) {
+    float2 grid=(queryPosition-job.canonicalGrid.xy)/job.canonicalGrid.z;
+    uint2 a=min(uint2(grid),job.canonical.y-2);float2 f=grid-a;
+    uint2 b=f.x>=f.y?a+uint2(1,0):a+1,c=f.x>=f.y?a+1:a+uint2(0,1);
+    float3 v0=float3(a.x*job.canonicalGrid.z,heightAt(job.canonical.x,job.canonical.y,a,job.canonical.z),a.y*job.canonicalGrid.z);
+    float3 v1=float3(b.x*job.canonicalGrid.z,heightAt(job.canonical.x,job.canonical.y,b,job.canonical.z),b.y*job.canonicalGrid.z);
+    float3 v2=float3(c.x*job.canonicalGrid.z,heightAt(job.canonical.x,job.canonical.y,c,job.canonical.z),c.y*job.canonicalGrid.z);
+    return sampleTriangle(grid*job.canonicalGrid.z,v0,v1,v2,height,slope);
+}
 [numthreads(128,1,1)]
 void main(uint3 group:SV_GroupID,uint lane:SV_GroupIndex) {
     Job job=jobs[group.x];uint index=job.config.x*128+lane;
@@ -70,15 +88,14 @@ void main(uint3 group:SV_GroupID,uint lane:SV_GroupIndex) {
         uint asset=species==0?(random(h+6)<.5?job.assets.x:job.assets.y):species==1?job.assets.z:job.assets.w;
         p.assetCell=job.config.x*8+(asset&7);
         float probability=vegetationProbability(job.habitat.xyz,species);
-        float2 grid=(p.rootScale.xz-job.canonicalGrid.xy)/job.canonicalGrid.z;
-        uint2 a=min(uint2(grid),job.canonical.y-2);float2 f=grid-a;
-        uint2 b=f.x>=f.y?a+uint2(1,0):a+1,c=f.x>=f.y?a+1:a+uint2(0,1);
-        float3 v0=float3(a.x*job.canonicalGrid.z,heightAt(job.canonical.x,job.canonical.y,a,job.canonical.z),a.y*job.canonicalGrid.z);
-        float3 v1=float3(b.x*job.canonicalGrid.z,heightAt(job.canonical.x,job.canonical.y,b,job.canonical.z),b.y*job.canonicalGrid.z);
-        float3 v2=float3(c.x*job.canonicalGrid.z,heightAt(job.canonical.x,job.canonical.y,c,job.canonical.z),c.y*job.canonicalGrid.z);
-        float height;float2 slope;bool valid=sampleTriangle(grid*job.canonicalGrid.z,v0,v1,v2,height,slope);
+        if(species==0) {
+            plantGeography=job.geography;
+            float rock=terrainRockWeight(length(evaluateBaseTerrain(p.rootScale.xz,true).gradient));
+            probability*=grassRockSuitability(rock);
+        }
+        float height;float2 slope;bool valid=canonicalSurface(job,p.rootScale.xz,height,slope);
         float up=rsqrt(1+dot(slope,slope));
-        if(!valid||asset==0xffffffff||random(h+7)>probability||up<job.habitat.w||height<job.elevation.x||height>job.elevation.y||
+        if(!valid||asset==0xffffffff||probability<=0||random(h+7)>probability||up<job.habitat.w||height<job.elevation.x||height>job.elevation.y||
            vegetationExcluded(p.rootScale.xz,job.clearing.xyz))p.rootScale.w=0;
         population[index]=p;
     } else p=population[index];

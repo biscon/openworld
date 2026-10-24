@@ -1,8 +1,8 @@
 #ifndef OW_MATERIALS
 #define OW_MATERIALS
 #include "vegetation_habitat.hlsli"
-struct NoiseDomain {int4 lattice;float4 fractionFrequency;};
-struct MaterialGeography {uint4 dimensions;float4 shape;NoiseDomain domains[13];uint4 sampling;uint4 worldOrigin;float4 geography;};
+#include "terrain_geography.hlsli"
+#include "terrain_rock.hlsli"
 struct MaterialCoordinates {float4 microPhase,macroPhase;};
 struct MaterialUniform {
     MaterialGeography geography; float4 controls,tint; uint4 options;
@@ -35,7 +35,7 @@ float4 terrainWeights(float2 relative){
     // the smooth material proxy so smoothstep below receives a continuous slope.
     BaseTerrainSample land=evaluateBaseTerrain(local,true);
     float slope=length(land.gradient);
-    float rock=smoothstep(.47,1.0,slope);
+    float rock=terrainRockWeight(slope);
     float patch=saturate(.5+gradientNoise(12,local).x);
     float soil=smoothstep(.48,.72,patch)*.65;
     float gravel=smoothstep(.2,.7,slope)*(.2+.4*(1-patch));

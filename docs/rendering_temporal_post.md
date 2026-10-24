@@ -286,7 +286,7 @@ same class. Full TSR contrast-line detection remains outside this correction.
 ## Spatial antialiasing
 
 Status: implemented and natively verified. `AntialiasingMode` selects Off,
-FXAA, SMAA 1x or TAA; new engine sessions default to SMAA 1x. Library scene
+FXAA, SMAA 1x or TAA; new engine sessions default to TAA (restored after the grass LOD stability update). Library scene
 defaults stay Off for explicit fixtures. TAA tuning remains separate; only TAA
 enables jitter, motion attachments and temporal history. Switching back resets
 history. Grass geometry/shading and further temporal improvements are deferred.
@@ -325,7 +325,7 @@ temporal/resolution/bookmark checks and new SPIR-V validation pass. Native Vulka
 synchronization validation reports no errors. Both spatial modes preserve flat
 colors within one UNORM step under ACES/AgX and bloom, and are pixel-identical
 across repeated frozen frames. Legacy v1–v3 AA choices and v4 round trips pass. Actual engine startup checks
-confirm the SMAA default, explicit CLI precedence over a loaded bookmark and the
+confirmed the then-current SMAA default, explicit CLI precedence over a loaded bookmark and the
 `--no-taa` Off alias, with native UI rendering and zero validation errors.
 
 One warmed 1920×1080 engine grass comparison (80 m, 32 warm-up + 120 sampled

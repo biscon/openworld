@@ -62,14 +62,15 @@ uint surfaceCluster(float3 position,out bool valid) {
     return (sliceForDepth(view.z)*clusters.grid.y+xy.y)*clusters.grid.x+xy.x;
 }
 #include "shadow_sampling.hlsli"
-float3 shadeSurface(SurfaceMaterial m,float3 relativePosition,float visibility,float3 renderedPosition,float transmission = 0) {
+float3 shadeSurface(SurfaceMaterial m,float3 relativePosition,float visibility,float3 renderedPosition,float transmission = 0,float3 shadowNormal = 0) {
     const float pi=3.14159265359;
+    shadowNormal=curveNormal(relativePosition,dot(shadowNormal,shadowNormal)>0?shadowNormal:m.normal,temporal.curvature);
     m.normal=curveNormal(relativePosition,m.normal,temporal.curvature);
     relativePosition=renderedPosition;
     float3 n=safeNormal(m.normal),v=safeNormal(-relativePosition);
     float nv=max(dot(n,v),1e-5),r=clamp(m.roughness,.045,1);
     float3 f0=lerp(.04.xxx,m.baseColour,m.metallic);
-    float shadowVisibility=sunVisibility(relativePosition,n);
+    float shadowVisibility=sunVisibility(relativePosition,safeNormal(shadowNormal));
     if(sunShadow.sampling.w==1)return shadowVisibility.xxx;
     if(sunShadow.sampling.w==2)return float3(shadowVisibility,1-shadowVisibility,.5);
     if(sunShadow.sampling.w==3)return float3(1-shadowVisibility,shadowVisibility,0);
