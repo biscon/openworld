@@ -169,6 +169,12 @@ production-scale/target-GPU review gates.
 CSM shafts, mixed atmospheric transport and independent source history. Local lights
 remain unshadowed; target-GPU performance and live motion review remain pending.
 
+The agreed [vegetation and ground clutter roadmap](rendering_vegetation.md) expands
+the vegetation part of 5J into slices 5J-V1–V6. It prioritizes dense ground-level
+grass/plants/shrubs with GPU instancing, bounded streaming, LOD, wind and temporary
+player bending. Implementation starts with a representation/performance experiment;
+trees remain a separate future design. These slices are not yet implemented.
+
 ### Scope
 
 - Establish linear HDR lighting, exposure, an ACES-style output transform and shared PBR materials.

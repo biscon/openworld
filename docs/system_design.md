@@ -15,6 +15,8 @@ Milestone 4 adds [hierarchical terrain residency](terrain_hierarchy.md): coarse 
 
 ## System design index
 
+- [Vegetation and ground clutter roadmap](rendering_vegetation.md) — agreed architecture, not implemented: baked grass tufts and mixed mesh/card plants, bounded GPU population and instancing, independent LOD/density/shadow budgets, shared wind and temporary player bending. Slices 5J-V1–V6 start with a representation/performance experiment; trees remain a separate future design.
+
 - [Engine UI and layout persistence](engine_ui.md) — implemented: menu-driven settings and diagnostics, dedicated UI modules, and UI-only JSON state saved on clean exit. Debug/Release and software Vulkan checks pass; native desktop review is blocked by an X11 drawable error.
 
 - [Local froxel volumetrics](rendering_volumetrics.md) — implemented slice 5I: bounded local media, mixed atmospheric transport and independent scattering history. The [stability correction](rendering_volumetrics.md#stability-correction) addresses reported opacity flicker, depth bands and ambiguous preset controls; target-GPU acceptance remains pending.

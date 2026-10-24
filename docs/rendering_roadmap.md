@@ -236,7 +236,7 @@ Acceptance: analytic homogeneous-fog transmittance, zero-density identity, local
 
 Split this into independent demos rather than one content milestone:
 
-- **Vegetation:** bounded streamed instances, alpha-mask materials, shared GPU visibility, wind-aware bounds, and explicit shadow deformation distance/quality. Measure caster cost with actual wind; shadow deformation must match the visible geometry.
+- **Vegetation:** the agreed [vegetation and ground clutter roadmap](rendering_vegetation.md) splits this into **5J-V1–V6**: representation/budget experiment, saved assets and foliage rendering, streamed placement and terrain attachment, production visibility/LOD, interaction and habitat variety, then integration/acceptance. Use GPU-instanced blade tufts and mixed mesh/card plants, independent density/animation/shadow budgets, shared wind, and temporary player bending. Trees remain separate. This architecture is not yet implemented; distance and performance targets require measurement.
 - **GPU particles:** fixed pool, bounded spawn/retire work, indirect rendering and transparent lighting/fog. Evaluate weighted OIT only where sorting fails visibly or costs too much.
 - **Reflection probes:** begin with bounded static/local probes and correct roughness filtering, then budget updates; always retain sky/environment fallback.
 - **Screen-space reflections:** later depth/normal/roughness and history consumers. Define a compact auxiliary surface buffer if needed; clustered forward does not require a full deferred G-buffer. SSR cannot recover offscreen/hidden content, so it supplements probes.
