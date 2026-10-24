@@ -15,6 +15,17 @@ struct VegetationUniform {
 [[vk::binding(1,0)]] ConstantBuffer<VegetationUniform> vegetation;
 struct Cell {float4 lo,hi,origin,previousOrigin,phase,casterLo,casterHi;};
 [[vk::binding(4,0)]] StructuredBuffer<Cell> cells;
+[[vk::binding(7,0)]] StructuredBuffer<float4> attachments;
+static float2 plantSlope=0;
+Plant loadPlant(uint index) {
+    Plant p=plants[index];
+    if(vegetation.inspection.y!=0) {
+        float4 a=attachments[index];
+        p.rootScale.y=a.x;plantSlope=a.yz;
+        if(a.w==0)p.rootScale.w=0;
+    }
+    return p;
+}
 struct VegetationPush {uint view,bin,phase,unused;};
 [[vk::push_constant]] ConstantBuffer<VegetationPush> plantPush;
 uint plantHash(uint x){x^=x>>16;x*=0x7feb352d;x^=x>>15;x*=0x846ca68b;return x^(x>>16);}
@@ -63,6 +74,7 @@ float3 plantPosition(Plant p,Cell cell,float3 vertex,float4 weights,float time,f
     }
     float3 pos=rotatePlant(vertex,p.yaw);
     pos.xz+=direction*windBend(p,cell,weights,time,strength,lod);
+    pos.y+=dot(plantSlope,pos.xz);
     return pos*p.rootScale.w+p.rootScale.xyz+(previous?cell.previousOrigin.xyz:cell.origin.xyz);
 }
 bool plantBoxVisible(float3 lo,float3 hi,uint view) {

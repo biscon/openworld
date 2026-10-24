@@ -4,12 +4,16 @@
 #include "vulkan_materials.hpp"
 #include "vulkan_shadows.hpp"
 namespace ow {
+class VulkanTerrainStream;
 class VulkanVegetation {
   public:
     VulkanVegetation(VkPhysicalDevice, VkDevice, uint32_t, VkDescriptorSetLayout, VulkanMaterials &,
                      const std::filesystem::path &, bool, bool, const VegetationOptions &);
     ~VulkanVegetation();
     void prepare(uint32_t, const Camera &, TerrainGrid, const TemporalView &, const VegetationSettings &);
+    void prepareStream(VulkanTerrainStream *, const VegetationSettings &,
+                       double terrainPreparationMilliseconds = 0);
+    void budgetStream(double remaining);
     void bounds(VulkanShadows &);
     void select(VkCommandBuffer, const ShadowUniform &, uint32_t);
     void draw(VkCommandBuffer, VkDescriptorSet, uint32_t pass, uint32_t view = 0);

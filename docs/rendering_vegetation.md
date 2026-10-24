@@ -2,7 +2,7 @@
 
 Status: architecture agreed on 2026-10-24. V1 experiment implemented with software
 Vulkan verification and native RTX 3060 measurements. Final density/appearance
-acceptance remains open. The V2 asset/foliage foundation is implemented; V3–V6 remain proposed. This expands
+acceptance remains open. The V2 asset/foliage foundation and V3 streaming/attachment are implemented; V4–V6 remain proposed. This expands
 the vegetation part of [rendering roadmap slice 5J](rendering_roadmap.md#5j--representative-scene-content-and-reflections).
 It records the direction, implementation sequence, and acceptance gates. Each slice
 needs its own focused implementation plan before coding; exact layouts, capacities,
@@ -318,8 +318,8 @@ Native costs, captures and remaining acceptance limits: [V2 report](measurements
 Saved grass/fern/shrub assets, compact instancing, leaf transmission, submitted wind
 history and the isolated viewer/probe share one rendering backend. Production grass
 casting defaults to zero and does not enter caster work. The V1 probe retains its
-historical 25 m comparison. Streaming, terrain attachment updates, interactions
-and full-scene integration remain V3–V6 work.
+historical 25 m comparison. Streaming and terrain attachment updates are implemented in V3 below; production
+visibility, interactions and full-scene acceptance remain V4–V6 work.
 
 - Build the saved asset/LOD pipeline and a small representative asset set, including
   masked plants; add opacity-aware texture import and deformation metadata.
@@ -330,6 +330,8 @@ and full-scene integration remain V3–V6 work.
   Do not expand the full plant library before the V1 tradeoff is understood.
 
 ### 5J-V3 — Streamed placement and terrain attachment
+
+Status: implemented. Detailed design and validation: [streaming and attachment](rendering_vegetation_streaming.md). The main demo provides an opt-in toggle; production visibility/coverage, interactions and final full-scene acceptance remain V4–V6.
 
 - Add stable cell identities, bounded incremental GPU population, residency, and
   terrain reader retention. Define the small terrain/habitat/exclusion input boundary.

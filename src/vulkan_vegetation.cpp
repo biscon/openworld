@@ -1,12 +1,13 @@
 #include "vulkan_vegetation.hpp"
 #include "render_resources.hpp"
+#include "vulkan_vegetation_stream.hpp"
 #include <chrono>
 #include <cmath>
 namespace ow {
 using namespace render_detail;
 namespace {
 constexpr uint32_t viewWords = vegetationBinLimit * 8 + 1, workWords = viewWords * vegetationViews,
-                   queryCount = 16;
+                   queryCount = 18;
 struct Uniform {
     std::array<glm::mat4, 6> views{};
     glm::vec4 cameraTime{}, previousCameraTime{}, settings{}, previousSettings{}, cards{}, previousCards{};
@@ -19,10 +20,7 @@ struct Uniform {
     std::array<glm::uvec4, 24> lods{};
 };
 static_assert(sizeof(Uniform) == 2976);
-struct Cell {
-    glm::vec4 lo{}, hi{}, origin{}, previousOrigin{}, phase{}, casterLo{}, casterHi{};
-};
-static_assert(sizeof(Cell) == 112);
+using Cell = VegetationGpuCell;
 } // namespace
 struct VulkanVegetation::Impl {
     VkPhysicalDevice physical;
@@ -43,6 +41,8 @@ struct VulkanVegetation::Impl {
     bool legacy = true;
     uint32_t bins = 12, cameraGroups = 0, casterGroups = 0, casterCount = 0, listEntries = 0;
     VegetationPopulation population;
+    std::unique_ptr<VulkanVegetationStream> streaming;
+    Buffer emptyAttachment;
     WorldPosition previousCamera{};
     WorldPosition currentCamera{};
     std::vector<Cell> localCells;
@@ -142,6 +142,8 @@ struct VulkanVegetation::Impl {
                     result.depthMilliseconds = ms;
                 else if (q == 4)
                     result.colourMilliseconds = ms;
+                else if (q == 16)
+                    result.updateMilliseconds = ms;
                 else
                     result.shadowMilliseconds += ms;
             }
@@ -231,8 +233,9 @@ VulkanVegetation::VulkanVegetation(VkPhysicalDevice p, VkDevice d, uint32_t fami
     : impl_(std::make_unique<Impl>(p, d, m)) {
     auto &s = *impl_;
     s.legacy = !options.library;
-    if (bool(options.library) != bool(options.population) || (options.library && options.fixture) ||
-        (!options.library && !options.fixture))
+    if (bool(options.library) != (bool(options.population) || options.streaming.enabled) ||
+        (options.streaming.enabled && (options.population || options.fixture)) ||
+        (options.library && options.fixture) || (!options.library && !options.fixture))
         throw std::invalid_argument("Select one vegetation library/population or legacy fixture");
     VegetationLibrary library;
     if (s.legacy) {
@@ -278,9 +281,39 @@ VulkanVegetation::VulkanVegetation(VkPhysicalDevice p, VkDevice d, uint32_t fami
         validate(library);
     } else {
         validate(*options.library);
-        validate(*options.population, *options.library);
         library = *options.library;
-        s.population = *options.population;
+        if (!options.streaming.enabled) {
+            validate(*options.population, *options.library);
+            s.population = *options.population;
+        } else {
+            VegetationResidency checked(options.streaming);
+            glm::uvec4 assets(~0u);
+            for (uint32_t i = 0; i < library.assets.size(); ++i) {
+                auto category = library.assets[i].category;
+                if (category == FoliageCategory::Grass) {
+                    if (assets.x == ~0u)
+                        assets.x = i;
+                    else if (assets.y == ~0u)
+                        assets.y = i;
+                }
+                if (category == FoliageCategory::Plant && assets.z == ~0u)
+                    assets.z = i;
+                if (category == FoliageCategory::Shrub && assets.w == ~0u)
+                    assets.w = i;
+            }
+            if (assets.x == ~0u)
+                throw std::invalid_argument("Streamed vegetation needs grass");
+            for (int k = 1; k < 4; ++k)
+                if (assets[k] == ~0u)
+                    assets[k] = assets.x;
+            for (uint32_t c = 0; c < options.streaming.cellCapacity; ++c) {
+                s.population.cells.push_back({{}, c * 128, 128});
+                for (uint32_t k = 0; k < 128; ++k) {
+                    auto asset = k < 126 ? assets[k % 2] : assets[k - 124];
+                    s.population.instances.push_back({{0, 0, 0, 1}, 0, 0, 0, c * 8 + asset});
+                }
+            }
+        }
     }
     s.budget = options.budgetBytes;
     s.count = uint32_t(s.population.instances.size());
@@ -399,6 +432,8 @@ VulkanVegetation::VulkanVegetation(VkPhysicalDevice p, VkDevice d, uint32_t fami
     workGroups.insert(workGroups.end(), casterWork.begin(), casterWork.end());
     if (options.listCapacity > vegetationMaximum * 2)
         throw std::invalid_argument("Invalid vegetation list capacity");
+    if (options.streaming.enabled)
+        cameraEntries = s.count * 2; // any grass variant may have two parts
     s.listCapacity = options.listCapacity ? options.listCapacity : std::max(1u, cameraEntries);
     uint32_t offset = 0;
     for (uint32_t view = 0; view < 6; ++view) {
@@ -411,7 +446,8 @@ VulkanVegetation::VulkanVegetation(VkPhysicalDevice p, VkDevice d, uint32_t fami
     }
     s.listEntries = offset;
     s.allocate(s.instances, instanceBytes,
-               VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+               VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                   VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
     s.allocate(s.geometry, geometryBytes,
                VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
                    VK_BUFFER_USAGE_TRANSFER_DST_BIT);
@@ -427,21 +463,27 @@ VulkanVegetation::VulkanVegetation(VkPhysicalDevice p, VkDevice d, uint32_t fami
     std::memcpy(data + s.indexOffset, indices.data(), indices.size() * 4);
     if (instanceBytes)
         std::memcpy(data + geometryBytes, s.population.instances.data(), instanceBytes);
-    VkDescriptorSetLayoutBinding bindings[7]{};
-    for (uint32_t i = 0; i < 7; ++i)
+    VkDescriptorSetLayoutBinding bindings[8]{};
+    for (uint32_t i = 0; i < 8; ++i)
         bindings[i] = {i, i == 1 ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
                        VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT, nullptr};
     VkDescriptorSetLayoutCreateInfo li{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-    li.bindingCount = 7;
+    li.bindingCount = 8;
     li.pBindings = bindings;
     check(vkCreateDescriptorSetLayout(d, &li, nullptr, &s.setLayout));
-    VkDescriptorPoolSize sizes[] = {{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 12},
+    VkDescriptorPoolSize sizes[] = {{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 14},
                                     {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2}};
     VkDescriptorPoolCreateInfo pi{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
     pi.maxSets = 2;
     pi.poolSizeCount = 2;
     pi.pPoolSizes = sizes;
     check(vkCreateDescriptorPool(d, &pi, nullptr, &s.pool));
+    if (options.streaming.enabled) {
+        s.streaming = std::make_unique<VulkanVegetationStream>(
+            p, d, shaders, s.instances.buffer, instanceBytes, options.streaming, library, s.budget - s.bytes);
+        s.bytes += s.streaming->bytes();
+    } else
+        s.allocate(s.emptyAttachment, 16, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
     for (auto &f : s.frames) {
         s.allocate(f.uniform, sizeof(Uniform), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true);
         s.allocate(f.cells, s.cellCount * sizeof(Cell), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
@@ -463,6 +505,9 @@ VulkanVegetation::VulkanVegetation(VkPhysicalDevice p, VkDevice d, uint32_t fami
         descriptor(d, f.set, 4, f.cells);
         descriptor(d, f.set, 5, s.groups);
         descriptor(d, f.set, 6, s.casters);
+        descriptor(d, f.set, 7,
+                   s.streaming ? s.streaming->attachments(uint32_t(&f - s.frames.data()))
+                               : s.emptyAttachment);
     }
     s.allocate(s.diagnostic, uint64_t(s.listEntries) * 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT, true);
     VkDescriptorSetLayout layouts[] = {s.setLayout, lighting, m.layout()};
@@ -521,8 +566,11 @@ void VulkanVegetation::prepare(uint32_t frame, const Camera &camera, TerrainGrid
     auto &s = *impl_;
     s.frame = frame;
     auto &f = s.frames[frame];
-    if (f.submitted)
+    if (f.submitted) {
         s.last = s.decode(frame);
+        if (s.streaming && s.last.timingsAvailable)
+            s.streaming->observe(s.last.updateMilliseconds, s.last.updatedCells);
+    }
     f.submitted = false;
     f.stamped = 0;
     f.stats = {};
@@ -537,11 +585,11 @@ void VulkanVegetation::prepare(uint32_t frame, const Camera &camera, TerrainGrid
     s.current.wind = {glm::normalize(settings.windDirection), 0, 0};
     s.current.profile = {s.legacy ? 1u : 0u, uint32_t(settings.isolateAsset), uint32_t(settings.forceLod),
                          settings.transmission ? 1u : 0u};
-    s.current.inspection = {settings.inspectIdentity, 0, 0, 0};
+    s.current.inspection = {settings.inspectIdentity, s.streaming ? 1u : 0u, 0, 0};
     s.current.previousWind = s.previous.wind;
     s.currentCamera = worldPosition(camera, grid);
     auto *cellData = static_cast<Cell *>(f.cells.mapped);
-    for (uint32_t c = 0; c < s.cellCount; ++c) {
+    for (uint32_t c = 0; !s.streaming && c < s.cellCount; ++c) {
         Cell cell = s.localCells[c];
         cell.origin = {glm::vec3(relativePosition(s.population.cells[c].origin, s.currentCamera)), 0};
         cell.previousOrigin = {glm::vec3(relativePosition(s.population.cells[c].origin, s.previousCamera)),
@@ -567,6 +615,30 @@ void VulkanVegetation::prepare(uint32_t frame, const Camera &camera, TerrainGrid
     f.stats.preparationMilliseconds =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
 }
+void VulkanVegetation::prepareStream(VulkanTerrainStream *terrain, const VegetationSettings &settings,
+                                     double terrainPreparationMilliseconds) {
+    auto &s = *impl_;
+    if (!s.streaming)
+        return;
+    auto start = std::chrono::steady_clock::now();
+    auto &f = s.frames[s.frame];
+    f.stats.preparationMilliseconds += terrainPreparationMilliseconds;
+    s.streaming->prepare(s.frame, s.currentCamera, s.previousCamera, settings, terrain, s.cellBounds.data(),
+                         f.stats);
+    f.stats.preparationMilliseconds +=
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+}
+void VulkanVegetation::budgetStream(double remaining) {
+    auto &s = *impl_;
+    if (!s.streaming)
+        return;
+    auto start = std::chrono::steady_clock::now();
+    auto &f = s.frames[s.frame];
+    s.streaming->restrictPopulation(remaining, s.cellBounds.data(), f.stats);
+    std::memcpy(f.cells.mapped, s.cellBounds.data(), s.cellCount * sizeof(Cell));
+    f.stats.preparationMilliseconds +=
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+}
 void VulkanVegetation::bounds(VulkanShadows &shadows) {
     auto start = std::chrono::steady_clock::now();
     auto &s = *impl_;
@@ -575,10 +647,11 @@ void VulkanVegetation::bounds(VulkanShadows &shadows) {
     if (s.legacy && s.current.settings.w <= 0)
         return;
     for (uint32_t i = 0; i < s.cellCount; ++i) {
-        if (!std::isfinite(s.casterLo[i].x))
+        if ((!s.streaming && !std::isfinite(s.casterLo[i].x)) ||
+            (s.streaming && s.cellBounds[i].origin.w == 0))
             continue;
         const auto &c = s.cellBounds[i];
-        glm::vec3 lo = glm::vec3(s.casterLo[i] + c.origin), hi = glm::vec3(s.casterHi[i] + c.origin);
+        glm::vec3 lo = glm::vec3(c.casterLo + c.origin), hi = glm::vec3(c.casterHi + c.origin);
         auto nearest = glm::max(glm::max(lo, -hi), glm::vec3(0));
         if (glm::length(nearest) > (s.legacy ? s.current.settings.w : s.casterRange[i]))
             continue;
@@ -599,7 +672,6 @@ void VulkanVegetation::select(VkCommandBuffer cmd, const ShadowUniform &shadows,
     std::memcpy(f.uniform.mapped, &s.current, sizeof(Uniform));
     if (s.queries)
         vkCmdResetQueryPool(cmd, s.queries, s.frame * queryCount, queryCount);
-    s.stamp(cmd, 0);
     if (!s.uploaded) {
         uint64_t geometryBytes = s.geometry.size, instanceBytes = uint64_t(s.count) * 32;
         VkBufferCopy copy{0, 0, geometryBytes};
@@ -616,6 +688,12 @@ void VulkanVegetation::select(VkCommandBuffer cmd, const ShadowUniform &shadows,
                 VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
             VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT |
                 VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_2_INDEX_READ_BIT);
+    if (s.streaming && s.streaming->updates()) {
+        s.stamp(cmd, 16);
+        s.streaming->record(cmd);
+        s.stamp(cmd, 17);
+    }
+    s.stamp(cmd, 0);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, s.compute);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, s.layout, 0, 1, &f.set, 0, nullptr);
     for (uint32_t phase = 0; phase < 3; ++phase) {
@@ -680,6 +758,8 @@ void VulkanVegetation::finish(VkCommandBuffer cmd) {
 }
 void VulkanVegetation::submitted() {
     auto &s = *impl_;
+    if (s.streaming)
+        s.streaming->submitted();
     s.previous = s.current;
     s.previousCamera = s.currentCamera;
     s.history = true;
@@ -696,6 +776,8 @@ void VulkanVegetation::copySnapshot(VkCommandBuffer cmd) {
         return;
     barrier(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
             VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+    if (s.streaming)
+        s.streaming->copySnapshot(cmd);
     VkBufferCopy copy{0, 0, uint64_t(s.listEntries) * 4};
     vkCmdCopyBuffer(cmd, s.frames[s.lastFrame].lists.buffer, s.diagnostic.buffer, 1, &copy);
     barrier(cmd, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_HOST_BIT,
@@ -706,6 +788,8 @@ VegetationSnapshot VulkanVegetation::snapshot() const {
     VegetationSnapshot out;
     out.stats = s.decode(s.lastFrame);
     out.binCount = s.bins;
+    if (s.streaming && out.stats.enabled)
+        out.cells = s.streaming->snapshot();
     if (out.stats.enabled) {
         auto *w = static_cast<const uint32_t *>(s.frames[s.lastFrame].readback.mapped);
         for (uint32_t v = 0; v < 6; ++v)
@@ -714,7 +798,8 @@ VegetationSnapshot VulkanVegetation::snapshot() const {
                 auto *ids = static_cast<const uint32_t *>(s.diagnostic.mapped) + s.current.lists[v].x +
                             w[v * viewWords + b * 8 + 7];
                 for (uint32_t j = 0; j < out.counts[v * s.bins + b]; ++j)
-                    out.identities[v].push_back(s.population.instances.at(ids[j]).identity);
+                    out.identities[v].push_back(s.streaming ? s.streaming->identity(ids[j])
+                                                            : s.population.instances.at(ids[j]).identity);
             }
     }
     return out;

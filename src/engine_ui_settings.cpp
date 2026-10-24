@@ -65,6 +65,24 @@ void EngineUi::drawSettings(UiWindow window, UiContext &context, UiActions &acti
         break;
     }
     case UiWindow::RenderingSettings: {
+        if (options.vegetation.streaming.enabled) {
+            ImGui::SeparatorText("Vegetation");
+            ImGui::Checkbox("Enable vegetation", &scene.vegetation.enabled);
+            int preset = scene.vegetation.habitat.weights.z > .5f   ? 2
+                         : scene.vegetation.habitat.weights.y > .5f ? 1
+                                                                    : 0;
+            if (ImGui::Combo("Habitat preset", &preset, "Meadow\0Moor\0Understory\0"))
+                scene.vegetation.habitat = vegetationHabitat(VegetationHabitat(preset));
+            ImGui::SliderFloat("Vegetation density", &scene.vegetation.density, 0, 1);
+            const auto &v = renderer.vegetationStats();
+            ImGui::Text("Cells: %u ready, %u pending, %u retiring", v.residentCells, v.pendingCells,
+                        v.retiringCells);
+            ImGui::Text("Updates: %u (%u new), missing terrain: %u", v.updatedCells, v.generatedCells,
+                        v.missingTerrainCells);
+            ImGui::Text("Capacity-deferred cells: %u", v.deferredCells);
+            ImGui::Text("GPU %.3f ms updates, %.1f MiB; CPU %.3f ms", v.updateMilliseconds,
+                        double(v.allocatedBytes) / (1024 * 1024), v.preparationMilliseconds);
+        }
         ImGui::SeparatorText("Geometry & visibility");
         char renderHeightLabel[32];
         std::snprintf(renderHeightLabel, sizeof(renderHeightLabel), "%u pixels", options.renderHeight);

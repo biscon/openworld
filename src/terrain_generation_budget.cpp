@@ -8,14 +8,16 @@ double TerrainGenerationBudget::groupMilliseconds(TerrainComputeKernel kernel) c
     return std::max(cost.milliseconds, targetMilliseconds / cost.allowance);
 }
 TerrainGenerationStop TerrainGenerationFrameBudget::limit() const {
-    if (groups >= TerrainGenerationBudget::maximumGroups) return TerrainGenerationStop::GroupLimit;
-    if (dispatches >= TerrainGenerationBudget::maximumDispatches) return TerrainGenerationStop::DispatchLimit;
+    if (groups + reservedGroups >= TerrainGenerationBudget::maximumGroups)
+        return TerrainGenerationStop::GroupLimit;
+    if (dispatches + reservedDispatches >= TerrainGenerationBudget::maximumDispatches)
+        return TerrainGenerationStop::DispatchLimit;
     if (segments >= TerrainGenerationBudget::maximumSegments) return TerrainGenerationStop::SegmentLimit;
     return TerrainGenerationStop::TimeBudget;
 }
 uint32_t TerrainGenerationFrameBudget::allowance(double cost) const {
     if (limit() != TerrainGenerationStop::TimeBudget || !std::isfinite(cost) || cost <= 0) return 0;
-    const auto remaining = TerrainGenerationBudget::maximumGroups - groups;
+    const auto remaining = TerrainGenerationBudget::maximumGroups - groups - reservedGroups;
     const double count = std::clamp((TerrainGenerationBudget::targetMilliseconds - milliseconds) / cost + 1e-9,
                                   0.0, double(remaining));
     return std::max(groups == 0 ? 1u : 0u, uint32_t(count));

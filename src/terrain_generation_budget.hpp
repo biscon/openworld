@@ -44,6 +44,7 @@ const char *terrainGenerationStopName(TerrainGenerationStop);
 // exceed the estimate, so an expensive kernel cannot permanently stop progress.
 struct TerrainGenerationFrameBudget {
     uint32_t groups = 0, dispatches = 0, segments = 0;
+    uint32_t reservedGroups = 0, reservedDispatches = 0;
     double milliseconds = 0;
     TerrainGenerationStop limit() const;
     uint32_t allowance(double groupMilliseconds) const;

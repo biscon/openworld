@@ -180,7 +180,11 @@ receive-only grass policy; final assets and full-scene acceptance remain open.
 The [V2 asset/foliage foundation](rendering_vegetation_assets.md) is implemented with
 saved grass/fern/shrub assets, compact instancing, wind history, leaf transmission,
 and isolated interactive review. [V2 measurements and validation](measurements/vegetation_5j_v2/rtx3060/README.md)
-record the current budgets and remaining quality limits. V3–V6 remain proposed.
+record the current budgets and remaining quality limits. The [V3 streamed population
+and terrain attachment](rendering_vegetation_streaming.md) adds bounded GPU placement,
+terrain reader retention, stitched-triangle attachment, and opt-in main-demo controls.
+V4–V6 remain proposed; the [short native report](measurements/vegetation_5j_v3/README.md)
+distinguishes measured V3 costs from remaining full-scene acceptance.
 
 ### Scope
 

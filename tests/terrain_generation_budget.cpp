@@ -44,6 +44,14 @@ void frameCarryover() {
     frame.consume(100, target / 150);
     require(frame.allowance(.001) == 0, "mixed costs obey unchanged total target");
     frame = {};
+    frame.reservedGroups = 32;
+    frame.reservedDispatches = 1;
+    frame.milliseconds = .5;
+    require(frame.allowance(.000001) == TerrainGenerationBudget::maximumGroups - 32,
+            "vegetation shares hard group allowance");
+    frame.dispatches = TerrainGenerationBudget::maximumDispatches - 1;
+    require(frame.allowance(.000001) == 0, "vegetation dispatch shares hard dispatch allowance");
+    frame = {};
     require(frame.allowance(.000001) == TerrainGenerationBudget::maximumGroups, "group hard limit caps fast kernels");
     frame.consume(TerrainGenerationBudget::maximumGroups, .000001);
     require(!frame.allowance(.000001) && frame.limit() == TerrainGenerationStop::GroupLimit, "group cap crosses stages");

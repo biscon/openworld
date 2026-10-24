@@ -219,6 +219,12 @@ struct Renderer::Impl {
 
     void init(const RendererOptions &config) {
         options = config;
+        if (options.vegetation.streaming.enabled &&
+            (!options.streaming.enabled || !options.streaming.hierarchical ||
+             options.terrainGrid.spacing != .5f || options.terrainGrid.extent() < 4 ||
+             std::fmod(options.terrainGrid.extent(), 4.0) != 0))
+            throw std::invalid_argument(
+                "Streamed vegetation requires stationary hierarchical terrain with a 4 m aligned extent");
         if (!options.width || !options.height || options.width > 16384 || options.height > 16384)
             throw std::invalid_argument("Offscreen extent must be in 1..16384");
         extent = {options.width, options.height};
@@ -1710,8 +1716,6 @@ struct Renderer::Impl {
         materials->recordUploads(cmd);
         meshes->uploads(cmd, frameIndex);
         const uint32_t generated = streaming ? 0 : terrain->record(cmd, frameIndex);
-        if (streaming)
-            streaming->record(cmd, frameIndex);
 
         if (renderQueries) {
             vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, renderQueries,
@@ -1849,8 +1853,25 @@ struct Renderer::Impl {
         const auto shadowCollectionStart = std::chrono::steady_clock::now();
         prepareTerrainShadows(camera, settings);
         meshes->prepareShadows(frameIndex, *shadows);
+        const auto vegetationPreparationStart = std::chrono::steady_clock::now();
+        if (streaming) {
+            streaming->vegetationReservation(0);
+            if (options.vegetation.streaming.enabled && settings.vegetation.enabled &&
+                settings.terrainVisible)
+                streaming->prepareVegetation(camera, settings.eroded);
+        }
         if (vegetation)
+            vegetation->prepareStream(settings.terrainVisible ? streaming.get() : nullptr,
+                                      settings.vegetation,
+                                      std::chrono::duration<double, std::milli>(
+                                          std::chrono::steady_clock::now() - vegetationPreparationStart)
+                                          .count());
+        if (streaming)
+            streaming->record(cmd, frameIndex);
+        if (vegetation) {
+            vegetation->budgetStream(streaming ? streaming->vegetationRemaining() : 0);
             vegetation->bounds(*shadows);
+        }
         shadows->prepare(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -
                                                                    shadowCollectionStart)
                              .count());

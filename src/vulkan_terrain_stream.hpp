@@ -3,6 +3,7 @@
 #include "terrain_detail_policy.hpp"
 #include "terrain_generation_budget.hpp"
 #include "terrain_ground_lod.hpp"
+#include "vegetation_stream.hpp"
 #include "vulkan_post.hpp"
 #include "vulkan_shadows.hpp"
 #include "vulkan_terrain.hpp"
@@ -28,6 +29,21 @@ class VulkanTerrainStream {
     void drawShadows(VkCommandBuffer, VkPipelineLayout, VulkanShadows &);
     VkDescriptorSetLayout descriptorLayout() const { return descriptorLayout_; }
     void submitted(uint32_t frame);
+    void prepareVegetation(const Camera &, bool eroded);
+    bool vegetationSurface(VegetationCellKey, VegetationTerrainCell &, bool retain = true);
+    VkBuffer vegetationHeights() const { return heights_.handle; }
+    uint64_t vegetationRevision() const { return epoch_ * 2 + (vegetationEroded_ ? 1 : 0); }
+    uint64_t vegetationSurfaceVersion() const { return vegetationPartition_; }
+    uint32_t vegetationSeed() const { return settings_.seed; }
+    void vegetationReservation(double milliseconds, uint32_t groups = 0) {
+        vegetationReserved_ = milliseconds;
+        vegetationGroups_ = groups;
+    }
+    double vegetationRemaining() const {
+        return std::max(0.0,
+                        TerrainGenerationBudget::targetMilliseconds - stats_.generationEstimatedMilliseconds);
+    }
+
     VkPipelineLayout graphicsLayout() const { return graphicsLayout_; }
     const TerrainStreamStats &stats() const { return stats_; }
     void reviewQuality(float &scale, float &focal) const {
@@ -199,6 +215,16 @@ class VulkanTerrainStream {
     VkQueryPool queryPool_{};
     double timestampPeriod_ = 0;
     TerrainGenerationBudget generationBudget_;
+    double vegetationReserved_ = 0;
+    uint32_t vegetationGroups_ = 0;
+    struct VegetationBucket {
+        std::array<uint32_t, 16> indices{};
+        uint32_t count = 0;
+    };
+    std::array<VegetationBucket, 51 * 51> vegetationBuckets_{};
+    VegetationCellKey vegetationCentre_;
+    uint64_t vegetationPartition_ = 0;
+    bool vegetationEroded_ = true, vegetationReady_ = false;
     bool imagesInitialized_ = false, generatorImagesInitialized_ = false;
     uint64_t imageBytes_ = 0, ioBackoffUntil_ = 0;
     TerrainCacheKey key(TerrainHandle, TerrainProduct) const;

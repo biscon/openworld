@@ -56,6 +56,7 @@ void help() {
                  "  --view-radius N       Render radius in base chunks (default ~8 km, "
                  "max ~16 km)\n"
                  "  --cache-dir PATH      Override per-user terrain cache directory\n"
+                 "  --vegetation          Enable streamed vegetation (default off)\n"
                  "  --no-cache            Disable disk caching, retain streaming\n"
                  "  --terrain-gpu-mib N   GPU terrain budget (default 512)\n"
                  "  --terrain-host-mib N  Host terrain budget (default 256)\n"
@@ -99,6 +100,7 @@ int main(int argc, char **argv) {
         uint32_t fogPreset = 0;
         uint64_t frameLimit = 0;
         ow::SceneSettings scene;
+        scene.vegetation.enabled = false;
         scene.taa.enabled = true;
         scene.opaqueDepthPrepass = true;
         scene.bloom.intensity = .05f;
@@ -137,7 +139,9 @@ int main(int argc, char **argv) {
                 help();
                 return 0;
             }
-            if (arg == "--review-view")
+            if (arg == "--vegetation")
+                scene.vegetation.enabled = true;
+            else if (arg == "--review-view")
                 reviewPath = value();
             else if (arg == "--save-review-view")
                 reviewSavePath = value();
@@ -307,9 +311,16 @@ int main(int argc, char **argv) {
         if (!reviewPath.empty()) {
             review = ow::loadReviewView(reviewPath);
             ow::applyReviewStartup(options, *review);
+            const auto vegetationSettings = scene.vegetation;
             scene = review->scene;
+            scene.vegetation = vegetationSettings;
             terrain = {review->terrainOrigin, review->terrain};
             singleChunk = !options.streaming.enabled;
+        }
+        if (options.streaming.enabled && options.streaming.hierarchical) {
+            options.vegetation.library = std::make_shared<ow::VegetationLibrary>(
+                ow::readVegetationLibrary(OPENWORLD_VEGETATION_LIBRARY_DIR));
+            options.vegetation.streaming.enabled = true;
         }
         std::string terrainError;
         if (options.requireValidation)
@@ -543,7 +554,9 @@ int main(int argc, char **argv) {
                             ow::terrainNeighbourhood({saved.terrainOrigin, saved.terrain}, singleChunk));
                         camera = saved.camera;
                         terrain = {saved.terrainOrigin, saved.terrain};
+                        const auto vegetationSettings = scene.vegetation;
                         scene = saved.scene;
+                        scene.vegetation = vegetationSettings;
                         fitSingleChunkCamera = false;
                         renderer.setTerrainLodReviewState(saved.lod);
                         options.renderHeight = saved.startup.renderHeight;
@@ -575,6 +588,7 @@ int main(int argc, char **argv) {
                 demoSeconds += dt;
                 lightingDemo.animate(demoSeconds);
             }
+            scene.vegetation.time += dt;
             if (renderer.render(camera, scene)) {
                 ++frames;
                 if (fitSingleChunkCamera && scene.terrainVisible) {

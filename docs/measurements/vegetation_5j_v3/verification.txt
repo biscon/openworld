@@ -1,0 +1,15 @@
+Final verification, 2026-10-24
+
+Debug and Release engine builds: passed
+Debug CPU: vegetation_cpu, vegetation_stream, terrain_generation_budget: passed
+Release CPU: vegetation_cpu, vegetation_library, vegetation_stream, terrain_generation_budget: passed
+Affected SPIR-V modules: 12 validated
+Native RTX 3060, synchronization validation:
+  Existing vegetation_gpu (Debug): passed
+  Existing foliage_gpu (Release): passed
+  vegetation_stream_gpu (Release, four stitched orientations, large coordinates): passed
+  Main engine --vegetation headless startup, 8 frames: 0 validation errors
+
+No extended benchmark matrix or software-Vulkan rerun.
+The initial test fixtures were corrected to wait for terrain residency, use signed
+floor division for negative partition keys, and respect terrain noise-lattice limits.

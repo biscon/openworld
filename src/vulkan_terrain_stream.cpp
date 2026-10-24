@@ -1083,6 +1083,9 @@ void VulkanTerrainStream::generate(VkCommandBuffer cmd, uint32_t frame) {
     auto &f = frames_[frame];
     f.segmentCount = f.generationGroups = 0;
     TerrainGenerationFrameBudget work;
+    work.milliseconds = vegetationReserved_;
+    work.reservedGroups = vegetationGroups_;
+    work.reservedDispatches = vegetationGroups_ ? 1 : 0;
     stats_.generationGroupBudget = TerrainGenerationBudget::maximumGroups;
     while (gen_.stage < 5) {
         uint32_t width = 0, level = 0, groupSide = 8;
@@ -1149,8 +1152,8 @@ void VulkanTerrainStream::generate(VkCommandBuffer cmd, uint32_t frame) {
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, g_.computeLayout_, 0, 1,
                                 &g_.slots_[0].descriptors[frame][std::min(level, layout_.levels - 1)], 0,
                                 nullptr);
-        while (work.dispatches < TerrainGenerationBudget::maximumDispatches && remaining &&
-               gen_.group < totalGroups) {
+        while (work.dispatches + work.reservedDispatches < TerrainGenerationBudget::maximumDispatches &&
+               remaining && gen_.group < totalGroups) {
             const auto batch = terrainComputeBatch(rowGroups, gen_.group, remaining);
             const glm::uvec4 push[2] = {{width, layout_.halos[std::min(level, layout_.levels - 1)],
                                          layout_.halos[level ? level - 1 : 0], level},
@@ -1200,7 +1203,7 @@ void VulkanTerrainStream::generate(VkCommandBuffer cmd, uint32_t frame) {
     f.segmentCount = stats_.generationSegments = work.segments;
     f.timestamp = queryPool_ && work.segments > 0;
     stats_.dispatches = work.dispatches;
-    stats_.generationEstimatedMilliseconds = work.milliseconds;
+    stats_.generationEstimatedMilliseconds = work.milliseconds - vegetationReserved_;
     stats_.generationStop = gen_.stage == 5 ? TerrainGenerationStop::JobComplete : work.limit();
     if (gen_.detailOnly && !stream_->slot(gen_.handle.index).detailWanted)
         stats_.obsoleteDetailGroups += work.groups;

@@ -237,6 +237,16 @@ VegetationFixture makeVegetationFixture(VegetationAssets assets, uint32_t side, 
     return f;
 }
 void validate(const VegetationSettings &s) {
+    validate(s.exclusion.centre);
+    for (float v : {s.habitat.weights.x, s.habitat.weights.y, s.habitat.weights.z, s.habitat.minimumElevation,
+                    s.habitat.maximumElevation, s.habitat.minimumUp, s.exclusion.radius})
+        if (!std::isfinite(v))
+            throw std::invalid_argument("Nonfinite vegetation habitat/exclusion");
+    if (glm::any(glm::lessThan(s.habitat.weights, glm::vec3(0))) ||
+        std::abs(s.habitat.weights.x + s.habitat.weights.y + s.habitat.weights.z - 1) > 1e-5f ||
+        s.habitat.minimumElevation > s.habitat.maximumElevation || s.habitat.minimumUp < .1f ||
+        s.habitat.minimumUp > 1 || s.exclusion.radius < 0)
+        throw std::invalid_argument("Invalid vegetation habitat/exclusion");
     for (float v : {s.density, s.cardWidth, s.cardDensity, s.time, s.wind, s.distance, s.shadowDistance})
         if (!std::isfinite(v))
             throw std::invalid_argument("Nonfinite vegetation setting");

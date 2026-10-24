@@ -1,6 +1,6 @@
 #include "terrain_stream_common.hlsli"
 #include "terrain_surface.hlsli"
-#include "terrain_morph.hlsli"
+#include "terrain_stationary.hlsli"
 float parentHeight(uint2 p,uint level) {
     // Legacy flat streaming stores only level zero; hierarchical tiles have
     // independently filtered geometry levels.
@@ -15,10 +15,7 @@ float3 surfacePosition(uint vertex,float3 observer,float4 curvature,out float2 g
         // another height representation. The observer never moves a vertex.
         uint2 local=uint2(vertex%width,vertex/width);
         uint edges=(draw.options.w>>8)&15,corners=(draw.options.w>>12)&15;
-        bool coarse=(local.x==0 && (edges&1)!=0) || (local.x==draw.patch.w && (edges&2)!=0) ||
-                    (local.y==0 && (edges&4)!=0) || (local.y==draw.patch.w && (edges&8)!=0);
-        if((local.x==0 || local.x==draw.patch.w) && (local.y==0 || local.y==draw.patch.w))
-            coarse=coarse || (corners&(1u<<((local.x!=0?1:0)+(local.y!=0?2:0))))!=0;
+        bool coarse=terrainStationaryCoarse(local,draw.patch.w,edges,corners);
         float h=terrainHeight(uint2(grid));
         if(coarse) {
             uint level=uint(draw.morph.z)+1;uint2 a,b,c;float3 w;
