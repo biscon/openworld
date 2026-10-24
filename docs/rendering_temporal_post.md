@@ -226,3 +226,58 @@ frame-spike measurements, and live motion review of terrain detail, fast turns,
 disocclusion, transparent trails and bloom radius/intensity. NVIDIA driver communication
 and a window display were unavailable in this environment. Software tests and the
 small static convergence fixture do not satisfy those hardware/visual gates.
+
+## Thin-geometry coverage
+
+Implemented. The owned fixture reproduces static thin-grass boiling under the
+jitter sequence with zero unjittered motion, no wind and no AO. Ordinary materials keep the
+existing resolve. `MeshMaterial::thinGeometry` opts opaque/masked surfaces into
+coverage handling; grass/leaf materials opt in without changing saved asset formats.
+Motion W explicitly encodes ordinary invalid/valid (0/1), sky (2), thin valid (3)
+and thin invalid (-1). Public snapshots decode the usual validity and expose a
+separate classification vector. No additional geometry render target is needed.
+
+One compute pass before resolve estimates 3x3 thin coverage, motion consistency and
+depth bounds, reprojects previous coverage and accumulates with a 0.875 history
+weight. Confidence ramps over eight valid observations. Complete misses in individual
+jitter phases may retain validated partial-coverage history; foreground depth and
+reactivity still reject it. Sky is explicitly the far endpoint of canopy intervals.
+Two frame-owned RGBA16F images store coverage, confidence and depth bounds in km
+(about 32 MiB at 1080p). Validated partial coverage locally relaxes colour clipping
+and luminance disagreement; neighbourhood-supported depth alternation may retain
+history, while invalid motion, occluders, disocclusion and reactive overlays suppress
+assistance. Global history weight and colour reconstruction remain unchanged.
+The feature follows submitted-frame history and existing reset/fence/resize rules.
+Actual allocations count against the TAA budget; insufficient extra budget falls
+back to ordinary TAA. `TaaSettings::thinGeometry` defaults on, including old bookmarks,
+and has one comparison checkbox beside TAA. No steady-state CPU allocation/readback.
+
+Verification is limited to the owned temporal/foliage fixtures, bookmark compatibility,
+shader checks, native Vulkan validation and one main-engine visual review. The static
+fixture compares 32 measured frames after 32 warmup frames against ordinary TAA and
+an 8x supersampled reference: target at least 50% less temporal variance and no more
+than 5% worse reference error. Moving leaves/camera, opaque occlusion, resets and
+solid surfaces guard against ghosting and global blur. The existing probe provides `--engine-scene --distance 80 --taa-check` for one
+short timing pair and eight successive static captures per setting. Readbacks occur
+outside measured intervals. This is a focused adaptation of
+[coverage-aware rejection](https://dev.epicgames.com/documentation/unreal-engine/thin-geometry-detection-with-temporal-super-resolution),
+not the complete TSR edge/line detection pipeline.
+
+
+Native RTX 3060 verification (2026-10-24): Debug/Release temporal and bookmark
+checks pass, as do Release foliage and streaming integration checks; all 95 shader
+modules validate in both builds. The static fixture variance falls from 0.002407
+to 0.000979 (59%), while reference MSE improves from 0.004703 to 0.004634. Untagged
+solid-edge output agrees within 1e-6. Tests cover moving surfaces/camera, foreground
+occlusion, history reset, resizing, masked fixed-binding materials, canopy gaps
+against sky and extra-budget fallback. The user's saved engine view, replayed with
+80 m vegetation, zero wind and GTAO off, settles with zero validation errors.
+
+The single 1080p Release pair uses 32 warmup + 120 measured frames per setting:
+TAA median/p95 is 0.350/0.355 ms ordinary and 0.627/0.851 ms with coverage handling
+(+0.277 ms median). Actual added allocations are 33.75 MiB, with zero render-thread
+C++ allocation calls in either measured interval. Eight-frame production captures
+show 27–48% lower display-space temporal variance across the sampled grass bands;
+this is reduced shimmer, not elimination of every dense subpixel artifact. Coverage
+classification cannot distinguish every variation between overlapping blades of the
+same class. Full TSR contrast-line detection remains outside this correction.

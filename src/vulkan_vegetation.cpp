@@ -362,6 +362,13 @@ VulkanVegetation::VulkanVegetation(VkPhysicalDevice p, VkDevice d, uint32_t fami
     for (const auto &source : library.materials) {
         MeshMaterial material;
         material.doubleSided = true;
+        material.thinGeometry = source.masked;
+        const uint32_t materialIndex = uint32_t(s.materialHandles.size());
+        for (const auto &asset : library.assets)
+            if (asset.category == FoliageCategory::Grass)
+                for (const auto &lod : asset.lods)
+                    for (const auto &part : lod)
+                        material.thinGeometry |= part.material == materialIndex;
         material.baseColour = source.colour;
         material.roughness = source.roughness;
         material.cutoff = source.cutoff;

@@ -260,6 +260,8 @@ void EngineUi::drawDiagnostics(UiWindow window, UiContext &context, UiActions &a
     }
     case UiWindow::PostDiagnostics: {
         const auto &post = renderer.postStats();
+        ImGui::Text("Thin geometry: %s | %s | %.1f MiB", post.thinGeometry ? "on" : "off",
+                    ow::postFallbackName(post.thinGeometryFallback), post.thinGeometryBytes / 1048576.);
         ImGui::TextWrapped("TAA %s | bloom %s | %.1f / %.1f MiB", post.taa ? "on" : "off",
                            post.bloom ? "on" : "off", post.taaBytes / 1048576., post.bloomBytes / 1048576.);
         ImGui::TextWrapped("Post GPU %.3f / %.3f ms | history %s | reset %s", post.taaMilliseconds,

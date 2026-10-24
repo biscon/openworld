@@ -31,7 +31,7 @@ TemporalOutput main(MeshSurface i,bool front:SV_IsFrontFace) {
     uint2 q=uint2(saturate(i.uv)*128);uint h=q.x*1973+q.y*9277+i.identity*26699;h^=h>>16;h*=0x7feb352d;h^=h>>15;
     if(float(h>>8)*(1.0/16777216.0)>=i.plant.w)i.previousClip=0;
     #endif
-    return temporalOutput(colour,i.renderedPosition,i.previousClip,float(i.previousClip.w>0),reactive);
+    return temporalOutput(colour,i.renderedPosition,i.previousClip,float(i.previousClip.w>0),reactive,r.temporalFlags.x!=0);
 }
 
 #else

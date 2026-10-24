@@ -1,4 +1,5 @@
 #include "temporal_types.hlsli"
+#include "temporal_motion.hlsli"
 [[vk::binding(0,0)]] Texture2D<float4> source;
 [[vk::binding(1,0)]] Texture2D<float4> sourceDepth;
 [[vk::binding(2,0)]] Texture2D<float4> motion;
@@ -13,3 +14,6 @@ struct Push {uint4 dims,pass;float4 effect,extra;};
 [[vk::push_constant]] ConstantBuffer<Push> settings;
 float luminance(float3 c){return dot(c,float3(.2126,.7152,.0722));}
 float3 finiteHdr(float3 c){return all(isfinite(c))?clamp(c,0,65504):0;}
+
+[[vk::binding(10,0)]] Texture2D<float4> coverageHistory;
+[[vk::image_format("rgba16f")]] [[vk::binding(11,0)]] RWTexture2D<float4> coverageResult;

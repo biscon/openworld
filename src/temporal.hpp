@@ -7,6 +7,7 @@ namespace ow {
 struct TaaSettings {
     bool enabled = false;
     float historyWeight = .9f;
+    bool thinGeometry = true;
 };
 struct BloomSettings {
     float intensity = 0, threshold = 10000, knee = .5f, radius = 1;
@@ -14,6 +15,9 @@ struct BloomSettings {
 enum class PostFallback : uint32_t { None, Disabled, Unsupported, Budget, Diagnostic };
 enum class TemporalReset : uint32_t { None, Initial, Explicit, Extent, CameraCut, Settings };
 struct PostStats {
+    bool thinGeometry = false;
+    PostFallback thinGeometryFallback = PostFallback::Disabled;
+    uint64_t thinGeometryBytes = 0;
     bool taa = false, bloom = false, historyValid = false, timingsAvailable = false;
     PostFallback taaFallback = PostFallback::Disabled, bloomFallback = PostFallback::Disabled;
     TemporalReset reset = TemporalReset::Initial;
@@ -26,6 +30,8 @@ struct PostSnapshot {
     uint32_t width = 0, height = 0;
     float preExposure = 1;
     std::vector<glm::vec4> resolved, motion;
+    std::vector<uint8_t> thinGeometry;
+    std::vector<glm::vec4> thinCoverage; // coverage, confidence, near/far depth in km.
     std::vector<float> reactivity,
         depth; // Negative depth marks rejected history; magnitude is view metres.
     std::vector<std::vector<glm::vec4>> bloom;

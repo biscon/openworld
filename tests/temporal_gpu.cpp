@@ -67,6 +67,15 @@ void convergence() {
     for (int i = 0; i < 24; ++i)
         frame(native, camera, settings);
     auto resolved = native.readPostSnapshot();
+    settings.taa.thinGeometry = false;
+    native.resetTemporalHistory();
+    for (int i = 0; i < 24; ++i)
+        frame(native, camera, settings);
+    const auto ordinary = native.readPostSnapshot();
+    for (size_t i = 0; i < resolved.resolved.size(); ++i)
+        near(resolved.resolved[i].r, ordinary.resolved[i].r, 1e-6,
+             "Untagged solid edges preserve the ordinary TAA image");
+    settings.taa.thinGeometry = true;
     double offError = 0, taaError = 0;
     for (uint32_t y = 0; y < 49; ++y)
         for (uint32_t x = 0; x < 65; ++x) {
@@ -94,6 +103,171 @@ void convergence() {
     frame(native, camera, settings);
     require(!native.postStats().taa && native.postStats().taaFallback == PostFallback::Diagnostic,
             "Diagnostics bypass temporal processing");
+}
+// Owned overlapping blades/leaves, approximately 0.2--1 pixel wide. No wind,
+// terrain, game content or changing lighting can explain temporal fluctuations.
+void thinGeometry() {
+    auto o = options();
+    o.width = 160;
+    o.height = 96;
+    Renderer r(o);
+    auto high = o;
+    high.renderHeight = o.height * 8;
+    Renderer reference(high);
+    Camera camera;
+    auto settings = scene();
+    struct Fixture {
+        MeshInstance first;
+        InstanceHandle second, background;
+    };
+    auto install = [](Renderer &renderer) {
+        MeshMaterial back;
+        back.unlit = back.doubleSided = true;
+        back.baseColour = {.12f, .12f, .12f, 1};
+        MeshInstance ground;
+        ground.mesh = renderer.uploadMesh(makeQuad());
+        ground.material = renderer.createMaterial(back);
+        ground.position.local.z = -40;
+        ground.scale = {100, 100, 1};
+        auto background = renderer.createInstance(ground);
+        MeshData leaves;
+        uint32_t seed = 17;
+        auto random = [&]() {
+            seed = seed * 1664525u + 1013904223u;
+            return float(seed >> 8) / 16777216.f;
+        };
+        for (int i = 0; i < 1800; ++i) {
+            float x = (random() - .5f) * 44, y = (random() - .5f) * 25;
+            float z = -20 - 10 * random(), w = .03f + .12f * random();
+            float h = .4f + 1.1f * random(), lean = (random() - .5f) * .5f;
+            uint32_t first = uint32_t(leaves.vertices.size());
+            leaves.vertices.push_back({{x - w, y, z}});
+            leaves.vertices.push_back({{x + w, y, z}});
+            leaves.vertices.push_back({{x + lean + w * .5f, y + h * .65f, z}});
+            leaves.vertices.push_back({{x + lean, y + h, z}});
+            leaves.indices.insert(leaves.indices.end(),
+                                  {first, first + 1, first + 2, first, first + 2, first + 3});
+        }
+        MeshMaterial leaf = back;
+        leaf.baseColour = {.7f, .7f, .7f, 1};
+        leaf.thinGeometry = true;
+        MeshInstance foliage;
+        foliage.mesh = renderer.uploadMesh(leaves);
+        foliage.material = renderer.createMaterial(leaf);
+        return Fixture{foliage, renderer.createInstance(foliage), background};
+    };
+    auto installed = install(r);
+    install(reference);
+    frame(reference, camera, settings);
+    const auto super = reference.readHdrSnapshot();
+    std::vector<double> expected(o.width * o.height);
+    for (uint32_t y = 0; y < o.height; ++y)
+        for (uint32_t x = 0; x < o.width; ++x)
+            for (uint32_t j = 0; j < 8; ++j)
+                for (uint32_t i = 0; i < 8; ++i)
+                    expected[y * o.width + x] += super.pixels[(y * 8 + j) * super.width + x * 8 + i].r / 64.;
+    settings.taa.enabled = true;
+    struct Result {
+        double variance = 0, error = 0;
+    } results[2];
+    for (int enabled = 0; enabled < 2; ++enabled) {
+        settings.taa.thinGeometry = enabled != 0;
+        r.resetTemporalHistory();
+        for (int i = 0; i < 32; ++i)
+            frame(r, camera, settings);
+        std::vector<double> sum(expected.size()), square(expected.size());
+        uint32_t classified = 0, assisted = 0;
+        for (int i = 0; i < 32; ++i) {
+            frame(r, camera, settings);
+            const auto snapshot = r.readPostSnapshot();
+            for (size_t j = 0; j < expected.size(); ++j) {
+                const double value = snapshot.resolved[j].r;
+                sum[j] += value / 32;
+                square[j] += value * value / 32;
+                results[enabled].error += std::pow(value - expected[j], 2) / (32 * expected.size());
+                require(std::abs(snapshot.motion[j].x) < 1e-6 && std::abs(snapshot.motion[j].y) < 1e-6,
+                        "Frozen thin surfaces have zero unjittered motion");
+                require(snapshot.motion[j].w == 1, "Frozen surfaces retain submitted correspondence");
+                classified += snapshot.thinGeometry[j] != 0;
+                if (!snapshot.thinCoverage.empty())
+                    assisted += snapshot.thinCoverage[j].y > 0;
+            }
+        }
+        require(classified > 0 && (!enabled || assisted > 0),
+                "Thin classification and coverage are exercised");
+        for (size_t j = 0; j < sum.size(); ++j)
+            results[enabled].variance += std::max(0., square[j] - sum[j] * sum[j]) / sum.size();
+        std::cout << "Thin static " << enabled << " variance=" << results[enabled].variance
+                  << " reference MSE=" << results[enabled].error << '\n';
+    }
+    require(results[1].variance < results[0].variance * .5,
+            "Thin coverage reduces static temporal variance by at least half");
+    require(results[1].error <= results[0].error * 1.05,
+            "Stability does not trade away supersampled reference accuracy");
+
+    // Motion and real foreground disocclusion must not inherit coverage relaxation.
+    for (int i = 0; i < 8; ++i) {
+        installed.first.position.local.x += .05;
+        require(r.updateInstance(installed.second, installed.first), "Move owned thin surfaces");
+        camera.local.x += .02;
+        frame(r, camera, settings);
+    }
+    auto moving = r.readPostSnapshot();
+    require(
+        std::any_of(moving.motion.begin(), moving.motion.end(), [](auto v) { return std::abs(v.x) > 1e-5; }),
+        "Thin geometry preserves actual submitted motion");
+    MeshMaterial solid;
+    solid.unlit = solid.doubleSided = true;
+    solid.baseColour = {.3f, .3f, .3f, 1};
+    MeshInstance occluder;
+    occluder.mesh = r.uploadMesh(makeQuad());
+    occluder.material = r.createMaterial(solid);
+    occluder.position.local.z = -10;
+    occluder.scale = {5, 5, 1};
+    auto handle = r.createInstance(occluder);
+    const size_t centre = o.width * (o.height / 2) + o.width / 2;
+    frame(r, camera, settings);
+    auto blocked = r.readPostSnapshot();
+    near(blocked.resolved[centre].r, r.readHdrSnapshot().pixels[centre].r, .001,
+         "Foreground occluder rejects foliage history immediately");
+    require(blocked.thinCoverage[centre].y == 0, "Solid occluder has no thin relaxation");
+    r.removeInstance(handle);
+    frame(r, camera, settings);
+    require(r.readPostSnapshot().depth[centre] < 0, "Disocclusion rejects foreground history");
+    r.resetTemporalHistory();
+    frame(r, camera, settings);
+    for (auto v : r.readPostSnapshot().thinCoverage)
+        require(v.y == 0, "Explicit reset discards coverage confidence");
+    r.resizeOffscreen(162, 98);
+    frame(r, camera, settings);
+    for (auto v : r.readPostSnapshot().thinCoverage)
+        require(v.y == 0, "Resize discards coverage confidence");
+    auto constrained = o;
+    constrained.taaBudgetBytes = r.postStats().taaBytes - r.postStats().thinGeometryBytes;
+    // Match the new extent so the exact ordinary allocation still fits.
+    constrained.width = 162;
+    constrained.height = 98;
+    Renderer fallback(constrained);
+    frame(fallback, camera, settings);
+    require(fallback.postStats().taa && !fallback.postStats().thinGeometry &&
+                fallback.postStats().thinGeometryFallback == PostFallback::Budget,
+            "Coverage budget exhaustion retains ordinary TAA");
+
+    r.removeInstance(installed.background);
+    settings.atmosphere.mode = AtmosphereMode::Physical;
+    settings.output.ev100 = 15;
+    r.resetTemporalHistory();
+    for (int i = 0; i < 24; ++i)
+        frame(r, camera, settings);
+    const auto canopy = r.readPostSnapshot();
+    finite(canopy);
+    require(std::any_of(canopy.motion.begin(), canopy.motion.end(), [](auto v) { return v.w == 2; }) &&
+                std::any_of(canopy.thinGeometry.begin(), canopy.thinGeometry.end(),
+                            [](auto v) { return v != 0; }),
+            "Canopy leaves and sky retain distinct motion classifications");
+    require(std::any_of(canopy.thinCoverage.begin(), canopy.thinCoverage.end(),
+                        [](auto v) { return v.y > 0 && v.w > 60; }),
+            "Partial canopy gaps accumulate coverage against sky");
 }
 void transparency() {
     auto o = options();
@@ -155,6 +329,7 @@ void transparency() {
     texture.bytes = {255, 255, 255, 0,   255, 255, 255, 255, 255, 255,
                      255, 255, 255, 255, 255, 0,   255, 255, 255, 128};
     m.alpha = AlphaMode::Mask;
+    m.thinGeometry = true;
     m.baseColour.a = 1;
     m.colourTexture = r.uploadTexture(texture);
     front.material = r.createMaterial(m);
@@ -350,6 +525,7 @@ int main() {
                         unsupported.postStats().bloomFallback == PostFallback::Unsupported,
                     "Forced unsupported capability paths bypass both stages");
         }
+        thinGeometry();
         convergence();
         transparency();
         bloomImpulse();

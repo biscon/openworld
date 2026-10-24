@@ -99,14 +99,18 @@ struct Samples {
 int main(int argc, char **argv) {
     try {
         if (argc < 2)
-            throw std::invalid_argument("Usage: vegetation_stream_probe OUTPUT [--cpu-check] "
-                                        "[--engine-scene] [--distance 20..200] [--occlusion-check] [--route-check]");
-        bool cpuOnly = false, routeOnly = false, engineScene = false, occlusionCheck = false;
+            throw std::invalid_argument(
+                "Usage: vegetation_stream_probe OUTPUT [--cpu-check] "
+                "[--engine-scene] [--distance 20..200] [--occlusion-check] [--route-check] [--taa-check]");
+        bool cpuOnly = false, routeOnly = false, engineScene = false, occlusionCheck = false,
+             taaCheck = false;
         float distance = 70;
         for (int i = 2; i < argc; ++i) {
             const std::string arg = argv[i];
             if (arg == "--cpu-check")
                 cpuOnly = true;
+            else if (arg == "--taa-check")
+                taaCheck = true;
             else if (arg == "--route-check")
                 routeOnly = true;
             else if (arg == "--engine-scene") {
@@ -225,6 +229,41 @@ int main(int argc, char **argv) {
         bookmark.scene = scene;
         bookmark.startup = o;
         saveReviewView(output / "close-view.json", bookmark);
+        if (taaCheck) {
+            scene.vegetation.wind = 0;
+            for (bool enabled : {false, true}) {
+                scene.taa.thinGeometry = enabled;
+                r.resetTemporalHistory();
+                std::vector<double> timings;
+                timings.reserve(120);
+                uint64_t allocations = 0;
+                for (uint32_t i = 0; i < 152; ++i) {
+                    frame();
+                    if (i >= 32) {
+                        timings.push_back(r.postStats().taaMilliseconds);
+                        allocations += frameAllocations;
+                    }
+                }
+                std::cout << "Thin TAA " << enabled << ": median/p95 " << percentile(timings, .5) << " / "
+                          << percentile(timings, .95) << " ms; coverage "
+                          << r.postStats().thinGeometryBytes / 1048576. << " MiB; allocations " << allocations
+                          << std::endl;
+                // Blocking observations are outside the measured interval. Capture
+                // successive jitter phases, not just one flattering still image.
+                for (uint32_t i = 0; i < 8; ++i) {
+                    frame();
+                    r.capture(output /
+                              (std::string(enabled ? "thin-on-" : "thin-off-") + std::to_string(i) + ".ppm"));
+                }
+            }
+            scene.vegetation.wind = 1;
+            for (uint32_t i = 0; i < 32; ++i) {
+                camera.local.x += .02;
+                frame();
+            }
+            r.capture(output / "thin-wind-moving.ppm");
+            return 0;
+        }
         cold.print("cold");
         if (cpuOnly) {
             Samples check;

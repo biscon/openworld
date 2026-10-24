@@ -27,6 +27,7 @@ int main() {
         v.terrain.wavelength = 1772;
         v.terrain.heightScale = 2000;
         v.scene.freezeLod = true;
+        v.scene.taa.thinGeometry = false;
         v.scene.vegetation.distance = 193;
         v.scene.vegetation.density = .83f;
         v.scene.vegetation.occlusion = true;
@@ -41,7 +42,16 @@ int main() {
         v.lod.patches = {{-8, 0, 1}, {0, 0, 1}};
         const auto path = dir / "view.json";
         saveReviewView(path, v);
+        {
+            std::ifstream input(path);
+            auto legacy = nlohmann::json::parse(input);
+            legacy["scene"]["taa"].erase("thinGeometry");
+            const auto legacyPath = dir / "legacy-taa.json";
+            std::ofstream(legacyPath) << legacy.dump();
+            require(loadReviewView(legacyPath).scene.taa.thinGeometry, "Old bookmarks enable thin coverage");
+        }
         const auto loaded = loadReviewView(path);
+        require(!loaded.scene.taa.thinGeometry, "Thin-geometry comparison setting round trips");
         require(loaded.camera.chunk.x == v.camera.chunk.x && loaded.camera.local == v.camera.local &&
                     loaded.camera.speed == 5 && loaded.terrain.seed == 771 &&
                     loaded.terrainOrigin.x == v.terrainOrigin.x,

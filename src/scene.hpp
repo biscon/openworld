@@ -55,6 +55,7 @@ struct MeshMaterial {
     AlphaMode alpha = AlphaMode::Opaque;
     float cutoff = .5f;
     bool doubleSided = false, unlit = false;
+    bool thinGeometry = false; // Coverage-aware TAA for opaque/masked blades, leaves and needles.
 };
 void validate(const MeshMaterial &);
 struct MeshInstance {

@@ -9,7 +9,7 @@ struct MaterialUniform {
     MaterialCoordinates coordinates; float4 blend; uint4 features;
     float4 habitat,clearing;
 };
-struct MaterialRecord {uint4 maps;uint4 macro;float4 base,emission,factors;uint4 meshMaps;float4 alpha;};
+struct MaterialRecord {uint4 maps;uint4 macro;float4 base,emission,factors;uint4 meshMaps;float4 alpha;uint4 temporalFlags;};
 [[vk::binding(0,2)]] ConstantBuffer<MaterialUniform> materialInfo;
 [[vk::binding(1,2)]] StructuredBuffer<MaterialRecord> materialRecords;
 #ifdef OW_BINDLESS

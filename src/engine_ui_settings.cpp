@@ -244,6 +244,7 @@ void EngineUi::drawSettings(UiWindow window, UiContext &context, UiActions &acti
     }
     case UiWindow::Output: {
         ImGui::Checkbox("Temporal antialiasing", &scene.taa.enabled);
+        ImGui::Checkbox("Thin geometry stability", &scene.taa.thinGeometry);
         ImGui::SliderFloat("Bloom intensity", &scene.bloom.intensity, 0, .5f);
         ImGui::SliderFloat("Bloom threshold", &scene.bloom.threshold, 0, 100000, "%.0f");
         ImGui::SliderFloat("Bloom knee", &scene.bloom.knee, 0, 1);

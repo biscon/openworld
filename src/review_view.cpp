@@ -89,7 +89,14 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(AtmosphereSettings, mode, quality, aerialPers
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(GtaoSettings, mode, radius, diagnostic)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ShadowSettings, mode, nearDistance, farDistance, biasTexels,
                                    normalBiasTexels, diagnostic)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(TaaSettings, enabled, historyWeight)
+void to_json(json &j, const TaaSettings &v) {
+    j = {{"enabled", v.enabled}, {"historyWeight", v.historyWeight}, {"thinGeometry", v.thinGeometry}};
+}
+void from_json(const json &j, TaaSettings &v) {
+    j.at("enabled").get_to(v.enabled);
+    j.at("historyWeight").get_to(v.historyWeight);
+    v.thinGeometry = j.value("thinGeometry", true);
+}
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(BloomSettings, intensity, threshold, knee, radius)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WorldPosition, x, z, local)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(VegetationHabitatInput, revision, weights, minimumElevation,

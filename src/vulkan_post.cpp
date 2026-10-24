@@ -136,7 +136,7 @@ struct VulkanPost::Impl {
     uint32_t capacity;
     PostFallback taaAllocation = PostFallback::Disabled, bloomAllocation = PostFallback::Disabled;
     uint32_t width = 0, height = 0, current = 0, last = 0;
-    bool requestedTaa = false, requestedBloom = false, haveHistory = false;
+    bool requestedTaa = false, requestedBloom = false, haveHistory = false, haveCoverage = false;
     uint64_t sequence = 0;
     float previousExposure = 1, currentExposure = 1;
     Camera previousCamera{}, pendingCamera{};
@@ -151,12 +151,12 @@ struct VulkanPost::Impl {
     VkPipelineLayout pipelineLayout{};
     VkDescriptorPool pool{};
     VkSampler sampler{};
-    VkPipeline taaPipeline{}, downPipeline{}, upPipeline{};
+    VkPipeline taaPipeline{}, thinPipeline{}, coveragePipeline{}, downPipeline{}, upPipeline{};
     VkQueryPool queries{};
     double period = 0;
     uint32_t timestampBits = 0;
     struct TaaFrame {
-        Image motion, reactive, history, depth;
+        Image motion, reactive, history, depth, coverage;
     };
     struct BloomFrame {
         std::array<Image, 6> down, up;
@@ -165,9 +165,9 @@ struct VulkanPost::Impl {
         TaaFrame taa;
         BloomFrame bloom;
         Buffer view, terrain;
-        VkDescriptorSet resolve{};
+        VkDescriptorSet resolve{}, coverageSet{};
         std::array<VkDescriptorSet, 6> down{}, up{};
-        bool timed = false, completedTaa = false, completedBloom = false;
+        bool timed = false, completedTaa = false, completedBloom = false, completedThin = false;
         float exposure = 1;
     };
     std::array<Frame, 2> frames;
@@ -175,7 +175,7 @@ struct VulkanPost::Impl {
     Impl(VkPhysicalDevice p, VkDevice d, PostCapabilities c, uint64_t t, uint64_t b, uint32_t n)
         : physical(p), device(d), caps(c), taaBudget(t), bloomBudget(b), capacity(n) {}
     ~Impl() {
-        for (auto p : {taaPipeline, downPipeline, upPipeline})
+        for (auto p : {taaPipeline, thinPipeline, coveragePipeline, downPipeline, upPipeline})
             if (p)
                 vkDestroyPipeline(device, p, nullptr);
         if (queries)
@@ -191,8 +191,7 @@ struct VulkanPost::Impl {
     }
     void dispatch(VkCommandBuffer cmd, VkPipeline p, VkDescriptorSet set, const Push &push) {
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, p);
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, &set, 0,
-                                nullptr);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, &set, 0, nullptr);
         vkCmdPushConstants(cmd, pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
         vkCmdDispatch(cmd, (push.dims.x + 7) / 8, (push.dims.y + 7) / 8, 1);
     }
@@ -208,17 +207,17 @@ struct VulkanPost::Impl {
         vkUpdateDescriptorSets(device, 1, &w, 0, nullptr);
     }
 };
-VulkanPost::VulkanPost(VkPhysicalDevice p, VkDevice d, uint32_t family, PostCapabilities caps,
-                       uint64_t tb, uint64_t bb, uint32_t capacity, const std::filesystem::path &shaders)
+VulkanPost::VulkanPost(VkPhysicalDevice p, VkDevice d, uint32_t family, PostCapabilities caps, uint64_t tb,
+                       uint64_t bb, uint32_t capacity, const std::filesystem::path &shaders)
     : impl_(std::make_unique<Impl>(p, d, caps, tb, bb, capacity)) {
     auto &s = *impl_;
-    std::array<VkDescriptorSetLayoutBinding, 10> bindings{};
-    for (uint32_t i = 0; i < 10; ++i)
+    std::array<VkDescriptorSetLayoutBinding, 12> bindings{};
+    for (uint32_t i = 0; i < 12; ++i)
         bindings[i] = {i,
-                       i < 6    ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE
-                       : i < 8  ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
-                       : i == 8 ? VK_DESCRIPTOR_TYPE_SAMPLER
-                                : VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                       i < 6 || i == 10   ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE
+                       : i < 8 || i == 11 ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+                       : i == 8           ? VK_DESCRIPTOR_TYPE_SAMPLER
+                                          : VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
                        1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr};
     VkDescriptorSetLayoutCreateInfo li{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
     li.bindingCount = bindings.size();
@@ -231,12 +230,12 @@ VulkanPost::VulkanPost(VkPhysicalDevice p, VkDevice d, uint32_t family, PostCapa
     pi.pushConstantRangeCount = 1;
     pi.pPushConstantRanges = &range;
     check(vkCreatePipelineLayout(d, &pi, nullptr, &s.pipelineLayout));
-    VkDescriptorPoolSize sizes[] = {{VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 156},
-                                    {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 52},
-                                    {VK_DESCRIPTOR_TYPE_SAMPLER, 26},
-                                    {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 26}};
+    VkDescriptorPoolSize sizes[] = {{VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 196},
+                                    {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 84},
+                                    {VK_DESCRIPTOR_TYPE_SAMPLER, 28},
+                                    {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 28}};
     VkDescriptorPoolCreateInfo pool{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
-    pool.maxSets = 26;
+    pool.maxSets = 28;
     pool.poolSizeCount = 4;
     pool.pPoolSizes = sizes;
     check(vkCreateDescriptorPool(d, &pool, nullptr, &s.pool));
@@ -256,6 +255,7 @@ VulkanPost::VulkanPost(VkPhysicalDevice p, VkDevice d, uint32_t family, PostCapa
             s.common(set, f);
         };
         alloc(f.resolve);
+        alloc(f.coverageSet);
         for (uint32_t l = 0; l < 6; ++l) {
             alloc(f.down[l]);
             alloc(f.up[l]);
@@ -271,8 +271,11 @@ VulkanPost::VulkanPost(VkPhysicalDevice p, VkDevice d, uint32_t family, PostCapa
         ci.layout = s.pipelineLayout;
         check(vkCreateComputePipelines(d, {}, 1, &ci, nullptr, &out));
     };
-    if (caps.taa)
+    if (caps.taa) {
         pipeline("taa.comp.spv", s.taaPipeline);
+        pipeline("taa_thin.comp.spv", s.thinPipeline);
+        pipeline("taa_coverage.comp.spv", s.coveragePipeline);
+    }
     if (caps.bloom) {
         pipeline("bloom_down.comp.spv", s.downPipeline);
         pipeline("bloom_up.comp.spv", s.upPipeline);
@@ -306,9 +309,10 @@ void VulkanPost::resize(uint32_t w, uint32_t h, bool t, bool b) {
     s.requestedTaa = t;
     s.requestedBloom = b;
     s.haveHistory = false;
+    s.haveCoverage = false;
     s.pendingReset = TemporalReset::Extent;
     s.sequence = 0;
-    s.stats.taaBytes = s.stats.bloomBytes = 0;
+    s.stats.taaBytes = s.stats.bloomBytes = s.stats.thinGeometryBytes = 0;
     s.taaAllocation = !t            ? PostFallback::Disabled
                       : !s.caps.taa ? PostFallback::Unsupported
                                     : PostFallback::None;
@@ -316,7 +320,8 @@ void VulkanPost::resize(uint32_t w, uint32_t h, bool t, bool b) {
                         : !s.caps.bloom ? PostFallback::Unsupported
                                         : PostFallback::None;
     for (auto &f : s.frames) {
-        f.timed = false;
+        f.timed = f.completedThin = false;
+        f.taa.coverage.reset();
         for (auto *i : {&f.taa.motion, &f.taa.reactive, &f.taa.history, &f.taa.depth})
             i->reset();
         for (auto &i : f.bloom.down)
@@ -357,11 +362,24 @@ void VulkanPost::resize(uint32_t w, uint32_t h, bool t, bool b) {
                     i->reset();
         } else {
             for (auto &f : s.frames) {
-                f.terrain.create(s.physical, s.device,
-                                 uint64_t(s.capacity) * sizeof(TemporalTerrainRecord),
+                f.terrain.create(s.physical, s.device, uint64_t(s.capacity) * sizeof(TemporalTerrainRecord),
                                  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
                 for (auto *i : {&f.taa.motion, &f.taa.reactive, &f.taa.history, &f.taa.depth})
                     i->allocate(s.physical);
+            }
+            uint64_t coverageBytes = 0;
+            for (auto &f : s.frames) {
+                f.taa.coverage.create(s.device, w, h, hdrFormat);
+                coverageBytes += f.taa.coverage.req.size;
+            }
+            if (coverageBytes <= s.taaBudget - bytes) {
+                for (auto &f : s.frames)
+                    f.taa.coverage.allocate(s.physical);
+                s.stats.thinGeometryBytes = coverageBytes;
+                bytes += coverageBytes;
+            } else {
+                for (auto &f : s.frames)
+                    f.taa.coverage.reset();
             }
             s.stats.taaBytes = bytes;
         }
@@ -400,6 +418,7 @@ void VulkanPost::resize(uint32_t w, uint32_t h, bool t, bool b) {
 void VulkanPost::reset(TemporalReset r) {
     impl_->pendingReset = r;
     impl_->haveHistory = false;
+    impl_->haveCoverage = false;
     impl_->sequence = 0;
 }
 void VulkanPost::begin(uint32_t frame, const Camera &camera, TerrainGrid grid, const TaaSettings &t,
@@ -413,14 +432,18 @@ void VulkanPost::begin(uint32_t frame, const Camera &camera, TerrainGrid grid, c
     s.currentExposure = exposure;
     s.pendingCamera = camera;
     s.stats.taa = t.enabled && s.frames[frame].taa.history.view && !diagnostic;
+    s.stats.thinGeometry = s.stats.taa && t.thinGeometry && s.frames[frame].taa.coverage.view;
+    s.stats.thinGeometryFallback = !t.thinGeometry         ? PostFallback::Disabled
+                                   : !s.stats.taa          ? s.stats.taaFallback
+                                   : !s.stats.thinGeometry ? PostFallback::Budget
+                                                           : PostFallback::None;
     s.stats.bloom = b.intensity > 0 && s.frames[frame].bloom.down[0].view && !diagnostic;
     if (s.stats.taa != bool(s.view.state.x))
         reset(TemporalReset::Settings);
     const auto origin = worldPosition(camera, grid);
     auto delta = relativePosition(origin, s.previousOrigin);
-    if (s.haveHistory &&
-        (glm::length(delta) > 256 ||
-         glm::dot(camera.forward(), s.previousCamera.forward()) < std::cos(glm::radians(45.f))))
+    if (s.haveHistory && (glm::length(delta) > 256 || glm::dot(camera.forward(), s.previousCamera.forward()) <
+                                                          std::cos(glm::radians(45.f))))
         reset(TemporalReset::CameraCut);
     if (s.haveHistory && (camera.curvature.x != s.previousCamera.curvature.x ||
                           camera.curvature.z != s.previousCamera.curvature.z ||
@@ -455,8 +478,7 @@ void VulkanPost::begin(uint32_t frame, const Camera &camera, TerrainGrid grid, c
             for (uint32_t i = 0; i < 14; ++i)
                 available &= values[i * 2 + 1] != 0;
             if (available) {
-                uint64_t mask =
-                    s.timestampBits == 64 ? ~uint64_t(0) : (uint64_t(1) << s.timestampBits) - 1;
+                uint64_t mask = s.timestampBits == 64 ? ~uint64_t(0) : (uint64_t(1) << s.timestampBits) - 1;
                 auto elapsed = [&](uint32_t a, uint32_t b) {
                     return ((values[b * 2] - values[a * 2]) & mask) * s.period / 1e6;
                 };
@@ -478,6 +500,7 @@ void VulkanPost::begin(uint32_t frame, const Camera &camera, TerrainGrid grid, c
 }
 void VulkanPost::submitted() {
     auto &s = *impl_;
+    s.haveCoverage = s.frames[s.current].completedThin;
     s.last = s.current;
     s.previousCamera = s.pendingCamera;
     s.previousOrigin = worldPosition(s.pendingCamera, s.previousGrid);
@@ -532,6 +555,7 @@ void VulkanPost::record(VkCommandBuffer cmd, VkImageView hdr, VkImageView depth)
     auto &f = s.frames[s.current];
     auto &previous = s.frames[1 - s.current];
     f.completedTaa = s.stats.taa;
+    f.completedThin = s.stats.thinGeometry;
     f.completedBloom = s.stats.bloom;
     if (s.queries) {
         vkCmdResetQueryPool(cmd, s.queries, s.current * 14, 14);
@@ -556,7 +580,22 @@ void VulkanPost::record(VkCommandBuffer cmd, VkImageView hdr, VkImageView depth)
         Push push{};
         push.dims = {s.width, s.height, 0, 0};
         push.effect.x = s.taa.historyWeight;
-        s.dispatch(cmd, s.taaPipeline, f.resolve, push);
+        if (f.completedThin) {
+            transition(cmd, f.taa.coverage, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL);
+            transition(cmd, previous.taa.coverage, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL);
+            imageDescriptor(s.device, f.coverageSet, 1, depth, VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL);
+            imageDescriptor(s.device, f.coverageSet, 2, f.taa.motion.view, VK_IMAGE_LAYOUT_GENERAL);
+            imageDescriptor(s.device, f.coverageSet, 3, f.taa.reactive.view, VK_IMAGE_LAYOUT_GENERAL);
+            imageDescriptor(s.device, f.coverageSet, 10, previous.taa.coverage.view, VK_IMAGE_LAYOUT_GENERAL);
+            imageDescriptor(s.device, f.coverageSet, 11, f.taa.coverage.view, VK_IMAGE_LAYOUT_GENERAL,
+                            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
+            // Both descriptor sets are finalized before their first bind.
+            imageDescriptor(s.device, f.resolve, 10, f.taa.coverage.view, VK_IMAGE_LAYOUT_GENERAL);
+            push.pass.x = s.haveCoverage ? 1 : 0;
+            s.dispatch(cmd, s.coveragePipeline, f.coverageSet, push);
+            transition(cmd, f.taa.coverage, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL);
+        }
+        s.dispatch(cmd, f.completedThin ? s.thinPipeline : s.taaPipeline, f.resolve, push);
         transition(cmd, f.taa.history, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL);
         transition(cmd, f.taa.depth, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL);
     }
@@ -613,8 +652,7 @@ void VulkanPost::record(VkCommandBuffer cmd, VkImageView hdr, VkImageView depth)
                                      s.current * 14 + 8 + k);
     } else if (s.queries) {
         for (uint32_t q = 2; q < 14; ++q)
-            vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, s.queries,
-                                 s.current * 14 + q);
+            vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, s.queries, s.current * 14 + q);
     }
 }
 VkImageView VulkanPost::resolved(VkImageView raw) const {
@@ -633,6 +671,8 @@ uint64_t VulkanPost::snapshotBytes() const {
     if (f.completedTaa)
         for (auto *i : {&f.taa.history, &f.taa.motion, &f.taa.reactive, &f.taa.depth})
             n += i->payload();
+    if (f.completedThin)
+        n += f.taa.coverage.payload();
     if (f.completedBloom)
         for (uint32_t l = 0; l < s.levels; ++l)
             n += f.bloom.up[l].payload();
@@ -655,11 +695,13 @@ void VulkanPost::copySnapshot(VkCommandBuffer cmd, VkBuffer target) const {
     if (f.completedTaa)
         for (auto *i : {&f.taa.history, &f.taa.motion, &f.taa.reactive, &f.taa.depth})
             copy(*i);
+    if (f.completedThin)
+        copy(f.taa.coverage);
     if (f.completedBloom)
         for (uint32_t l = 0; l < s.levels; ++l)
             copy(f.bloom.up[l]);
-    barrier(cmd, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
-            VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_READ_BIT);
+    barrier(cmd, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_HOST_BIT,
+            VK_ACCESS_2_HOST_READ_BIT);
 }
 PostSnapshot VulkanPost::decodeSnapshot(const void *data) const {
     auto &s = *impl_;
@@ -683,6 +725,15 @@ PostSnapshot VulkanPost::decodeSnapshot(const void *data) const {
     if (f.completedTaa) {
         out.resolved = rgba(f.taa.history);
         out.motion = rgba(f.taa.motion);
+        out.thinGeometry.resize(out.motion.size());
+        for (size_t i = 0; i < out.motion.size(); ++i) {
+            auto &tag = out.motion[i].w;
+            out.thinGeometry[i] = tag == 3 || tag == -1;
+            if (tag == 3)
+                tag = 1;
+            else if (tag == -1)
+                tag = 0;
+        }
         if (static_cast<const TemporalView *>(f.view.mapped)->curvature.z != 0)
             for (auto &motion : out.motion)
                 motion.z *= 1000; // Public snapshots remain metres.
@@ -694,6 +745,8 @@ PostSnapshot VulkanPost::decodeSnapshot(const void *data) const {
         std::memcpy(out.depth.data(), p, out.depth.size() * 4);
         p += f.taa.depth.payload();
     }
+    if (f.completedThin)
+        out.thinCoverage = rgba(f.taa.coverage);
     if (f.completedBloom)
         for (uint32_t l = 0; l < s.levels; ++l) {
             out.bloom.push_back(rgba(f.bloom.up[l]));

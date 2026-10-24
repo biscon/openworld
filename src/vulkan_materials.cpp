@@ -98,6 +98,7 @@ struct MaterialRecord {
     glm::vec4 base{1}, emission{0}, factors{.8f, 0, 1, 1};
     glm::uvec4 meshMaps{0, 1, 2, 0};
     glm::vec4 alpha{0, .5f, 0, 0};
+    glm::uvec4 temporal{0};
 };
 struct MaterialUniform {
     TerrainParameters geography;
@@ -108,7 +109,7 @@ struct MaterialUniform {
     glm::uvec4 features;
     glm::vec4 habitat, clearing;
 };
-static_assert(sizeof(MaterialRecord) == 112);
+static_assert(sizeof(MaterialRecord) == 128);
 static_assert(sizeof(MaterialUniform) == 640);
 static_assert(offsetof(MaterialUniform, coordinates) == 544);
 static_assert(offsetof(MaterialUniform, blend) == 576);
@@ -427,6 +428,7 @@ struct VulkanMaterials::Impl {
             r.meshMaps = {this->textureIndex(m.colourTexture, 0), this->textureIndex(m.normalTexture, 1),
                           this->textureIndex(m.ormTexture, 2), this->textureIndex(m.emissiveTexture, 0)};
             r.alpha = {float(m.alpha), m.cutoff, m.doubleSided ? 1.f : 0.f, m.unlit ? 1.f : 0.f};
+            r.temporal.x = m.thinGeometry && m.alpha != AlphaMode::Blend ? 1u : 0u;
         }
         f.revision = revision;
         f.palette = current;
