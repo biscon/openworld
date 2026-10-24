@@ -44,10 +44,10 @@ float4 terrainWeights(float2 relative){
     if(materialInfo.habitat.w!=0) {
         float2 habitatLocal=relative+materialInfo.habitatLocal.xy;
         float3 weights=vegetationHabitatWeights(materialInfo.habitatKey,habitatLocal,materialInfo.habitat.xyz,materialInfo.habitatMode.x!=0,materialInfo.habitatMode.y);
-        float cover=vegetationProbability(weights,0)*vegetationClearing(materialInfo.habitatKey,habitatLocal,materialInfo.habitatMode.x!=0,materialInfo.habitatMode.y);
+        float cover=vegetationGroundCover(weights,vegetationClearing(materialInfo.habitatKey,habitatLocal,materialInfo.habitatMode.x!=0,materialInfo.habitatMode.y),materialInfo.habitatMode.x!=0);
         if(vegetationExcluded(relative,materialInfo.clearing.xyz))cover=0;
         // Rebalance existing grass/soil coverage, keeping rock and gravel intact.
-        // This is expected habitat coverage, never the currently visible population.
+        // Ground cover includes low vegetation/litter, never the currently visible population.
         float ground=w.x+w.y;
         float grass=ground*cover;
         w.x=grass;w.y=ground-grass;

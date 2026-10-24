@@ -16,8 +16,9 @@ float habitatNoise(uint4 key,float2 local,uint shift,uint seed) {
 }
 float3 vegetationHabitatWeights(uint4 key,float2 local,float3 uniformWeights,bool blended,uint seed) {
     if(!blended)return uniformWeights;
-    float a=habitatNoise(key,local,5,seed^173u),b=habitatNoise(key,local,5,seed^917u);
-    float3 w=float3(1-smoothstep(.35,.65,a),smoothstep(.35,.65,a)*(1-smoothstep(.4,.7,b)),smoothstep(.35,.65,a)*smoothstep(.4,.7,b));
+    float a=habitatNoise(key,local,7,seed^173u),b=habitatNoise(key,local,7,seed^917u);
+    float moor=smoothstep(.25,.75,a),understory=smoothstep(.3,.75,b);
+    float3 w=float3(1-moor,moor*(1-understory),moor*understory);
     return w/max(dot(w,1.0.xxx),1e-6);
 }
 float vegetationClearing(uint4 key,float2 local,bool blended,uint seed) {
@@ -28,6 +29,12 @@ float vegetationCluster(uint4 key,float2 local,uint species,uint seed,float amou
 }
 float vegetationProbability(float3 weights,uint species) {
     return dot(weights,species==0?float3(1,.65,.35):species==1?float3(.15,.25,1):float3(.15,.75,.4));
+}
+float vegetationGroundCover(float3 weights,float clearing,bool blended) {
+    // Sparse grass does not mean bare soil: moor and understory retain low cover/litter.
+    // Small population clearings should not become high-contrast mountain spots.
+    return blended?dot(weights,float3(1,.9,.82))*lerp(.85,1,clearing)
+                  :vegetationProbability(weights,0)*clearing;
 }
 bool vegetationExcluded(float2 relative,float3 clearing) {
     return clearing.z>0&&distance(relative,clearing.xy)<clearing.z;

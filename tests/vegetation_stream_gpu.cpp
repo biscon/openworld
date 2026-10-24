@@ -304,10 +304,20 @@ void habitatBoundaries() {
         auto snapshot = settle(r, c, s);
         uint32_t checked = 0;
         for (const auto &cell : snapshot.cells)
-            for (auto value : cell.attachment) {
-                near(value.x + value.y + value.z, 1, 2e-5, "normalized blended habitat");
-                require(value.x >= 0 && value.y >= 0 && value.z >= 0, "nonnegative habitat mixture");
-                near(value.w, 0, 2e-5, "habitat and clearing agree across signed cell boundary");
+            for (uint32_t lane = 0; lane < cell.attachment.size(); ++lane) {
+                auto value = cell.attachment[lane];
+                if (lane & 1) {
+                    require(value.x >= .8f && value.x <= 1.00001f,
+                            "sparse habitats retain low ground vegetation");
+                    require(value.y >= .65f && value.y <= value.x && value.x - value.y <= .15001f,
+                            "procedural clearings never expose pure soil spots");
+                    near(value.z, 0, 2e-5, "ground cover continuous across signed cell boundary");
+                    near(value.w, .35f, 1e-6, "uniform understory inspection retains original coverage");
+                } else {
+                    near(value.x + value.y + value.z, 1, 2e-5, "normalized blended habitat");
+                    require(value.x >= 0 && value.y >= 0 && value.z >= 0, "nonnegative habitat mixture");
+                    near(value.w, 0, 2e-5, "habitat and clearing agree across signed cell boundary");
+                }
                 ++checked;
             }
         require(checked > 128, "owned habitat sample coverage");

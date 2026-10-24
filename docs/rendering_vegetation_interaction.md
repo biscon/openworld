@@ -36,7 +36,7 @@ Explicit species metadata replaces category-first discovery. Identity remains se
 by world/cell/species/candidate, independent of camera and quality. Algorithm, library
 and habitat revisions invalidate population; attachment remains a separate operation.
 
-Blended habitats use stable lattice noise: 128 m broad patches, 8 m species clusters,
+Blended habitats use stable lattice noise: 512 m broad patches, 8 m species clusters,
 32 m clearings. Uniform meadow/moor/understory remain inspection presets. Shared HLSL
 evaluation supplies terrain expected coverage and population probabilities, retaining
 rock exclusion, canonical suitability and authored clearing inputs. Integer lattice
@@ -91,7 +91,7 @@ Population jobs are 1936 bytes, still capped at 32 per frame. Metadata supplies
 per-asset meadow/moor/understory affinities, clustering, footprint, conformity and
 scale range. The two decorative slots choose within the fern/daisy and shrub/heather
 families; grass identities retain their original hash salt. Population algorithm
-revision 5 and library metadata revisions invalidate residency independently of
+revision 6 and library metadata revisions invalidate residency independently of
 candidate identity. Caster lists reserve two parts per decorative slot and enclose
 the largest authored caster range, including alternatives not used by startup placeholders.
 
@@ -100,3 +100,30 @@ placement; formats 1–4 remain readable and load uniform habitats. Field conten
 transient contacts never enter saved JSON. The ordinary engine offers species
 isolation alongside the proxy controls. Existing specimen/profiling tools accept
 `--asset daisy|heather`; no additional viewer is introduced.
+
+## Habitat appearance correction
+
+The initial terrain mapping treated reduced grass population probability as exposed
+soil, including complete soil replacement in procedural clearings. Combined with
+128 m habitat patches and height blending this produced isolated brown spots across
+distant mountains. Ground cover now represents low vegetation/litter as well as grass:
+meadow/moor/understory contribute 1.0/0.9/0.82 green ground coverage, and a procedural
+clearing reduces that by at most 15%. Explicit authored exclusions still expose soil.
+Uniform inspection presets retain their original mapping. Shared habitat weights
+use broader 512 m regions and wider transitions; local 32 m clearings and 8 m species
+clusters still affect population. Rock/gravel classification remains independent.
+
+This is a material/population tuning change with no new textures, resources, noise
+evaluations or frame allocations. Population algorithm revision advances independently
+of stable candidate identity. Verify signed-coordinate continuity and bounded ground
+cover using the owned GPU fixture, then compare an ordinary-engine mountain view
+with identical camera/lighting. Performance improvement is not claimed.
+
+Verified on RTX 3060: Debug/Release builds and all 103 SPIR-V modules per build pass;
+native material and streamed-vegetation tests pass with synchronization validation.
+The ordinary engine completed 1,200 frames with zero validation errors. The matching
+[before](measurements/vegetation_5j_v5/engine-close.png) and
+[after](measurements/vegetation_habitat_correction/mountain.png) views show the isolated
+brown mountain spots removed, with broader, quieter ground colour variation.
+[Verification log](measurements/vegetation_habitat_correction/verification.txt).
+The existing distant grass geometry/ground boundary remains a separate V6 tuning item.

@@ -8,6 +8,10 @@ visual acceptance remain V6 work. Nearby density has not been reduced to meet a 
 
 ## Measurements
 
+These measurements precede the [habitat appearance correction](../../rendering_vegetation_interaction.md#habitat-appearance-correction).
+That correction changes the spatial species mixture; the values below remain the
+original V5 acceptance record, not a fresh benchmark of the tuned distribution.
+
 Release, NVIDIA GeForce RTX 3060, uncapped offscreen rendering. The existing streaming
 probe uses normal engine terrain, seed 173, 16 km streaming distance, curved horizon,
 physical atmosphere, production terrain palette, CSM, TAA and bloom. Blended habitats,

@@ -140,7 +140,7 @@ void VulkanVegetationStream::prepare(uint32_t frame, WorldPosition camera, World
     completed_ = std::max(completed_, f.serial);
     updateCount_ = 0;
     uint64_t revision = terrain ? terrain->vegetationRevision() : 0;
-    revision = revision * 1099511628211ull ^ 5u; // population algorithm revision, not candidate hash salt
+    revision = revision * 1099511628211ull ^ 6u; // population algorithm revision, not candidate hash salt
     revision = revision * 1099511628211ull ^ settings.habitat.revision;
     revision = revision * 1099511628211ull ^ settings.exclusion.revision;
     // Include values as well as caller revisions, so interactive edits cannot

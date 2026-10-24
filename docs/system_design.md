@@ -16,6 +16,8 @@ Milestone 4 adds [hierarchical terrain residency](terrain_hierarchy.md): coarse 
 ## System design index
 
 - [Vegetation interaction and habitat variety](rendering_vegetation_interaction.md) — implemented 5J-V5; [native verification and remaining tuning gates](measurements/vegetation_5j_v5/README.md): bounded submitted bend history, blended habitats and expanded foliage assets.
+  The habitat appearance correction separates grass population density from ground
+  cover and widens regional transitions; see the detailed design for verification.
 
 - [Grass rock exclusion](rendering_vegetation_streaming.md#rock-exclusion-for-grass) — implemented and natively verified: shared terrain rock classification and stable soft-edge grass suppression.
 
