@@ -27,6 +27,12 @@ int main() {
         v.terrain.wavelength = 1772;
         v.terrain.heightScale = 2000;
         v.scene.freezeLod = true;
+        v.scene.trees.distance = 6000;
+        v.scene.trees.coverage = .71f;
+        v.scene.trees.forceLod = 2;
+        v.startup.trees.streaming.maximumDistance = 8000;
+        v.startup.trees.streaming.cellCapacity = 65536;
+        v.startup.trees.streaming.budgetBytes = 1536ull << 20;
         v.scene.taa.thinGeometry = false;
         v.scene.vegetation.distance = 193;
         v.scene.vegetation.density = .83f;
@@ -91,6 +97,9 @@ int main() {
                     "v4 habitat and fresh interaction migration");
         }
         const auto loaded = loadReviewView(path);
+        require(loaded.scene.trees.distance == 6000 && loaded.scene.trees.forceLod == 2 &&
+                    loaded.startup.trees.streaming.cellCapacity == 65536,
+                "Tree settings and capacity round trip");
         require(!loaded.startup.lod.enabled, "Terrain LOD enable state survives AA bookmark migration");
         require(!loaded.scene.taa.thinGeometry, "Thin-geometry comparison setting round trips");
         require(loaded.camera.chunk.x == v.camera.chunk.x && loaded.camera.local == v.camera.local &&
@@ -127,7 +136,7 @@ int main() {
         auto invalid = v;
         invalid.version = 99;
         rejects([&] { saveReviewView(path, invalid); }, "unsupported version rejected before replacing file");
-        require(loadReviewView(path).version == 5, "invalid save leaves existing view intact");
+        require(loadReviewView(path).version == 6, "invalid save leaves existing view intact");
         nlohmann::json legacy;
         {
             std::ifstream input(path);
@@ -144,7 +153,7 @@ int main() {
         require(old.scene.vegetation.enabled && old.scene.vegetation.distance == 80,
                 "old bookmarks acquire engine vegetation defaults");
         saveReviewView(dir / "legacy.json", old);
-        require(loadReviewView(dir / "legacy.json").version == 5, "new saves upgrade v1 bookmarks");
+        require(loadReviewView(dir / "legacy.json").version == 6, "new saves upgrade v1 bookmarks");
         for (auto keys : {std::vector<TerrainPatchKey>{{0, 0, 32}},
                           {{1, 0, 0}},
                           {{0, 0, 0}, {0, 0, 1}},

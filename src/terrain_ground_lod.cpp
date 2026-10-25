@@ -153,6 +153,10 @@ uint32_t TerrainGroundLod::covering(const Table &table, int64_t x, int64_t z, ui
     }
     return ~0u;
 }
+uint32_t TerrainGroundLod::casterAt(int64_t x, int64_t z) const {
+    auto i = covering(current_, x, z, 0);
+    return i == ~0u ? ~0u : nodes_[i].caster;
+}
 void TerrainGroundLod::neighbours(const Node &n, std::array<uint32_t, 8> &out) const {
     const auto s = side(cells_, n.key.level), x = n.key.x, z = n.key.z;
     const auto at = [&](int64_t px, int64_t pz) { return covering(current_, px, pz, n.key.level); };
@@ -353,6 +357,7 @@ void TerrainGroundLod::finish(const TerrainLod &source, const TerrainPatchTopolo
         }
         TerrainPatchDraw p{n.slot, n.x, n.z, 1u << n.level, n.level, 15, false, cells_, edges, corners};
         VisibilityBounds b{n.lo - glm::vec3(.01f), n.hi + glm::vec3(.01f), true};
+        nodes_[i].caster = uint32_t(casters_.size());
         casters_.push_back(p);
         casterBounds_.push_back(b);
         if (n.protectedGround) {

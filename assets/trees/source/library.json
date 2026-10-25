@@ -1,0 +1,177 @@
+{
+  "version": 1,
+  "frames": 12,
+  "tile_size": 128,
+  "attractors": 800,
+  "compressed": true,
+  "trees": [
+    {
+      "species": 0,
+      "variant": 0,
+      "seed": 731,
+      "height": 10.27,
+      "radius": 2.7
+    },
+    {
+      "species": 0,
+      "variant": 1,
+      "seed": 768,
+      "height": 11.61,
+      "radius": 2.7
+    },
+    {
+      "species": 0,
+      "variant": 2,
+      "seed": 805,
+      "height": 16.56,
+      "radius": 4.5
+    },
+    {
+      "species": 0,
+      "variant": 3,
+      "seed": 842,
+      "height": 18.72,
+      "radius": 4.5
+    },
+    {
+      "species": 0,
+      "variant": 4,
+      "seed": 879,
+      "height": 16.56,
+      "radius": 5.62
+    },
+    {
+      "species": 0,
+      "variant": 5,
+      "seed": 916,
+      "height": 18.72,
+      "radius": 5.62
+    },
+    {
+      "species": 1,
+      "variant": 0,
+      "seed": 838,
+      "height": 10.84,
+      "radius": 3.6
+    },
+    {
+      "species": 1,
+      "variant": 1,
+      "seed": 875,
+      "height": 12.25,
+      "radius": 3.6
+    },
+    {
+      "species": 1,
+      "variant": 2,
+      "seed": 912,
+      "height": 17.48,
+      "radius": 6
+    },
+    {
+      "species": 1,
+      "variant": 3,
+      "seed": 949,
+      "height": 19.76,
+      "radius": 6
+    },
+    {
+      "species": 1,
+      "variant": 4,
+      "seed": 986,
+      "height": 17.48,
+      "radius": 7.5
+    },
+    {
+      "species": 1,
+      "variant": 5,
+      "seed": 1023,
+      "height": 19.76,
+      "radius": 7.5
+    },
+    {
+      "species": 2,
+      "variant": 0,
+      "seed": 945,
+      "height": 10.84,
+      "radius": 2.28
+    },
+    {
+      "species": 2,
+      "variant": 1,
+      "seed": 982,
+      "height": 12.25,
+      "radius": 2.28
+    },
+    {
+      "species": 2,
+      "variant": 2,
+      "seed": 1019,
+      "height": 17.48,
+      "radius": 3.8
+    },
+    {
+      "species": 2,
+      "variant": 3,
+      "seed": 1056,
+      "height": 19.76,
+      "radius": 3.8
+    },
+    {
+      "species": 2,
+      "variant": 4,
+      "seed": 1093,
+      "height": 17.48,
+      "radius": 4.75
+    },
+    {
+      "species": 2,
+      "variant": 5,
+      "seed": 1130,
+      "height": 19.76,
+      "radius": 4.75
+    },
+    {
+      "species": 3,
+      "variant": 0,
+      "seed": 1052,
+      "height": 13.12,
+      "radius": 2.58
+    },
+    {
+      "species": 3,
+      "variant": 1,
+      "seed": 1089,
+      "height": 14.83,
+      "radius": 2.58
+    },
+    {
+      "species": 3,
+      "variant": 2,
+      "seed": 1126,
+      "height": 21.16,
+      "radius": 4.3
+    },
+    {
+      "species": 3,
+      "variant": 3,
+      "seed": 1163,
+      "height": 23.92,
+      "radius": 4.3
+    },
+    {
+      "species": 3,
+      "variant": 4,
+      "seed": 1200,
+      "height": 21.16,
+      "radius": 5.38
+    },
+    {
+      "species": 3,
+      "variant": 5,
+      "seed": 1237,
+      "height": 23.92,
+      "radius": 5.38
+    }
+  ]
+}

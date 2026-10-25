@@ -11,6 +11,7 @@
 #include "vulkan_spatial_aa.hpp"
 #include "vulkan_terrain.hpp"
 #include "vulkan_terrain_stream.hpp"
+#include "vulkan_trees.hpp"
 #include "vulkan_vegetation.hpp"
 #include "vulkan_visibility.hpp"
 #include "vulkan_volumetrics.hpp"
@@ -170,6 +171,7 @@ struct Renderer::Impl {
     std::unique_ptr<VulkanClusters> clusters;
     std::unique_ptr<VulkanMeshes> meshes;
     std::unique_ptr<VulkanVegetation> vegetation;
+    std::unique_ptr<VulkanTrees> trees;
     std::unique_ptr<VulkanVisibility> visibility;
     VisibilityCapabilities visibilityCaps;
     std::unique_ptr<VulkanPost> post;
@@ -284,9 +286,12 @@ struct Renderer::Impl {
         }
         shadows = std::make_unique<VulkanShadows>(
             physical, device, queueFamily, shadowCaps, options.shadowCapacity,
-            options.vegetation.streaming.enabled ? options.vegetation.streaming.cellCapacity
-            : (options.vegetation.fixture || options.vegetation.library) ? vegetationCellLimit
-                                                                         : 0);
+            (options.vegetation.streaming.enabled ? options.vegetation.streaming.cellCapacity
+             : (options.vegetation.fixture || options.vegetation.library) ? vegetationCellLimit
+                                                                          : 0) +
+                ((!options.trees.directory.empty() || options.trees.library)
+                     ? options.trees.streaming.cellCapacity
+                     : 0));
         {
             auto cmd = beginImmediate();
             shadows->initialize(cmd);
@@ -295,6 +300,12 @@ struct Renderer::Impl {
         meshes = std::make_unique<VulkanMeshes>(physical, device, options.sceneCapacity, lightingSetLayout,
                                                 *materials, options.shaderDirectory, materialCaps.bindless,
                                                 shadows->layout(), postCaps.taa);
+        if (!options.trees.directory.empty() || options.trees.library) {
+            options.trees.forceRgba |= options.forceRgbaMaterials;
+            trees = std::make_unique<VulkanTrees>(physical, device, queueFamily, lightingSetLayout,
+                                                  options.shaderDirectory, postCaps.taa,
+                                                  materialCaps.anisotropy, options.trees);
+        }
         if (options.vegetation.population && !options.vegetation.library)
             throw std::invalid_argument("Vegetation population requires a library");
         if (options.vegetation.fixture || options.vegetation.library)
@@ -1890,10 +1901,21 @@ struct Renderer::Impl {
                                       std::chrono::duration<double, std::milli>(
                                           std::chrono::steady_clock::now() - vegetationPreparationStart)
                                           .count());
+        if (trees)
+            trees->prepare(frameIndex, camera, options.terrainGrid, post->view(), settings.trees,
+                           settings.terrainVisible ? streaming.get() : nullptr, settings.eroded);
         if (streaming)
             streaming->record(cmd, frameIndex);
+        double populationRemaining = streaming ? streaming->vegetationRemaining() : 0;
+        if (trees) {
+            populationRemaining -= trees->budgetStream(
+                std::max(0.0, populationRemaining - (vegetation && settings.vegetation.enabled ? .5 : 0)));
+            trees->bounds(*shadows);
+            if (vegetation)
+                vegetation->treeCanopy(trees->canopyBuffer(), settings.trees.enabled);
+        }
         if (vegetation) {
-            vegetation->budgetStream(streaming ? streaming->vegetationRemaining() : 0);
+            vegetation->budgetStream(std::max(0.0, populationRemaining));
             vegetation->bounds(*shadows);
         }
         shadows->prepare(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -
@@ -1903,6 +1925,12 @@ struct Renderer::Impl {
         // Finalize all borrowed terrain descriptors before any command binds
         // this lighting set, including clustered-light compute.
         clusters->record(cmd, frameIndex, frame.lightingSet);
+        if (trees) {
+            if (visibilityCaps.hiZ)
+                trees->preparePyramid(visibility->pyramidView());
+            trees->updateAndSelectCasters(cmd, shadows->uniform(),
+                                          shadows->active() ? shadows->cascadeCount() : 0);
+        }
         if (vegetation) {
             if (settings.vegetation.occlusion && visibilityCaps.hiZ && !settings.wireframe)
                 vegetation->preparePyramid(visibility->pyramidView());
@@ -1936,6 +1964,8 @@ struct Renderer::Impl {
                 meshes->drawShadows(cmd, frameIndex, frame.lightingSet, *shadows);
                 if (vegetation)
                     vegetation->draw(cmd, frame.lightingSet, 4, cascade + 1);
+                if (trees)
+                    trees->draw(cmd, frame.lightingSet, 4, cascade + 1);
                 shadows->endRaster(cmd);
             }
             shadows->finish(cmd);
@@ -1948,11 +1978,16 @@ struct Renderer::Impl {
                                       (!options.vegetation.streaming.enabled || settings.terrainVisible);
         const bool vegetationOcclusion =
             vegetationActive && settings.vegetation.occlusion && visibilityCaps.hiZ && !settings.wireframe;
-        const bool buildPyramid = visibility->hiZ() || vegetationOcclusion;
+        const bool treesActive = trees && settings.trees.enabled;
+        const bool treeOcclusion =
+            treesActive && settings.trees.occlusion && visibilityCaps.hiZ && !settings.wireframe;
+        const bool buildPyramid = visibility->hiZ() || vegetationOcclusion || treeOcclusion;
+        if (trees && !treeOcclusion)
+            trees->selectCamera(cmd);
         const bool separateVegetationDepth = vegetationActive && buildPyramid;
         if (vegetation && !vegetationOcclusion)
             vegetation->selectCamera(cmd);
-        const bool depthPrepass = settings.opaqueDepthPrepass ||
+        const bool depthPrepass = treesActive || settings.opaqueDepthPrepass ||
                                   (vegetationActive && settings.vegetation.depthPrepass) || buildPyramid ||
                                   gtao->active();
         VkRenderingAttachmentInfo depth{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
@@ -2024,6 +2059,8 @@ struct Renderer::Impl {
             meshes->draw(cmd, frameIndex, frame.lightingSet, 2, visibility.get());
             if (vegetation && !separateVegetationDepth)
                 vegetation->draw(cmd, frame.lightingSet, 2);
+            if (trees && !treeOcclusion)
+                trees->draw(cmd, frame.lightingSet, 2);
             vkCmdEndRendering(cmd);
             visibility->stamp(cmd, 3);
             const auto depthStages =
@@ -2039,16 +2076,21 @@ struct Renderer::Impl {
                     visibility->cull(cmd, true);
                 if (vegetationOcclusion)
                     vegetation->selectCamera(cmd, visibility->pyramidView());
+                if (treeOcclusion)
+                    trees->selectCamera(cmd, true);
                 imageBarrier(cmd, frame.depth, VK_IMAGE_ASPECT_DEPTH_BIT,
                              VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL,
                              VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                              VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, depthStages,
                              VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
                                  VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
-                if (separateVegetationDepth) {
+                if (separateVegetationDepth || treeOcclusion) {
                     depth.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
                     vkCmdBeginRendering(cmd, &rendering);
-                    vegetation->draw(cmd, frame.lightingSet, 2);
+                    if (separateVegetationDepth)
+                        vegetation->draw(cmd, frame.lightingSet, 2);
+                    if (treeOcclusion)
+                        trees->draw(cmd, frame.lightingSet, 2);
                     vkCmdEndRendering(cmd);
                 }
             }
@@ -2088,6 +2130,8 @@ struct Renderer::Impl {
         meshes->draw(cmd, frameIndex, frame.lightingSet, depthPrepass ? 1 : 0, visibility.get());
         if (vegetation)
             vegetation->draw(cmd, frame.lightingSet, depthPrepass ? 1 : 0);
+        if (trees)
+            trees->draw(cmd, frame.lightingSet, depthPrepass ? 1 : 0);
         visibility->stamp(cmd, 9);
         clusters->timestamp(cmd, frameIndex, 3);
         if (atmosphere->active() || volumetrics->active()) {
@@ -2210,6 +2254,8 @@ struct Renderer::Impl {
         vkCmdEndRendering(cmd);
         if (vegetation)
             vegetation->finish(cmd);
+        if (trees)
+            trees->finish(cmd);
         if (renderQueries) {
             vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, renderQueries,
                                  frameIndex * 4 + 3);
@@ -2249,6 +2295,8 @@ struct Renderer::Impl {
         meshes->submitted();
         if (vegetation)
             vegetation->submitted();
+        if (trees)
+            trees->submitted();
         terrainHistory->submitted();
         renderingStats.terrainFinalizeMilliseconds = 0;
         if (streaming) {
@@ -2359,6 +2407,7 @@ struct Renderer::Impl {
             destroySceneTargets();
             streaming.reset();
             terrain.reset();
+            trees.reset();
             vegetation.reset();
             meshes.reset();
             visibility.reset();
@@ -2411,6 +2460,19 @@ bool Renderer::updateLight(LightHandle h, const LocalLight &l) {
     return impl_->clusters->lights.update(h, l);
 }
 bool Renderer::removeLight(LightHandle h) { return impl_->clusters->lights.remove(h); }
+TreeSnapshot Renderer::readTreeSnapshot() {
+    if (!impl_->trees)
+        return {};
+    waitIdle();
+    auto cmd = impl_->beginImmediate();
+    impl_->trees->copySnapshot(cmd);
+    impl_->endImmediate(cmd);
+    return impl_->trees->snapshot();
+}
+const TreeStats &Renderer::treeStats() const {
+    static const TreeStats empty;
+    return impl_->trees ? impl_->trees->stats() : empty;
+}
 const VegetationStats &Renderer::vegetationStats() const {
     static const VegetationStats empty;
     return impl_->vegetation ? impl_->vegetation->stats() : empty;

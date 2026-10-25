@@ -1,0 +1,32 @@
+function(openworld_add_tree_assets target importer recipe output_directory shader_directory)
+    get_filename_component(recipe "${recipe}" ABSOLUTE)
+    get_filename_component(source_directory "${recipe}" DIRECTORY)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${recipe}")
+    file(READ "${recipe}" recipe_json)
+    set(inputs "${recipe}" "${shader_directory}/tree_bake.vert.spv" "${shader_directory}/tree_bake.frag.spv")
+    set(outputs "${output_directory}/library.bin")
+    foreach(species beech oak birch pine)
+        list(APPEND inputs "${source_directory}/${species}.png" "${source_directory}/${species}_bark.png")
+        foreach(part bark leaf)
+            list(APPEND outputs "${output_directory}/${species}_${part}.dds" "${output_directory}/${species}_${part}_rgba.dds")
+        endforeach()
+    endforeach()
+    string(JSON count LENGTH "${recipe_json}" trees)
+    if(count LESS 1 OR count GREATER 24)
+        message(FATAL_ERROR "Tree recipe must contain 1 to 24 trees")
+    endif()
+    math(EXPR last "${count}-1")
+    foreach(index RANGE 0 ${last})
+        foreach(part colour normal depth colour_rgba normal_rgba)
+            list(APPEND outputs "${output_directory}/tree${index}_${part}.dds")
+        endforeach()
+    endforeach()
+    set(stamp "${output_directory}/.import-complete")
+    add_custom_command(OUTPUT "${stamp}" ${outputs}
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${output_directory}"
+        COMMAND "${CMAKE_COMMAND}" -E rm -f "${stamp}"
+        COMMAND "$<TARGET_FILE:${importer}>" "${recipe}" "${output_directory}" "${shader_directory}"
+        COMMAND "${CMAKE_COMMAND}" -E touch "${stamp}"
+        DEPENDS ${importer} ${inputs} VERBATIM)
+    add_custom_target(${target} DEPENDS "${stamp}" ${outputs})
+endfunction()

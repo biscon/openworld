@@ -3,6 +3,7 @@
 #include "terrain_detail_policy.hpp"
 #include "terrain_generation_budget.hpp"
 #include "terrain_ground_lod.hpp"
+#include "trees.hpp"
 #include "vegetation_stream.hpp"
 #include "vulkan_post.hpp"
 #include "vulkan_shadows.hpp"
@@ -29,6 +30,7 @@ class VulkanTerrainStream {
     void drawShadows(VkCommandBuffer, VkPipelineLayout, VulkanShadows &);
     VkDescriptorSetLayout descriptorLayout() const { return descriptorLayout_; }
     void submitted(uint32_t frame);
+    bool treeSurface(TreeCellKey, TreeTerrainCell &, bool eroded);
     void prepareVegetation(const Camera &, bool eroded);
     void vegetationDemandRadius(float radius) { vegetationDemandRadius_ = radius; }
     bool vegetationSurface(VegetationCellKey, VegetationTerrainCell &, bool retain = true);
@@ -40,6 +42,10 @@ class VulkanTerrainStream {
     void vegetationReservation(double milliseconds, uint32_t groups = 0) {
         vegetationReserved_ = milliseconds;
         vegetationGroups_ = groups;
+    }
+    void reserveTreePopulation(double milliseconds, uint32_t groups) {
+        vegetationReserved_ += milliseconds;
+        vegetationGroups_ += groups;
     }
     double vegetationRemaining() const {
         return std::max(0.0,

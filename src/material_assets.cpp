@@ -38,7 +38,8 @@ MaterialCoordinates materialCoordinates(int64_t x, int64_t z, double extent, glm
     return out;
 }
 uint64_t textureMipBytes(TextureFormat f, uint32_t w, uint32_t h) {
-    return f == TextureFormat::Rgba8 || f == TextureFormat::Srgb8
+    return f == TextureFormat::R16 ? uint64_t(w) * h * 2
+           : f == TextureFormat::Rgba8 || f == TextureFormat::Srgb8
                ? uint64_t(w) * h * 4
                : uint64_t((w + 3) / 4) * ((h + 3) / 4) * 16;
 }
@@ -47,8 +48,8 @@ uint64_t textureBytes(const TextureData &t, bool allowPartial) {
         !t.levels || t.levels > 14)
         throw std::runtime_error("Invalid texture dimensions");
     const auto f = t.format;
-    if (f != TextureFormat::Rgba8 && f != TextureFormat::Srgb8 && f != TextureFormat::Bc5 &&
-        f != TextureFormat::Bc7 && f != TextureFormat::Bc7Srgb)
+    if (f != TextureFormat::R16 && f != TextureFormat::Rgba8 && f != TextureFormat::Srgb8 &&
+        f != TextureFormat::Bc5 && f != TextureFormat::Bc7 && f != TextureFormat::Bc7Srgb)
         throw std::runtime_error("Unsupported DDS format");
     uint32_t full = 1;
     for (auto n = std::max(t.width, t.height); n > 1; n >>= 1)
@@ -93,9 +94,11 @@ void writeTexture(const std::filesystem::path &path, const TextureData &t, bool 
     std::array<uint32_t, 37> h{};
     h[0] = 0x20534444;
     h[1] = 124;
-    const bool raw = t.format == TextureFormat::Rgba8 || t.format == TextureFormat::Srgb8;
+    const bool raw = t.format == TextureFormat::R16 || t.format == TextureFormat::Rgba8 ||
+                     t.format == TextureFormat::Srgb8;
     h[2] = 0x21007 | (raw ? 0x8 : 0x80000);
-    h[5] = raw ? t.width * 4 : uint32_t(textureMipBytes(t.format, t.width, t.height));
+    h[5] = raw ? t.width * (t.format == TextureFormat::R16 ? 2 : 4)
+               : uint32_t(textureMipBytes(t.format, t.width, t.height));
     h[3] = t.height;
     h[4] = t.width;
     h[7] = t.levels;

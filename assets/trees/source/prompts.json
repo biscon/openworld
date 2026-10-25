@@ -1,0 +1,37 @@
+{
+  "tool": "built-in image_gen",
+  "assets": {
+    "beech": {
+      "file": "beech.png",
+      "prompt": "Use case: photorealistic-natural. Asset type: production game foliage alpha texture. A single small leafy twig of European beech Fagus sylvatica, oval pointed leaves with gently wavy margins, pronounced parallel lateral veins, warm natural mid-green. Straight-on orthographic botanical capture, entire twig and every leaf tip inside image with generous transparent margin, stem enters at bottom center and branches upward, twig fills about 80% of square. Naturally irregular arrangement with several visible gaps, mostly face-on leaves with subtle curvature, no fruit. Soft perfectly even diffuse illumination suitable as base color, no directional shadows, no background, genuinely transparent alpha, no text, no labels, no border, no watermark. Realistic European summer tree foliage, restrained saturation. 1024 square."
+    },
+    "beech_bark": {
+      "file": "beech_bark.png",
+      "prompt": "Use case: photorealistic-natural. Asset type: seamlessly repeating game bark base-color texture. European beech, smooth silver-gray bark with fine pores, soft subtle organic mottling and occasional faint scars, no deep furrows. Flat orthographic close-up of bark, filling the entire square edge to edge, trunk growth direction vertical. Seamless tiling in both axes, consistent texture scale across image, diffuse flat overcast illumination, no baked directional highlights or shadows, no perspective or trunk outline, no moss or leaves, no text. Natural subdued colors, realistic fine detail. 1024 square."
+    },
+    "oak": {
+      "file": "oak.png",
+      "prompt": "Use case: photorealistic-natural. Asset type: production game foliage alpha texture. A single small leafy twig of pedunculate oak Quercus robur, recognizably rounded deeply lobed leaves, muted rich mid green. Straight-on orthographic botanical capture, entire twig and every leaf tip inside image with generous transparent margin, stem enters at bottom center and branches upward, twig fills about 80% of square. Naturally irregular arrangement with several visible gaps, mostly face-on leaves with subtle curvature, no fruit. Soft perfectly even diffuse illumination suitable as base color, no directional shadows, no background, genuinely transparent alpha, no text, no labels, no border, no watermark. Realistic European summer tree foliage, restrained saturation. 1024 square."
+    },
+    "oak_bark": {
+      "file": "oak_bark.png",
+      "prompt": "Use case: photorealistic-natural. Asset type: seamlessly repeating game bark base-color texture. pedunculate oak, rugged gray-brown bark with longitudinal fissures and interlocking irregular ridges, mature trunk. Flat orthographic close-up of bark, filling the entire square edge to edge, trunk growth direction vertical. Seamless tiling in both axes, consistent texture scale across image, diffuse flat overcast illumination, no baked directional highlights or shadows, no perspective or trunk outline, no moss or leaves, no text. Natural subdued colors, realistic fine detail. 1024 square."
+    },
+    "birch": {
+      "file": "birch.png",
+      "prompt": "Use case: photorealistic-natural. Asset type: production game foliage alpha texture. A single small leafy twig of silver birch Betula pendula, small triangular pointed leaves, fine doubly serrated edges, fresh natural mid-green. Straight-on orthographic botanical capture, entire twig and every leaf tip inside image with generous transparent margin, stem enters at bottom center and branches upward, twig fills about 80% of square. Naturally irregular arrangement with several visible gaps, mostly face-on leaves with subtle curvature, no fruit. Soft perfectly even diffuse illumination suitable as base color, no directional shadows, no background, genuinely transparent alpha, no text, no labels, no border, no watermark. Realistic European summer tree foliage, restrained saturation. 1024 square."
+    },
+    "birch_bark": {
+      "file": "birch_bark.png",
+      "prompt": "Use case: photorealistic-natural. Asset type: seamlessly repeating game bark base-color texture. silver birch, ivory white papery bark with natural scattered dark horizontal lenticels and small irregular charcoal scars, avoid zebra stripes. Flat orthographic close-up of bark, filling the entire square edge to edge, trunk growth direction vertical. Seamless tiling in both axes, consistent texture scale across image, diffuse flat overcast illumination, no baked directional highlights or shadows, no perspective or trunk outline, no moss or leaves, no text. Natural subdued colors, realistic fine detail. 1024 square."
+    },
+    "pine": {
+      "file": "pine.png",
+      "prompt": "Use case: photorealistic-natural. Asset type: production game foliage alpha texture. A single small leafy twig of Scots pine Pinus sylvestris, fine blue-green paired needles arranged along a small branching shoot, airy needle tufts. Straight-on orthographic botanical capture, entire twig and every leaf tip inside image with generous transparent margin, stem enters at bottom center and branches upward, twig fills about 80% of square. Naturally irregular arrangement with several visible gaps, mostly face-on leaves with subtle curvature, no fruit. Soft perfectly even diffuse illumination suitable as base color, no directional shadows, no background, genuinely transparent alpha, no text, no labels, no border, no watermark. Realistic European summer tree foliage, restrained saturation. 1024 square."
+    },
+    "pine_bark": {
+      "file": "pine_bark.png",
+      "prompt": "Use case: photorealistic-natural. Asset type: seamlessly repeating game bark base-color texture. Scots pine, warm gray russet-brown flaking bark plates with fine dark fissures, modest orange tones. Flat orthographic close-up of bark, filling the entire square edge to edge, trunk growth direction vertical. Seamless tiling in both axes, consistent texture scale across image, diffuse flat overcast illumination, no baked directional highlights or shadows, no perspective or trunk outline, no moss or leaves, no text. Natural subdued colors, realistic fine detail. 1024 square."
+    }
+  }
+}

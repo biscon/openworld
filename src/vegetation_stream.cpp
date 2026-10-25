@@ -15,6 +15,14 @@ uint32_t hash(uint32_t x) {
 int64_t floorDiv(int64_t x, int64_t n) { return x / n - (x % n < 0); }
 uint32_t keyHash(VegetationCellKey k) { return vegetationCandidateHash(k, 0, 0, 0); }
 } // namespace
+uint32_t populationUpdateAllowance(uint32_t pending, uint32_t required, double remaining, double cellCost) {
+    if (!std::isfinite(remaining) || !std::isfinite(cellCost) || cellCost <= 0)
+        throw std::invalid_argument("Invalid population budget");
+    uint32_t timed = uint32_t(std::min(double(pending), std::max(0.0, remaining) / cellCost));
+    if (remaining > 0 && pending && timed == 0)
+        timed = 1;
+    return std::min(pending, std::max(required, timed));
+}
 uint32_t vegetationCandidateHash(VegetationCellKey k, uint32_t seed, uint32_t species, uint32_t candidate) {
     uint32_t h = hash(seed ^ 0x56330001u);
     for (uint32_t w : {uint32_t(k.x), uint32_t(uint64_t(k.x) >> 32), uint32_t(k.z),

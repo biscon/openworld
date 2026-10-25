@@ -16,6 +16,7 @@ struct VegetationUniform {
     uint4 pyramidSize;
     float4 grassBands[8],grassShading[8],interactionResponse[8];
     float4 interaction,previousInteraction;
+    float4 forest;
 };
 [[vk::binding(0,0)]] StructuredBuffer<Plant> plants;
 [[vk::binding(1,0)]] ConstantBuffer<VegetationUniform> vegetation;
@@ -39,6 +40,8 @@ float2 interactionBend(float2 root,bool previous=false) {
     float edge=min(min(local.x,local.y),min(32-local.x,32-local.y));
     return v*smoothstep(0,2,edge);
 }
+[[vk::binding(14,0)]] StructuredBuffer<uint> forestCanopy;
+float canopyCover(float2 relative){if(vegetation.forest.x==0)return 0;float2 q=(relative+256)*.25-.5;int2 p=int2(floor(q));float2 f=frac(q);float value[4];for(uint j=0;j<4;++j){int2 v=p+int2(j&1,j>>1);value[j]=any(v<0)||any(v>=128)?0:forestCanopy[v.y*128+v.x]/65535.0;}return lerp(lerp(value[0],value[1],f.x),lerp(value[2],value[3],f.x),f.y);}
 static float2 plantSlope=0;
 Plant loadPlant(uint index) {
     Plant p=plants[index];
@@ -93,6 +96,7 @@ float plantCoverage(Plant p,float d,uint asset,float4 settings,float4 cards,uint
     float thinning=vegetation.profile.x!=0||vegetation.deformation[asset].z==0?lerp(1,.4,smoothstep(18,50,d)):1;
     if(vegetation.inspection.y!=0)thinning*=lerp(1,.25,smoothstep(80,200,d));
     float probability=settings.x*thinning*(vegetation.profile.x!=0&&asset%2!=0?cards.y:1);
+    if(vegetation.forest.x!=0){Cell c=cells[p.assetCell>>3];float shade=canopyCover(p.rootScale.xz+c.origin.xz);float affinity=vegetation.deformation[asset].z==0?.22:vegetation.interactionResponse[asset].z;probability*=lerp(1,affinity,shade);}
     if(probability<=0)return 0;
     float rank=plantRandom(p.identity+1927);
     float density=vegetation.inspection.y!=0?saturate((probability+.03-rank)/.03):float(rank<=probability);

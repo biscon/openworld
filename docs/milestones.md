@@ -173,7 +173,7 @@ The agreed [vegetation and ground clutter roadmap](rendering_vegetation.md) expa
 the vegetation part of 5J into slices 5J-V1–V6. It prioritizes dense ground-level
 grass/plants/shrubs with GPU instancing, bounded streaming, LOD, wind and temporary
 player bending. Implementation starts with a representation/performance experiment;
-trees remain a separate future design. The [V1 experiment](rendering_vegetation_experiment.md)
+trees have a [separate implemented design](rendering_trees.md). The [V1 experiment](rendering_vegetation_experiment.md)
 is implemented with Debug/Release, software Vulkan and native RTX 3060 validation.
 [Native measurements](measurements/vegetation_5j_v1/rtx3060/README.md) inform the
 receive-only grass policy; final assets and full-scene acceptance remain open.
@@ -187,6 +187,14 @@ terrain reader retention, stitched-triangle attachment, and opt-in main-demo con
 ordinary engine with a dedicated settings window, live 20–200 m distance, bounded
 visibility and shared depth/coverage. [V4 native verification and full-scene measurements](measurements/vegetation_5j_v4/README.md) record completed integration and remaining moving CPU/art tuning gates. [V5 interaction/habitat variety](rendering_vegetation_interaction.md) is implemented and natively verified; [V6 is closed as a documentation handoff](rendering_vegetation.md#5j-v6--final-tuning-and-extended-acceptance), with completed correctness evidence and the current performance baseline recorded. The user accepted the habitat and patch-continuity corrections. Trees can proceed separately; final presets, appearance/performance targets and extended stress are deferred to combined vegetation-and-tree acceptance, not marked passed. The [short native report](measurements/vegetation_5j_v3/README.md)
 distinguishes measured V3 costs from remaining full-scene acceptance.
+
+[European forests](rendering_trees.md) adds 5J-T1–T4: offline tree generation and
+octahedral rendering, the 24-asset European library, kilometer-scale streamed
+placement/terrain attachment, and combined understory/forest acceptance.
+The runtime, offline library, streamed attachment and understory integration are
+implemented. The default target is 4 km at 1080p/60 FPS on RTX 3060; native
+performance, final reference-quality acceptance and extended 8 km stress are
+still open. See the [verification report](measurements/trees_5j/README.md).
 
 ### Scope
 

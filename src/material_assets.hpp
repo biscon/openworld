@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 namespace ow {
-enum class TextureFormat : uint32_t { Rgba8 = 28, Srgb8 = 29, Bc5 = 83, Bc7 = 98, Bc7Srgb = 99 };
+enum class TextureFormat : uint32_t { R16 = 56, Rgba8 = 28, Srgb8 = 29, Bc5 = 83, Bc7 = 98, Bc7Srgb = 99 };
 struct TextureData {
     uint32_t width = 1, height = 1, levels = 1, layers = 1;
     TextureFormat format = TextureFormat::Rgba8;

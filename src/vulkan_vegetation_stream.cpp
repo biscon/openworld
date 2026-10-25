@@ -290,8 +290,7 @@ void VulkanVegetationStream::restrictPopulation(double remaining, VegetationGpuC
     uint32_t repairs = 0;
     while (repairs < updateCount_ && !jobs[repairs].config.z)
         ++repairs;
-    uint32_t allowed =
-        std::max(repairs, std::min(updateCount_, uint32_t(std::max(0.0, remaining) / cellCost_)));
+    uint32_t allowed = populationUpdateAllowance(updateCount_, repairs, remaining, cellCost_);
     for (uint32_t j = allowed; j < updateCount_; ++j) {
         uint32_t i = jobs[j].config.x;
         residency_.slot(i).generated = false;

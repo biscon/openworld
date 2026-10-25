@@ -85,7 +85,7 @@ function(compile_shader name profile entry)
         list(APPEND extra_source "${CMAKE_CURRENT_SOURCE_DIR}/third_party/fxaa/FxaaShader.h")
     endif()
     set(shader_environment vulkan1.3)
-    if(name MATCHES "^smaa" OR name MATCHES "terrain_stream.*frag" OR name STREQUAL "terrain_depth.frag" OR name MATCHES "vegetation.*frag" OR name MATCHES "mesh.*frag" OR name MATCHES "shadow_.*frag")
+    if(name MATCHES "^tree.*frag" OR name MATCHES "^smaa" OR name MATCHES "terrain_stream.*frag" OR name STREQUAL "terrain_depth.frag" OR name MATCHES "vegetation.*frag" OR name MATCHES "mesh.*frag" OR name MATCHES "shadow_.*frag")
         # Core OpKill is sufficient for the view-boundary clip. Targeting SPIR-V
         # 1.5 avoids requiring the optional shaderDemoteToHelperInvocation feature.
         set(shader_environment vulkan1.2)
@@ -95,12 +95,17 @@ function(compile_shader name profile entry)
         # Match the shared vertex interface without requiring maintenance4.
         list(APPEND shader_options -fspv-preserve-interface)
     endif()
+    set(shader_includes ${SHADER_INCLUDES})
+    # Bake shaders are self-contained; runtime edits must not rebake the asset library.
+    if(name MATCHES "^tree_bake")
+        set(shader_includes)
+    endif()
     add_custom_command(OUTPUT "${output}"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${SHADER_OUTPUT_DIR}"
         COMMAND "${DXC_EXECUTABLE}" -spirv -fspv-target-env=${shader_environment}
             -T "${profile}" -E "${entry}" -Ges -WX -O3 ${shader_options}
             -Fo "${output}" "${source}"
-        DEPENDS "${source}" ${extra_source} ${SHADER_INCLUDES}
+        DEPENDS "${source}" ${extra_source} ${shader_includes}
         COMMENT "Compiling HLSL: ${name} (${profile})"
         VERBATIM)
     set(SHADER_BINARIES ${SHADER_BINARIES} "${output}" PARENT_SCOPE)
@@ -626,4 +631,80 @@ if(BUILD_TESTING)
         add_test(NAME vegetation_interaction_gpu COMMAND vegetation_interaction_gpu_tests)
         set_tests_properties(vegetation_interaction_gpu PROPERTIES TIMEOUT 120 LABELS "gpu" FAIL_REGULAR_EXPRESSION "\\[Vulkan validation\\]")
     endif()
+endif()
+
+# Offline tree geometry/materials and full-sphere impostor captures.
+compile_shader(tree_bake.vert vs_6_0 main)
+compile_shader(tree_bake.frag ps_6_0 main)
+add_library(tree_data STATIC src/tree_library.cpp)
+target_include_directories(tree_data PUBLIC src)
+target_link_libraries(tree_data PUBLIC glm::glm)
+add_library(tree_generator STATIC tools/tree_generation.cpp)
+target_include_directories(tree_generator PUBLIC tools)
+target_link_libraries(tree_generator PUBLIC tree_data)
+target_link_libraries(engine_render PUBLIC tree_data)
+target_sources(engine_render PRIVATE src/tree_gpu_resources.cpp)
+add_executable(tree_import tools/tree_import.cpp tools/tree_baker.cpp src/tree_gpu_resources.cpp src/material_assets.cpp third_party/bc7enc/bc7enc.cpp)
+target_include_directories(tree_import PRIVATE src tools third_party/bc7enc ${NLOHMANN_JSON_INCLUDE_DIR})
+target_link_libraries(tree_import PRIVATE tree_generator Vulkan::Vulkan PNG::PNG ${SQUISH_LIBRARY})
+# Offline BC7/mip generation must remain practical when the engine is built in Debug.
+target_compile_options(tree_import PRIVATE "$<$<AND:$<CONFIG:Debug>,$<CXX_COMPILER_ID:GNU,Clang>>:-O2>")
+set(TREE_LIBRARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/assets/trees/runtime")
+include(cmake/TreeAssets.cmake)
+openworld_add_tree_assets(tree_assets tree_import
+    "${CMAKE_CURRENT_SOURCE_DIR}/assets/trees/source/library.json" "${TREE_LIBRARY_DIR}" "${SHADER_OUTPUT_DIR}")
+
+compile_shader(tree_populate.comp cs_6_0 main)
+compile_shader(tree_select.comp cs_6_0 main)
+compile_shader(tree.vert vs_6_0 main)
+compile_shader(tree.frag ps_6_0 main)
+compile_shader(tree_temporal.frag ps_6_0 main)
+compile_shader(tree_depth.frag ps_6_0 main)
+target_sources(engine_render PRIVATE src/trees.cpp src/vulkan_trees.cpp src/vulkan_trees_assets.cpp src/vulkan_terrain_trees.cpp)
+
+compile_shader(tree_canopy.comp cs_6_0 main)
+add_custom_target(tree_shaders DEPENDS
+    "${SHADER_OUTPUT_DIR}/tree_canopy.comp.spv"
+    "${SHADER_OUTPUT_DIR}/tree_bake.vert.spv" "${SHADER_OUTPUT_DIR}/tree_bake.frag.spv"
+    "${SHADER_OUTPUT_DIR}/tree_populate.comp.spv" "${SHADER_OUTPUT_DIR}/tree_select.comp.spv"
+    "${SHADER_OUTPUT_DIR}/tree.vert.spv" "${SHADER_OUTPUT_DIR}/tree.frag.spv"
+    "${SHADER_OUTPUT_DIR}/tree_temporal.frag.spv" "${SHADER_OUTPUT_DIR}/tree_depth.frag.spv")
+add_dependencies(shaders tree_shaders)
+if(BUILD_TESTING)
+    add_executable(trees_cpu_tests tests/trees_cpu.cpp)
+    target_link_libraries(trees_cpu_tests PRIVATE tree_generator engine_render)
+    target_include_directories(trees_cpu_tests PRIVATE tests)
+    add_test(NAME trees_cpu COMMAND trees_cpu_tests)
+    if(OPENWORLD_GPU_TESTS)
+        add_executable(trees_gpu_tests tests/trees_gpu.cpp tools/tree_baker.cpp)
+        target_link_libraries(trees_gpu_tests PRIVATE tree_generator engine_render)
+        target_include_directories(trees_gpu_tests PRIVATE tests tools)
+        target_compile_definitions(trees_gpu_tests PRIVATE OPENWORLD_SHADER_DIR="${SHADER_OUTPUT_DIR}")
+        add_test(NAME trees_gpu COMMAND trees_gpu_tests)
+        set_tests_properties(trees_gpu PROPERTIES TIMEOUT 180 LABELS "gpu" FAIL_REGULAR_EXPRESSION "\\[Vulkan validation\\]")
+    endif()
+endif()
+
+target_compile_definitions(engine PRIVATE OPENWORLD_TREE_LIBRARY_DIR="${TREE_LIBRARY_DIR}")
+add_dependencies(engine tree_assets)
+add_executable(tree_probe tools/tree_probe.cpp)
+target_link_libraries(tree_probe PRIVATE engine_render)
+target_compile_definitions(tree_probe PRIVATE OPENWORLD_SHADER_DIR="${SHADER_OUTPUT_DIR}" OPENWORLD_TREE_LIBRARY_DIR="${TREE_LIBRARY_DIR}")
+target_compile_definitions(tree_probe PRIVATE OPENWORLD_VEGETATION_LIBRARY_DIR="${VEGETATION_LIBRARY_DIR}")
+add_dependencies(tree_probe tree_assets vegetation_assets)
+
+if(BUILD_TESTING AND OPENWORLD_GPU_TESTS)
+    add_test(NAME tree_asset_build COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/tree_asset_build.py ${CMAKE_COMMAND}
+        $<TARGET_FILE:tree_import> ${CMAKE_CURRENT_SOURCE_DIR}/cmake/TreeAssets.cmake ${SHADER_OUTPUT_DIR})
+    set_tests_properties(tree_asset_build PROPERTIES TIMEOUT 120 LABELS "gpu")
+endif()
+
+if(BUILD_TESTING AND OPENWORLD_GPU_TESTS)
+    add_executable(trees_stream_gpu_tests tests/trees_stream_gpu.cpp)
+    target_link_libraries(trees_stream_gpu_tests PRIVATE tree_generator engine_render)
+    target_include_directories(trees_stream_gpu_tests PRIVATE tests)
+    target_compile_definitions(trees_stream_gpu_tests PRIVATE OPENWORLD_SHADER_DIR="${SHADER_OUTPUT_DIR}")
+    add_test(NAME trees_stream_gpu COMMAND trees_stream_gpu_tests)
+    set_tests_properties(trees_stream_gpu PROPERTIES TIMEOUT 120 LABELS "gpu" FAIL_REGULAR_EXPRESSION "\\[Vulkan validation\\]")
 endif()

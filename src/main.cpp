@@ -58,6 +58,8 @@ void help() {
                  "  --view-radius N       Render radius in base chunks (default ~8 km, "
                  "max ~16 km)\n"
                  "  --cache-dir PATH      Override per-user terrain cache directory\n"
+                 "  --trees / --no-trees  Enable/disable forests (default on)\n"
+                 "  --tree-distance M    Forest range, 64..8000 m (default 4000)\n"
                  "  --vegetation          Enable streamed vegetation (default on)\n"
                  "  --no-vegetation       Disable vegetation\n"
                  "  --vegetation-distance M  Render distance, 20..200 m (default 80)\n"
@@ -111,6 +113,8 @@ int main(int argc, char **argv) {
         scene.vegetation.enabled = true;
         scene.vegetation.distance = 80;
         scene.vegetation.habitat.mode = ow::VegetationHabitatMode::Blended;
+        std::optional<bool> treeEnabled;
+        std::optional<float> treeDistance;
         std::optional<bool> vegetationEnabled;
         std::optional<float> vegetationDistance;
         scene.antialiasing = ow::AntialiasingMode::Taa;
@@ -152,7 +156,15 @@ int main(int argc, char **argv) {
                 help();
                 return 0;
             }
-            if (arg == "--vegetation")
+            if (arg == "--no-trees")
+                treeEnabled = false;
+            else if (arg == "--trees")
+                treeEnabled = true;
+            else if (arg == "--tree-distance") {
+                treeDistance = std::stof(value());
+                if (!std::isfinite(*treeDistance) || *treeDistance < 64 || *treeDistance > 8000)
+                    throw std::runtime_error("Tree distance must be in 64..8000 m");
+            } else if (arg == "--vegetation")
                 vegetationEnabled = true;
             else if (arg == "--no-vegetation")
                 vegetationEnabled = false;
@@ -354,6 +366,12 @@ int main(int argc, char **argv) {
         if (vegetationDistance)
             scene.vegetation.distance = *vegetationDistance;
         if (options.streaming.enabled && options.streaming.hierarchical) {
+            options.trees.directory = OPENWORLD_TREE_LIBRARY_DIR;
+            if (treeDistance && *treeDistance > 4000) {
+                options.trees.streaming.maximumDistance = 8000;
+                options.trees.streaming.cellCapacity = 65536;
+                options.trees.streaming.budgetBytes = 1536ull << 20;
+            }
             options.vegetation.library = std::make_shared<ow::VegetationLibrary>(
                 ow::readVegetationLibrary(OPENWORLD_VEGETATION_LIBRARY_DIR));
             options.vegetation.streaming.enabled = true;
@@ -362,8 +380,14 @@ int main(int argc, char **argv) {
             options.vegetation.streaming.retentionRadius = 232;
             options.vegetation.budgetBytes = 256ull << 20;
         }
-        if (!options.vegetation.streaming.enabled)
+        if (!options.vegetation.streaming.enabled) {
             scene.vegetation.enabled = false;
+            scene.trees.enabled = false;
+        }
+        if (treeEnabled)
+            scene.trees.enabled = *treeEnabled;
+        if (treeDistance)
+            scene.trees.distance = *treeDistance;
         std::string terrainError;
         if (options.requireValidation)
             options.validation = true;
@@ -642,6 +666,7 @@ int main(int argc, char **argv) {
             }
             vegetationDemo.update(scene.vegetation, proxyMovement, dt, proxyBoost);
             scene.vegetation.time += dt;
+            scene.trees.time += dt;
             if (renderer.render(camera, scene)) {
                 vegetationDemo.submitted(scene.vegetation);
                 ++frames;

@@ -106,12 +106,17 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(VegetationProxy, position, active, route, mar
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(VegetationSettings, enabled, habitat, exclusion, interaction, proxy,
                                    density, time, wind, windDirection, distance, transmission, depthPrepass,
                                    occlusion)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(TreeSettings, enabled, occlusion, distance, coverage, density, wind, time,
+                                   treeline, windDirection, forceLod, diagnostic)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SceneSettings, shading, atmosphere, antialiasing, taa, bloom, gtao,
                                    shadows, terrainVisible, localLights, clusterDiagnostic, material,
                                    terrainMaterial, lighting, output, viewRadius, lod, lodColours, freezeLod,
                                    visibility, opaqueDepthPrepass, terrainLodQuality, terrainLodErrorView,
                                    terrainLodPixelError, frustumCulling, eroded, normalView, wireframe,
-                                   chunkBorders, filteredNormals, background, vegetation)
+                                   chunkBorders, filteredNormals, background, vegetation, trees)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(TreeStreamConfig, cellCapacity, updatesPerFrame, maximumDistance,
+                                   budgetBytes)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(TreeOptions, streaming)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(RendererOptions, materialDirectory, terrainGrid, normalSubdivisions,
                                    terrainCapacity, terrainChunkCapacity, lod, streaming, curvedHorizon,
                                    shadowCapacity, width, height, renderHeight, forceFixedMaterials,
@@ -120,7 +125,8 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(RendererOptions, materialDirectory, terrainGr
                                    visibilityCapacity, atmosphereBudgetBytes, forceNoAtmosphere,
                                    taaBudgetBytes, bloomBudgetBytes, spatialAaBudgetBytes, forceNoTaa,
                                    forceNoBloom, gtaoBudgetBytes, forceNoGtao, forceWideGtao,
-                                   forceFixedIndirect, forceSingleIndirect, forceDirectVisibility, forceNoHiZ)
+                                   forceFixedIndirect, forceSingleIndirect, forceDirectVisibility, forceNoHiZ,
+                                   trees)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ReviewView, version, camera, terrain, terrainOrigin, scene, lod, startup)
 namespace {
 void check(bool valid, const char *message) {
@@ -146,7 +152,8 @@ void cameraValid(const Camera &c) {
 }
 } // namespace
 void validateReviewView(const ReviewView &v) {
-    check(v.version == 1 || v.version == 2 || v.version == 3 || v.version == 4 || v.version == 5,
+    check(v.version == 1 || v.version == 2 || v.version == 3 || v.version == 4 || v.version == 5 ||
+              v.version == 6,
           "Unsupported review view version");
     finite(json(v));
     cameraValid(v.camera);
@@ -199,6 +206,8 @@ void validateReviewView(const ReviewView &v) {
     validatePost(s.taa, s.bloom);
     validate(s.shadows);
     validate(s.vegetation);
+    validate(s.trees);
+    validate(o.trees.streaming);
     check(uint32_t(s.shading) <= 1 && uint32_t(s.visibility) <= 2 && uint32_t(s.localLights) <= 2 &&
               uint32_t(s.output.toneMapper) <= 1 && s.clusterDiagnostic <= 2 && s.viewRadius >= 0 &&
               s.viewRadius <= terrainMaximumRadius(o.terrainGrid) && s.terrainLodPixelError >= .5f &&
@@ -220,6 +229,10 @@ ReviewView loadReviewView(const std::filesystem::path &path) {
         throw std::runtime_error("Cannot open review view: " + path.string());
     auto j = json::parse(f);
     finite(j);
+    if (j.value("version", 0) < 6) {
+        j["scene"]["trees"] = TreeSettings{};
+        j["startup"]["trees"] = TreeOptions{};
+    }
     if (j.value("version", 0) < 3 && !j.at("scene").contains("vegetation")) {
         VegetationSettings defaults;
         defaults.distance = 80;
@@ -250,7 +263,7 @@ void saveReviewView(const std::filesystem::path &path, const ReviewView &v) {
         std::ofstream f(temp, std::ios::trunc);
         f.exceptions(std::ios::failbit | std::ios::badbit);
         auto document = json(v);
-        document["version"] = 5; // Loading v1–v4 remains supported; every new save
+        document["version"] = 6; // Loading v1–v4 remains supported; every new save
                                  // uses the current format.
         const auto bytes = document.dump(2);
         check(bytes.size() + 1 <= 1024 * 1024, "Review file exceeds 1 MiB");

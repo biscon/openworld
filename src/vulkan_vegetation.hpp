@@ -16,6 +16,7 @@ class VulkanVegetation {
     void prepareStream(VulkanTerrainStream *, const VegetationSettings &,
                        double terrainPreparationMilliseconds = 0);
     void budgetStream(double remaining);
+    void treeCanopy(VkBuffer, bool enabled);
     void bounds(VulkanShadows &);
     void preparePyramid(VisibilityPyramidView); // Before any command binds this
                                                 // frame's descriptors.

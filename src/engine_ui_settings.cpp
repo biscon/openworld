@@ -65,6 +65,35 @@ void EngineUi::drawSettings(UiWindow window, UiContext &context, UiActions &acti
                            "terrain in Terrain Settings to compare.");
         break;
     }
+    case UiWindow::Trees: {
+        auto &t = scene.trees;
+        ImGui::Checkbox("Enable trees", &t.enabled);
+        ImGui::SliderFloat("View distance (m)", &t.distance, 64, options.trees.streaming.maximumDistance,
+                           "%.0f");
+        ImGui::SliderFloat("Woodland coverage", &t.coverage, 0, 1);
+        ImGui::SliderFloat("Stand density", &t.density, 0, 1);
+        ImGui::SliderFloat("Treeline elevation", &t.treeline, 100, 2000, "%.0f m");
+        ImGui::SliderFloat("Wind", &t.wind, 0, 2);
+        ImGui::Checkbox("Opaque terrain occlusion", &t.occlusion);
+        ImGui::Checkbox("LOD colours", &t.diagnostic);
+        int lod = t.forceLod + 1;
+        if (ImGui::Combo("Representation", &lod,
+                         "Automatic\0Mesh LOD 0\0Mesh LOD 1\0Mesh LOD 2\0Octahedral impostor\0"))
+            t.forceLod = lod - 1;
+        const auto &s = renderer.treeStats();
+        ImGui::Separator();
+        ImGui::Text("Resident cells %u | pending %u | deferred %u", s.resident, s.pending, s.deferred);
+        ImGui::Text("Visible entries %u | caster entries %u", s.visible, s.casters);
+        ImGui::Text("LOD entries %u / %u / %u / %u", s.lodCounts[0], s.lodCounts[1], s.lodCounts[2],
+                    s.lodCounts[3]);
+        ImGui::Text("GPU memory %.1f MiB | CPU %.3f ms", double(s.bytes) / (1024 * 1024), s.cpuMilliseconds);
+        ImGui::Text("Update %.3f | selection %.3f | depth %.3f ms", s.updateMilliseconds,
+                    s.selectionMilliseconds, s.depthMilliseconds);
+        ImGui::Text("Colour %.3f | shadows %.3f ms", s.colourMilliseconds, s.shadowMilliseconds);
+        if (s.overflow)
+            ImGui::Text("OVERFLOW: %u entries; incomplete rendering", s.overflow);
+        break;
+    }
     case UiWindow::Vegetation: {
         if (!options.vegetation.streaming.enabled) {
             ImGui::TextWrapped("Streamed vegetation requires hierarchical terrain.");

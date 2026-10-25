@@ -24,9 +24,9 @@ struct Uniform {
     glm::mat4 raster{1};
     glm::uvec4 pyramidSize{};
     std::array<glm::vec4, 8> grassBands{}, grassShading{}, interactionResponse{};
-    glm::vec4 interaction{}, previousInteraction{};
+    glm::vec4 interaction{}, previousInteraction{}, forest{};
 };
-static_assert(sizeof(Uniform) == 3504);
+static_assert(sizeof(Uniform) == 3520);
 using Cell = VegetationGpuCell;
 } // namespace
 struct VulkanVegetation::Impl {
@@ -402,6 +402,8 @@ VulkanVegetation::VulkanVegetation(VkPhysicalDevice p, VkDevice d, uint32_t fami
         const auto &a = library.assets[asset];
         s.current.ranges[asset] = a.ranges;
         s.current.interactionResponse[asset] = a.interaction;
+        s.current.interactionResponse[asset].z =
+            std::clamp(a.habitat.z / std::max(.1f, a.habitat.x), .15f, 1.8f);
         s.current.deformation[asset] = {a.stiffness, a.displacement, float(a.category),
                                         a.grass.counts.x ? 1.f : 0.f};
         s.current.grassBands[asset] = a.grass.bands;
@@ -525,7 +527,7 @@ VulkanVegetation::VulkanVegetation(VkPhysicalDevice p, VkDevice d, uint32_t fami
     std::memcpy(data + s.indexOffset, indices.data(), indices.size() * 4);
     if (instanceBytes && !options.streaming.enabled)
         std::memcpy(data + geometryBytes, s.population.instances.data(), instanceBytes);
-    VkDescriptorSetLayoutBinding bindings[14]{};
+    VkDescriptorSetLayoutBinding bindings[15]{};
     for (uint32_t i = 0; i < 10; ++i)
         bindings[i] = {i, i == 1 ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
                        VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT, nullptr};
@@ -534,10 +536,12 @@ VulkanVegetation::VulkanVegetation(VkPhysicalDevice p, VkDevice d, uint32_t fami
     bindings[11] = {11, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT, nullptr};
     bindings[12] = {12, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT, nullptr};
     bindings[13] = {13, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT, nullptr};
-    li.bindingCount = 14;
+    bindings[14] = {14, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
+                    VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT, nullptr};
+    li.bindingCount = 15;
     li.pBindings = bindings;
     check(vkCreateDescriptorSetLayout(d, &li, nullptr, &s.setLayout));
-    VkDescriptorPoolSize sizes[] = {{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 24},
+    VkDescriptorPoolSize sizes[] = {{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 26},
                                     {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2},
                                     {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 2}};
     VkDescriptorPoolCreateInfo pi{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
@@ -571,6 +575,7 @@ VulkanVegetation::VulkanVegetation(VkPhysicalDevice p, VkDevice d, uint32_t fami
         ai.descriptorSetCount = 1;
         ai.pSetLayouts = &s.setLayout;
         check(vkAllocateDescriptorSets(d, &ai, &f.set));
+        descriptor(d, f.set, 14, s.instances); // valid inactive fallback
         descriptor(d, f.set, 0, s.instances);
         descriptor(d, f.set, 1, f.uniform, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
         descriptor(d, f.set, 2, f.lists);
@@ -752,6 +757,22 @@ void VulkanVegetation::budgetStream(double remaining) {
     s.current.lists[0].w = active;
     f.stats.preparationMilliseconds +=
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+}
+void VulkanVegetation::treeCanopy(VkBuffer canopy, bool enabled) {
+    auto &s = *impl_;
+    s.current.forest.x = enabled ? 1.f : 0.f;
+    auto &f = s.frames[s.frame];
+    if (canopy) {
+        VkDescriptorBufferInfo b{canopy, 0, 128 * 128 * 4};
+        VkWriteDescriptorSet w{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+        w.dstSet = f.set;
+        w.dstBinding = 14;
+        w.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        w.descriptorCount = 1;
+        w.pBufferInfo = &b;
+        vkUpdateDescriptorSets(s.device, 1, &w, 0, nullptr);
+    }
+    std::memcpy(f.uniform.mapped, &s.current, sizeof(Uniform));
 }
 void VulkanVegetation::bounds(VulkanShadows &shadows) {
     auto start = std::chrono::steady_clock::now();

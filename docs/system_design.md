@@ -15,6 +15,8 @@ Milestone 4 adds [hierarchical terrain residency](terrain_hierarchy.md): coarse 
 
 ## System design index
 
+- [European forests](rendering_trees.md) — implemented, 5J-T: offline species assets, octahedral impostors, kilometer-scale instancing and ecological placement. Native quality/performance acceptance remains pending.
+
 - [Vegetation interaction and habitat variety](rendering_vegetation_interaction.md) — implemented 5J-V5; [native verification and remaining tuning gates](measurements/vegetation_5j_v5/README.md): bounded submitted bend history, blended habitats and expanded foliage assets.
   The habitat appearance correction separates grass population density from ground
   cover and widens regional transitions; see the detailed design for verification.
@@ -36,7 +38,7 @@ Milestone 4 adds [hierarchical terrain residency](terrain_hierarchy.md): coarse 
 - [Vegetation asset and foliage foundation](rendering_vegetation_assets.md) — implemented 5J-V2; saved reusable assets, compact instancing, foliage lighting, submitted wind history and isolated review tools.
 
 - [Vegetation representation experiment](rendering_vegetation_experiment.md) — implemented 5J-V1 automated comparison with saved fixtures, compact indirect instancing, LOD, wind, CSM and temporal motion. Debug/Release, software Vulkan and native RTX 3060 synchronization validation pass; native performance results are recorded, final asset/scene acceptance remains open.
-- [Vegetation and ground clutter roadmap](rendering_vegetation.md) — V1–V5 implemented and verified; [V6 documentation closeout and tree handoff](rendering_vegetation.md#5j-v6--final-tuning-and-extended-acceptance) complete. Current ground vegetation is accepted for moving on to trees; quality presets, final appearance/performance targets and extended stress remain deferred to combined-scene acceptance. The closeout records the latest baseline and retained budgets; trees require a separate design.
+- [Vegetation and ground clutter roadmap](rendering_vegetation.md) — V1–V5 implemented and verified; [V6 documentation closeout and tree handoff](rendering_vegetation.md#5j-v6--final-tuning-and-extended-acceptance) complete. Current ground vegetation is accepted for moving on to trees; quality presets, final appearance/performance targets and extended stress remain deferred to combined-scene acceptance. The closeout records the latest baseline and retained budgets; trees now have a [separate implemented design](rendering_trees.md).
 
 - [Engine UI and layout persistence](engine_ui.md) — implemented: menu-driven settings and diagnostics, dedicated UI modules, and UI-only JSON state saved on clean exit. Debug/Release and software Vulkan checks pass; native desktop review is blocked by an X11 drawable error.
 

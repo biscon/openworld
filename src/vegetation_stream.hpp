@@ -2,6 +2,9 @@
 #include "vegetation_library.hpp"
 #include <array>
 namespace ow {
+// Shared soft GPU budget: preserve required repairs and allow one expensive cell
+// when time remains, rather than starving forever after a slow timing sample.
+uint32_t populationUpdateAllowance(uint32_t pending, uint32_t required, double remaining, double cellCost);
 constexpr uint32_t vegetationCandidatesPerCell = 128;
 struct VegetationCellKey {
     int64_t x = 0, z = 0;

@@ -85,6 +85,12 @@ int main() {
         live.demand(origin, 9, 7, true, 216);
         require(live.deferred() == 0, "maximum range recovers after retirement");
         rejects([&] { live.demand(origin, 9, 7, true, 217); }, "range cannot exceed startup capacity");
+        require(populationUpdateAllowance(7, 0, .125, 4) == 1, "expensive population cell cannot starve");
+        require(populationUpdateAllowance(7, 0, 0, 4) == 0, "no unreserved work with exhausted budget");
+        require(populationUpdateAllowance(7, 2, 0, 4) == 2, "published root repairs keep their reservation");
+        require(populationUpdateAllowance(7, 0, .5, .125) == 4,
+                "ordinary population follows measured allowance");
+        require(populationUpdateAllowance(0, 0, 4, .125) == 0, "empty work stays empty");
         RendererOptions invalidRenderer;
         invalidRenderer.vegetation.streaming.enabled = true;
         rejects([&] { Renderer renderer(invalidRenderer); },

@@ -1,6 +1,7 @@
 #include "renderer.hpp"
 #include "test_support.hpp"
 #include <chrono>
+#include <cstdlib>
 #include <iostream>
 #include <map>
 #include <set>
@@ -8,7 +9,9 @@
 using namespace ow;
 namespace {
 VegetationSnapshot settle(Renderer &r, Camera &c, SceneSettings &s) {
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(12);
+    // Preserve the workload/invariants while allowing an explicit software-Vulkan run.
+    const auto deadline = std::chrono::steady_clock::now() +
+        std::chrono::seconds(std::getenv("OPENWORLD_SOFTWARE_GPU_TESTS") ? 90 : 12);
     uint32_t stable = 0;
     for (uint32_t i = 0; i < 1200 && std::chrono::steady_clock::now() < deadline; ++i) {
         s.vegetation.time += 1.f / 120;
@@ -27,7 +30,9 @@ VegetationSnapshot settle(Renderer &r, Camera &c, SceneSettings &s) {
     }
     const auto &v = r.vegetationStats();
     std::cerr << "ready=" << v.residentCells << " pending=" << v.pendingCells
-              << " missing=" << v.missingTerrainCells << " updates=" << v.updatedCells << '\n';
+              << " missing=" << v.missingTerrainCells << " updates=" << v.updatedCells
+              << " terrain pending=" << r.terrainStreamingStats().pending
+              << " detail=" << r.terrainStreamingStats().detailPending << " io=" << r.terrainStreamingStats().ioJobs << '\n';
     throw std::runtime_error("Bounded vegetation settle deadline");
 }
 using Identity = std::tuple<int64_t, int64_t, uint32_t>;

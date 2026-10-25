@@ -9,6 +9,7 @@
 #include "temporal.hpp"
 #include "terrain_lod.hpp"
 #include "terrain_stream.hpp"
+#include "trees.hpp"
 #include "vegetation.hpp"
 #include "visibility.hpp"
 #include "volumetrics.hpp"
@@ -31,6 +32,7 @@ struct RendererOptions {
     uint64_t materialBudgetBytes = 320ull * 1024 * 1024;
     SceneCapacity sceneCapacity;
     VegetationOptions vegetation;
+    TreeOptions trees;
     ShadowCapacity shadowCapacity;
     bool forceDirectShadows = false, forceManualShadowFiltering = false, forceNoShadowDepth = false;
     uint32_t visibilityCapacity = 65536;
@@ -59,6 +61,7 @@ struct RendererOptions {
 
 struct SceneSettings {
     VegetationSettings vegetation;
+    TreeSettings trees;
     ShadingMode shading = ShadingMode::Pbr;
     AtmosphereSettings atmosphere;
     VolumetricSettings volumetrics;
@@ -118,6 +121,8 @@ class Renderer {
     bool releaseTexture(TextureHandle);
     MaterialHandle createMaterial(const MeshMaterial &);
     bool releaseMaterial(MaterialHandle);
+    const TreeStats &treeStats() const;
+    TreeSnapshot readTreeSnapshot();
     const VegetationStats &vegetationStats() const;
     VegetationSnapshot readVegetationSnapshot();
     const SceneStats &sceneStats() const;

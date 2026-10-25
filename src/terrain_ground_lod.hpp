@@ -14,6 +14,8 @@ class TerrainGroundLod {
     const auto &draws() const { return draws_; }
     const auto &bounds() const { return bounds_; }
     const auto &casters() const { return casters_; }
+    // Index into the finished partition, or ~0u when no resident patch covers the base-grid point.
+    uint32_t casterAt(int64_t gridX, int64_t gridZ) const;
     const auto &casterBounds() const { return casterBounds_; }
     const auto &stats() const { return stats_; }
     std::vector<TerrainPatchKey> snapshot() const;
@@ -25,7 +27,7 @@ class TerrainGroundLod {
     struct Node {
         TerrainPatchKey key;
         uint32_t slot{}, x{}, z{}, level{}, minimum{}, child = ~0u;
-        uint32_t mark{};
+        uint32_t mark{}, caster = ~0u;
         float priority{}, transition{}, error{}, distance{};
         glm::vec3 lo{}, hi{};
         bool protectedGround{};

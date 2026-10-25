@@ -22,6 +22,8 @@ uint32_t memoryType(VkPhysicalDevice p, uint32_t bits, VkMemoryPropertyFlags fla
 }
 VkFormat format(TextureFormat f) {
     switch (f) {
+    case TextureFormat::R16:
+        return VK_FORMAT_R16_UNORM;
     case TextureFormat::Bc5:
         return VK_FORMAT_BC5_UNORM_BLOCK;
     case TextureFormat::Bc7:
